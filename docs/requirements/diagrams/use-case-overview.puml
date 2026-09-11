@@ -1,0 +1,58 @@
+@startuml
+title 数据备份系统用例总览
+left to right direction
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam linetype polyline
+skinparam nodesep 55
+skinparam ranksep 48
+skinparam defaultFontName PingFang SC
+skinparam ArrowColor #475569
+skinparam ActorBorderColor #334155
+skinparam UsecaseBorderColor #2563EB
+skinparam UsecaseBackgroundColor #EFF6FF
+skinparam RectangleBorderColor #64748B
+skinparam PackageStyle rectangle
+actor "桌面用户" as USR
+actor "高级/自动化用户" as AUT
+actor "操作系统调度器" as OS <<system>>
+actor "源文件系统" as SRC <<system>>
+actor "备份存储" as TGT <<system>>
+rectangle "Data Backup 数据备份系统" {
+  usecase "UC-01\n管理备份任务" as UC_01
+  usecase "UC-02\n执行备份" as UC_02
+  usecase "UC-03\n查看状态与历史" as UC_03
+  usecase "UC-04\n校验备份" as UC_04
+  usecase "UC-05\n浏览快照" as UC_05
+  usecase "UC-06\n恢复数据" as UC_06
+  usecase "UC-07\n管理保留策略" as UC_07
+  usecase "UC-08\n导出诊断信息" as UC_08
+  UC_01 -[hidden]down- UC_05
+  UC_02 -[hidden]down- UC_06
+  UC_03 -[hidden]down- UC_07
+  UC_04 -[hidden]down- UC_08
+  UC_01 -[hidden]right- UC_02
+  UC_05 -[hidden]right- UC_06
+  UC_02 -[hidden]right- UC_03
+  UC_06 -[hidden]right- UC_07
+  UC_03 -[hidden]right- UC_04
+  UC_07 -[hidden]right- UC_08
+}
+USR -[norank]- UC_01
+USR -[norank]- UC_02
+USR -right- UC_03
+USR -[norank]- UC_04
+USR -[norank]- UC_05
+USR -[norank]- UC_06
+USR -[norank]- UC_07
+USR -[norank]- UC_08
+OS -right- UC_02
+UC_01 -right- SRC
+UC_02 -[norank]- SRC
+UC_02 -[norank]- TGT
+UC_04 -[norank]- TGT
+UC_05 -[norank]- TGT
+UC_06 -right- TGT
+UC_07 -[norank]- TGT
+AUT --|> USR
+@enduml

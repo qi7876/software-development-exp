@@ -1,0 +1,63 @@
+@startuml
+title 备份浏览恢复与维护用例
+left to right direction
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam linetype polyline
+skinparam nodesep 55
+skinparam ranksep 48
+skinparam defaultFontName PingFang SC
+skinparam ArrowColor #475569
+skinparam ActorBorderColor #334155
+skinparam UsecaseBorderColor #2563EB
+skinparam UsecaseBackgroundColor #EFF6FF
+skinparam RectangleBorderColor #64748B
+skinparam PackageStyle rectangle
+actor "桌面用户" as USR
+actor "备份存储" as TGT <<system>>
+actor "本地存储" as LOCAL <<system>>
+actor "WebDAV/S3 远程存储" as REMOTE <<system>>
+rectangle "Data Backup 数据备份系统" {
+  usecase "UC-04\n校验备份" as UC_04
+  usecase "UC-05\n浏览快照" as UC_05
+  usecase "UC-06\n恢复数据" as UC_06
+  usecase "UC-07\n管理保留策略" as UC_07
+  usecase "UC-14\n访问备份仓库" as UC_14
+  usecase "UC-14L\n访问本地仓库" as UC_14L
+  usecase "UC-14R\n访问远程仓库" as UC_14R
+  usecase "UC-15\n使用文本密钥文件解锁加密仓库" as UC_15
+  usecase "UC-17\n处理恢复冲突" as UC_17
+  usecase "UC-18\n校验恢复结果" as UC_18
+  UC_04 -[hidden]right- UC_14L
+  UC_14L -[hidden]right- UC_14
+  UC_05 -[hidden]right- UC_14R
+  UC_14R -[hidden]right- UC_15
+  UC_06 -[hidden]right- UC_17
+  UC_17 -[hidden]right- UC_18
+  UC_04 -[hidden]down- UC_05
+  UC_14L -[hidden]down- UC_14R
+  UC_14 -[hidden]down- UC_15
+  UC_05 -[hidden]down- UC_06
+  UC_14R -[hidden]down- UC_17
+  UC_15 -[hidden]down- UC_18
+  UC_06 -[hidden]down- UC_07
+}
+USR -[norank]- UC_04
+USR -[norank]- UC_05
+USR -right- UC_06
+USR -[norank]- UC_07
+UC_14 -right- TGT
+UC_14L -right- LOCAL
+UC_14R -right- REMOTE
+LOCAL -left-|> TGT
+REMOTE -left-|> TGT
+UC_04 ..> UC_14 : <<include>>
+UC_05 ..> UC_14 : <<include>>
+UC_06 ..> UC_14 : <<include>>
+UC_06 ..> UC_18 : <<include>>
+UC_07 ..> UC_14 : <<include>>
+UC_14L --|> UC_14
+UC_14R --|> UC_14
+UC_15 ..> UC_14 : <<extend>>\n[仓库已加密]
+UC_17 ..> UC_06 : <<extend>>\n[恢复目标存在冲突]
+@enduml

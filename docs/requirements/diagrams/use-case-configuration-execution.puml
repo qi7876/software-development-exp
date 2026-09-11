@@ -1,0 +1,52 @@
+@startuml
+title 备份任务配置与执行用例
+left to right direction
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam linetype polyline
+skinparam nodesep 55
+skinparam ranksep 48
+skinparam defaultFontName PingFang SC
+skinparam ArrowColor #475569
+skinparam ActorBorderColor #334155
+skinparam UsecaseBorderColor #2563EB
+skinparam UsecaseBackgroundColor #EFF6FF
+skinparam RectangleBorderColor #64748B
+skinparam PackageStyle rectangle
+actor "桌面用户" as USR
+actor "操作系统调度器" as OS <<system>>
+actor "源文件系统" as SRC <<system>>
+actor "备份存储" as TGT <<system>>
+rectangle "Data Backup 数据备份系统" {
+  usecase "UC-01\n管理备份任务" as UC_01
+  usecase "UC-02\n执行备份" as UC_02
+  usecase "UC-09\n配置数据保护" as UC_09
+  usecase "UC-10\n配置并预览文件筛选" as UC_10
+  usecase "UC-11\n验证任务配置" as UC_11
+  usecase "UC-12\n扫描并筛选源文件" as UC_12
+  usecase "UC-13\n构建并提交快照" as UC_13
+  usecase "UC-16\n取消备份" as UC_16
+  UC_01 -[hidden]right- UC_09
+  UC_09 -[hidden]right- UC_10
+  UC_10 -[hidden]right- UC_11
+  UC_16 -[hidden]right- UC_02
+  UC_02 -[hidden]right- UC_12
+  UC_12 -[hidden]right- UC_13
+  UC_01 -[hidden]down- UC_16
+  UC_09 -[hidden]down- UC_02
+  UC_10 -[hidden]down- UC_12
+  UC_11 -[hidden]down- UC_13
+}
+USR -right- UC_01
+USR -[norank]- UC_02
+USR -[norank]- UC_16
+OS -right- UC_02
+UC_12 -right- SRC
+UC_13 -right- TGT
+UC_01 ..> UC_09 : <<include>>
+UC_01 ..> UC_10 : <<include>>
+UC_01 ..> UC_11 : <<include>>
+UC_02 ..> UC_12 : <<include>>
+UC_02 ..> UC_13 : <<include>>
+UC_16 ..> UC_02 : <<extend>>\n[备份运行中]
+@enduml
