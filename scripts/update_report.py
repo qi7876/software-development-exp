@@ -17,7 +17,11 @@ from docx.shared import Cm, Pt
 from docx.table import Table, _Cell  # pyright: ignore[reportPrivateUsage]
 from docx.text.paragraph import Paragraph
 from PIL import Image, ImageDraw, ImageFont
-from update_use_cases import generate_artifacts
+from system_design_model import Diagram as SystemDiagram
+from system_design_model import Model as SystemDesignModel
+from system_design_model import load_model as load_system_design_model
+from update_system_design import generate_artifacts as generate_system_design_artifacts
+from update_use_cases import generate_artifacts as generate_use_case_artifacts
 from use_case_model import Actor, Model, UseCase, actor_map, case_map, inverse_relations, load_model
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -570,12 +574,176 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _picture(document, anchor, GENERATED_DIR / "delivery-roadmap.png", "图 4  单人敏捷交付路线")
 
 
+def _design_trace(diagram: SystemDiagram) -> str:
+    trace = diagram["trace"]
+    return (
+        f"用例：{'、'.join(trace['use_cases'])}；"
+        f"功能需求：{'、'.join(trace['requirements'])}；"
+        f"非功能需求：{'、'.join(trace['nfr'])}。"
+    )
+
+
+def _add_design_diagram(
+    document: DocumentType,
+    anchor: Paragraph,
+    diagram: SystemDiagram,
+    *,
+    section_number: str,
+    figure_number: int,
+    width: float,
+    page_break: bool,
+) -> None:
+    _heading(
+        document,
+        anchor,
+        f"{section_number} {diagram['title']}",
+        2,
+        page_break=page_break,
+    )
+    _picture(
+        document,
+        anchor,
+        GENERATED_DIR / f"system-{diagram['id']}.png",
+        f"图 {figure_number}  {diagram['title']}",
+        width=width,
+    )
+    _paragraph(document, anchor, diagram["purpose"])
+    responsibility_heading = {
+        "component": "构件与接口职责",
+        "class": "类与接口职责",
+        "sequence": "参与对象职责",
+    }[diagram["kind"]]
+    _paragraph(document, anchor, responsibility_heading, level=2)
+    _table(
+        document,
+        anchor,
+        ("元素", "职责"),
+        (
+            (responsibility["element"], responsibility["responsibility"])
+            for responsibility in diagram["responsibilities"]
+        ),
+        (3.5, 10.5),
+    )
+    relation_heading = {
+        "component": "依赖与数据流说明",
+        "class": "关系与生命周期说明",
+        "sequence": "交互与分支说明",
+    }[diagram["kind"]]
+    _paragraph(document, anchor, relation_heading, level=2)
+    for detail in diagram["details"]:
+        _paragraph(document, anchor, detail, bullet=True)
+    _paragraph(document, anchor, "关键约束", level=2)
+    for constraint in diagram["constraints"]:
+        _paragraph(document, anchor, constraint, bullet=True)
+    _paragraph(document, anchor, f"追踪关系：{_design_trace(diagram)}")
+
+
+def _populate_system_design(
+    document: DocumentType,
+    anchor: Paragraph,
+    model: SystemDesignModel,
+) -> None:
+    _paragraph(
+        document,
+        anchor,
+        f"文档版本：{model['version']}（逻辑设计阶段）    更新日期：{model['updated']}",
+    )
+    _paragraph(
+        document,
+        anchor,
+        "本章在需求模型基础上说明系统的构件边界、静态类关系和关键动态交互。"
+        "图中的类与接口用于约束职责，不表示已经存在的 Rust 类型或已经确定的 IPC 技术。",
+    )
+    _heading(document, anchor, "1. 开发环境和工具")
+    _table(
+        document,
+        anchor,
+        ("类别", "选择与用途"),
+        (
+            ("首发平台", "macOS；同时兼顾 Apple Silicon 与 Intel Mac。"),
+            ("核心与后台", "Rust；用于备份核心、后台守护进程和 CLI。"),
+            ("桌面界面", "Svelte 与 TypeScript；桌面应用壳由后续 ADR 确定。"),
+            ("元数据", "SQLite；保存任务、运行、快照索引和校验结果。"),
+            ("建模与文档", "PlantUML 1.2026.8、Python、uv、python-docx。"),
+            ("质量工具", "ruff、basedpyright、Git 及自动化测试。"),
+        ),
+        (3.2, 10.8),
+    )
+    diagrams = {diagram["id"]: diagram for diagram in model["diagrams"]}
+    _heading(document, anchor, "2. 总体设计", page_break=True)
+    _heading(document, anchor, "2.1 系统结构设计", 2)
+    _add_design_diagram(
+        document,
+        anchor,
+        diagrams["component-overview"],
+        section_number="2.1.1",
+        figure_number=5,
+        width=14.0,
+        page_break=False,
+    )
+    _add_design_diagram(
+        document,
+        anchor,
+        diagrams["component-core"],
+        section_number="2.1.2",
+        figure_number=6,
+        width=14.0,
+        page_break=True,
+    )
+    _heading(document, anchor, "3. 静态建模", page_break=True)
+    _add_design_diagram(
+        document,
+        anchor,
+        diagrams["class-domain"],
+        section_number="3.1",
+        figure_number=7,
+        width=14.0,
+        page_break=False,
+    )
+    _add_design_diagram(
+        document,
+        anchor,
+        diagrams["class-services"],
+        section_number="3.2",
+        figure_number=8,
+        width=11.4,
+        page_break=True,
+    )
+    _heading(document, anchor, "4. 动态建模", page_break=True)
+    for index, (diagram_id, figure_number) in enumerate(
+        (
+            ("sequence-configure", 9),
+            ("sequence-backup", 10),
+            ("sequence-restore", 11),
+        ),
+        1,
+    ):
+        _add_design_diagram(
+            document,
+            anchor,
+            diagrams[diagram_id],
+            section_number=f"4.{index}",
+            figure_number=figure_number,
+            width=14.0,
+            page_break=index > 1,
+        )
+    _heading(document, anchor, "5. 设计边界")
+    for boundary in (
+        "当前模型不决定桌面应用壳、本地 IPC 形式及具体 Rust 类型布局。",
+        "压缩、加密、打包和仓库访问通过策略或端口替换，读取端按版本化元数据选择实现。",
+        "文本密钥文件只保存认证加密后的主密钥及 KDF 参数，不保存口令或明文主密钥。",
+    ):
+        _paragraph(document, anchor, boundary, bullet=True)
+
+
 def main() -> None:
     """Synchronize UML, Markdown, and the existing report through one entry point."""
     if not REPORT_PATH.exists():
         raise FileNotFoundError(f"Report is missing: {REPORT_PATH}")
-    generate_artifacts()
+    generate_use_case_artifacts()
+    generate_system_design_artifacts()
     model = load_model()
+    design_model = load_system_design_model()
     document = Document(str(REPORT_PATH))
     section_cell = _find_section_cell(document, "需求分析说明书（10分）")
     title = _find_cell_paragraph(section_cell, "需求分析说明书（10分）")
@@ -586,6 +754,15 @@ def main() -> None:
     anchor = section_cell.add_paragraph()
     _populate(document, anchor, model)
     anchor._element.getparent().remove(anchor._element)
+    design_cell = _find_section_cell(document, "系统设计文档（20分）")
+    design_title = _find_cell_paragraph(design_cell, "系统设计文档（20分）")
+    _clear_after_paragraph(design_cell, design_title)
+    design_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for run in design_title.runs:
+        _font_run(run, size=16, bold=True)
+    design_anchor = design_cell.add_paragraph()
+    _populate_system_design(document, design_anchor, design_model)
+    design_anchor._element.getparent().remove(design_anchor._element)
     _normalize_document_fonts(document)
     document.save(str(REPORT_PATH))
 

@@ -2,7 +2,8 @@
 
 一款以 macOS 为首发平台、面向个人桌面用户的数据备份软件。应用采用 Rust 实现备份核心与后台守护进程，Svelte 实现桌面图形界面，并提供 CLI 以便自动化和故障排查。
 
-> 项目当前处于需求分析阶段。需求基线见 [产品需求文档](docs/requirements/product-requirements.md)。
+> 项目当前处于逻辑设计阶段。需求基线见 [产品需求文档](docs/requirements/product-requirements.md)，
+> 系统设计见[数据备份系统逻辑设计](docs/design/system-design.md)。
 
 ## 产品目标
 
@@ -31,7 +32,7 @@
 - Rust：备份核心、守护进程、CLI。
 - Svelte + TypeScript：桌面 GUI。
 - SQLite：任务元数据、快照索引和运行历史。
-- PlantUML 1.2026.8：标准 UML 用例图；Mermaid：架构图、线框图和交付路线图。
+- PlantUML 1.2026.8：标准 UML 用例图、构件图、类图和顺序图；Mermaid：线框图。
 
 桌面壳、快照存储格式及 RPC 方案将在架构验证阶段通过 ADR 决定，不在需求阶段过早锁定。
 
@@ -41,19 +42,23 @@
 - [用例模型](docs/requirements/use-cases.md)
 - [界面原型](docs/design/ui-wireframes.md)
 - [初步架构](docs/design/architecture.md)
+- [逻辑系统设计](docs/design/system-design.md)
 - [开发计划](docs/project/roadmap.md)
 - [决策记录](docs/decisions/README.md)
 - [实验报告](docs/report.docx)
 
-实验报告从保留的 `docs/report.template.docx` 生成。需求、设计或测试文档更新后，运行：
+实验报告以当前 `docs/report.docx` 为直接排版基准；`docs/report.template.docx` 只保留为课程样式参考。
+需求或设计文档更新后，运行：
 
 ```shell
 uv run scripts/update_report.py
 ```
 
-用例模型以 `docs/requirements/use-cases.yaml` 为唯一事实来源；上述命令会同步生成
-Markdown、三张 PlantUML 图和 Word 用例章节。可用
-`uv run scripts/update_use_cases.py --check` 检查生成内容是否漂移。
+用例模型以 `docs/requirements/use-cases.yaml` 为唯一事实来源，逻辑设计以
+`docs/design/system-design.yaml` 为唯一事实来源。上述命令会同步生成 Markdown、PlantUML、
+SVG、PNG，以及 Word 中的需求与系统设计章节。可分别运行
+`uv run scripts/update_use_cases.py --check` 和
+`uv run scripts/update_system_design.py --check` 检查生成内容是否漂移。
 
 ## 开发阶段
 
@@ -70,6 +75,7 @@ Markdown、三张 PlantUML 图和 Word 用例章节。可用
 - [x] 建立 MVP 需求基线
 - [x] 建立用例模型与界面低保真原型
 - [x] 建立初步架构与项目计划
+- [x] 建立构件图、类图和关键场景顺序图
 - [ ] 评审并冻结其余需求基线
 - [x] 确认 macOS 为首发平台
 - [ ] 完成架构原型和 ADR

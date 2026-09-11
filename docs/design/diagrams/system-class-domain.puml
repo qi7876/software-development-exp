@@ -1,0 +1,194 @@
+@startuml
+title 备份领域模型类图
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName PingFang SC
+skinparam ArrowColor #475569
+skinparam BorderColor #64748B
+skinparam packageStyle rectangle
+skinparam roundcorner 8
+top to bottom direction
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #2563EB
+skinparam classBackgroundColor #EFF6FF
+hide empty members
+package "任务配置" {
+  class "备份任务\nBackupTask" as BackupTask <<aggregate root>> {
+    + taskId: TaskId
+    + name: String
+    + enabled: Boolean
+    --
+    + validate(): ValidationResult
+    + canStart(): Boolean
+  }
+  class "数据源\nSourceSpec" as SourceSpec <<value object>> {
+    + rootPath: Path
+    + symlinkPolicy: SymlinkPolicy
+    --
+    + contains(path): Boolean
+  }
+  class "调度策略\nSchedule" as Schedule <<abstract>> {
+    + nextAfter(time): Optional<Time>
+  }
+  class "手动调度\nManualSchedule" as ManualSchedule <<strategy>> {
+  }
+  class "每日调度\nDailySchedule" as DailySchedule <<strategy>> {
+    + localTime: Time
+  }
+  class "每周调度\nWeeklySchedule" as WeeklySchedule <<strategy>> {
+    + weekday: Weekday
+    + localTime: Time
+  }
+  class "保留策略\nRetentionPolicy" as RetentionPolicy <<value object>> {
+    + keepLast: PositiveInt
+    --
+    + selectExpired(snapshots): SnapshotId[]
+  }
+  class "数据保护配置\nProtectionConfig" as ProtectionConfig <<abstract>> {
+    + encryptionEnabled(): Boolean
+  }
+  class "不加密\nNoEncryptionConfig" as NoEncryption <<configuration>> {
+  }
+  class "口令保护密钥文件\nProtectedKeyFileConfig" as ProtectedKeyFile <<configuration>> {
+    + keyFilePath: Path
+    + keyId: KeyId
+    + kdfProfile: KdfProfile
+  }
+  class "仓库配置\nRepositoryConfig" as RepositoryConfig <<abstract>> {
+    + repositoryId: RepositoryId
+    --
+    + validateLocation(): ValidationResult
+  }
+  class "本地仓库\nLocalRepositoryConfig" as LocalRepo <<configuration>> {
+    + path: Path
+  }
+  class "WebDAV 仓库\nWebDAVRepositoryConfig" as WebDAVRepo <<configuration>> {
+    + endpoint: Url
+    + remotePath: String
+  }
+  class "S3 仓库\nS3RepositoryConfig" as S3Repo <<configuration>> {
+    + endpoint: Url
+    + bucket: String
+    + prefix: String
+  }
+}
+package "筛选规则" {
+  class "筛选规则集\nFilterSet" as FilterSet <<value object>> {
+    + defaultDecision: Decision
+    --
+    + compile(): CompiledFilter
+    + evaluate(file): Decision
+  }
+  class "筛选规则\nFilterRule" as FilterRule <<abstract>> {
+    + mode: IncludeOrExclude
+    + order: NonNegativeInt
+    --
+    + matches(file): Boolean
+  }
+  class "路径正则规则\nPathRegexRule" as PathRegexRule <<rule>> {
+    + pattern: SafeRegex
+  }
+  class "用户名规则\nOwnerRule" as OwnerRule <<rule>> {
+    + userName: String
+  }
+  class "用户组规则\nGroupRule" as GroupRule <<rule>> {
+    + groupName: String
+  }
+  class "时间规则\nTimeRule" as TimeRule <<rule>> {
+    + field: TimeField
+    + range: TimeRange
+  }
+  class "文件类型规则\nFileTypeRule" as FileTypeRule <<rule>> {
+    + extensions: String[]
+    + objectTypes: FileType[]
+  }
+}
+package "运行与快照" {
+  class "备份运行\nBackupRun" as BackupRun <<entity>> {
+    + runId: RunId
+    + status: RunStatus
+    + startedAt: Time
+    + finishedAt: Optional<Time>
+    --
+    + cancel(): CancelResult
+    + finish(result): Void
+  }
+  class "快照\nSnapshot" as Snapshot <<aggregate root>> {
+    + snapshotId: SnapshotId
+    + createdAt: Time
+    + manifestHash: Digest
+    + state: SnapshotState
+    --
+    + commit(): Void
+    + isReadable(): Boolean
+  }
+  class "文件条目\nFileEntry" as FileEntry <<entity>> {
+    + relativePath: Path
+    + fileType: FileType
+    + metadataDigest: Digest
+    + size: UInt64
+  }
+  class "数据块引用\nChunkReference" as ChunkRef <<value object>> {
+    + digest: Digest
+    + packId: PackId
+    + offset: UInt64
+    + length: UInt64
+    + codec: CodecId
+    + cipher: CipherId
+  }
+}
+package "恢复" {
+  class "恢复请求\nRestoreRequest" as RestoreRequest <<entity>> {
+    + snapshotId: SnapshotId
+    + selectedPaths: Path[]
+    + targetRoot: Path
+    + conflictPolicy: ConflictPolicy
+    --
+    + validate(): ValidationResult
+  }
+  class "恢复结果\nRestoreResult" as RestoreResult <<value object>> {
+    + status: RestoreStatus
+    + restored: UInt64
+    + skipped: UInt64
+    + failed: UInt64
+  }
+}
+ManualSchedule -[hidden]down- DailySchedule
+DailySchedule -[hidden]down- WeeklySchedule
+NoEncryption -[hidden]down- ProtectedKeyFile
+LocalRepo -[hidden]down- WebDAVRepo
+WebDAVRepo -[hidden]down- S3Repo
+PathRegexRule -[hidden]down- OwnerRule
+OwnerRule -[hidden]down- GroupRule
+GroupRule -[hidden]down- TimeRule
+TimeRule -[hidden]down- FileTypeRule
+BackupRun -[hidden]down- Snapshot
+Snapshot -[hidden]down- FileEntry
+FileEntry -[hidden]down- ChunkRef
+BackupTask "1" *-- "1..*" SourceSpec : 定义数据源
+BackupTask "1" *-- "1" FilterSet : 应用规则
+FilterSet "1" *-- "0..*" FilterRule : 有序规则
+BackupTask "1" *-- "1" Schedule : 调度
+BackupTask "1" *-- "1" RetentionPolicy : 保留
+BackupTask "1" *-- "1" ProtectionConfig : 保护
+BackupTask "1" *-- "1" RepositoryConfig : 目标
+BackupTask "1" o-- "0..*" BackupRun : 产生运行
+BackupRun "1" -- "0..1" Snapshot : 成功后产生
+Snapshot "1" *-- "0..*" FileEntry : 清单
+FileEntry "1" *-- "0..*" ChunkRef : 内容引用
+RestoreRequest "0..*" -- "1" Snapshot : 选择
+RestoreRequest "1" -- "0..1" RestoreResult : 产生
+ManualSchedule --|> Schedule
+DailySchedule --|> Schedule
+WeeklySchedule --|> Schedule
+NoEncryption --|> ProtectionConfig
+ProtectedKeyFile --|> ProtectionConfig
+LocalRepo --|> RepositoryConfig
+WebDAVRepo --|> RepositoryConfig
+S3Repo --|> RepositoryConfig
+PathRegexRule --|> FilterRule
+OwnerRule --|> FilterRule
+GroupRule --|> FilterRule
+TimeRule --|> FilterRule
+FileTypeRule --|> FilterRule
+@enduml

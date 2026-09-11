@@ -1,0 +1,52 @@
+@startuml
+title 配置并保存备份任务顺序图
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName PingFang SC
+skinparam ArrowColor #475569
+skinparam BorderColor #64748B
+skinparam packageStyle rectangle
+skinparam roundcorner 8
+skinparam sequenceMessageAlign center
+skinparam sequenceArrowThickness 1
+skinparam ParticipantBorderColor #2563EB
+skinparam ParticipantBackgroundColor #EFF6FF
+skinparam sequenceGroupBorderColor #64748B
+actor "桌面用户" as User
+boundary "桌面 GUI" as UI
+control "任务服务" as Task
+control "筛选预览服务" as Preview
+entity "源文件端口" as Source
+control "文本密钥文件服务" as KeyFile
+entity "仓库端口" as Repo
+database "元数据存储" as Meta
+User -> UI : 创建任务并填写源、目标和策略
+UI -> Task : 创建任务草稿
+User -> UI : 请求预览筛选结果
+UI -> Preview : 编译规则并预览
+Preview -> Source : 有界扫描源文件元数据
+Source --> Preview : 候选条目流
+Preview --> UI : 包含、排除及错误摘要
+alt 筛选规则有效
+UI -> Task : 更新已编译筛选配置
+else 正则无效或复杂度超限
+Preview --> UI : 指出规则和修正建议
+end
+alt 选择口令保护的文本密钥文件
+UI -> KeyFile : 创建密钥文件（路径、口令、KDF 参数）
+KeyFile -> KeyFile : 生成随机 256 位主密钥并认证封装
+KeyFile --> UI : keyId 与文件创建结果
+else 选择不加密
+UI -> Task : 设置 NoEncryptionConfig
+end
+User -> UI : 保存任务
+UI -> Task : 验证完整任务草稿
+Task -> Repo : 验证目标与能力
+alt 配置有效
+Task -> Meta : 事务保存任务
+Meta --> Task : taskId
+Task --> UI : 保存成功
+else 口令不合规、路径危险或仓库不可用
+Task --> UI : 字段级错误，不持久化
+end
+@enduml

@@ -1,0 +1,58 @@
+@startuml
+title 执行并提交备份顺序图
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName PingFang SC
+skinparam ArrowColor #475569
+skinparam BorderColor #64748B
+skinparam packageStyle rectangle
+skinparam roundcorner 8
+skinparam sequenceMessageAlign center
+skinparam sequenceArrowThickness 1
+skinparam ParticipantBorderColor #2563EB
+skinparam ParticipantBackgroundColor #EFF6FF
+skinparam sequenceGroupBorderColor #64748B
+actor "用户 / 操作系统调度器" as Trigger
+control "后台守护进程" as Daemon
+control "备份协调器" as Backup
+control "扫描与筛选" as Scanner
+entity "源文件端口" as Source
+control "分块 / 压缩 / 加密 / 打包" as Pipeline
+entity "备份仓库" as Repo
+control "快照服务" as Snapshot
+database "元数据存储" as Meta
+Trigger -> Daemon : 触发任务
+Daemon -> Meta : 检查互斥并创建运行记录
+Daemon -> Backup : execute(task, runId)
+Backup -> Scanner : 扫描并应用已编译规则
+Scanner -> Source : 遍历源文件
+loop 每个匹配文件
+Source -> Scanner : 元数据与流式内容
+alt 文件可读取
+Scanner -> Backup : 候选文件流
+loop 每个新数据块
+Backup -> Pipeline : 分块 → 压缩 → 可选加密 → 打包
+Pipeline -> Repo : 写入临时 pack / 复用已有块
+Repo --> Pipeline : 块位置与校验信息
+Pipeline --> Backup : ChunkReference
+end
+else 单文件读取失败
+Scanner -> Meta : 记录脱敏错误与策略结果
+end
+opt 收到取消请求
+Daemon -> Backup : cancel(runId)
+Backup -> Repo : 停止新增写入并清理未提交对象
+Backup -> Meta : 记录已取消
+end
+end
+alt 未取消且全部必需内容已写入
+Backup -> Snapshot : 构建清单和 pack 索引
+Snapshot -> Repo : 提交对象、清单和提交标记
+Repo --> Snapshot : 提交可读取
+Snapshot -> Meta : 事务发布快照与成功运行
+Meta --> Daemon : 成功状态与统计
+else 仓库写入或提交失败
+Backup -> Repo : 保留可恢复上传状态或清理临时对象
+Backup -> Meta : 记录失败；不发布快照
+end
+@enduml

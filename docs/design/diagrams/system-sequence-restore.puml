@@ -1,0 +1,60 @@
+@startuml
+title 浏览快照并恢复数据顺序图
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName PingFang SC
+skinparam ArrowColor #475569
+skinparam BorderColor #64748B
+skinparam packageStyle rectangle
+skinparam roundcorner 8
+skinparam sequenceMessageAlign center
+skinparam sequenceArrowThickness 1
+skinparam ParticipantBorderColor #2563EB
+skinparam ParticipantBackgroundColor #EFF6FF
+skinparam sequenceGroupBorderColor #64748B
+actor "桌面用户" as User
+boundary "桌面 GUI" as UI
+control "恢复协调器" as Restore
+entity "备份仓库" as Repo
+control "文本密钥文件服务" as KeyFile
+control "解包 / 解密 / 解压" as Pipeline
+control "冲突处理器" as Conflict
+control "恢复校验服务" as Verify
+entity "恢复目标文件系统" as Target
+User -> UI : 打开仓库并浏览快照
+UI -> Restore : 访问仓库
+Restore -> Repo : 读取仓库头和格式版本
+alt 仓库已加密
+Restore --> UI : 请求密钥文件与口令
+User -> UI : 选择文本密钥文件并输入口令
+UI -> KeyFile : unlock(path, password, repositoryId)
+alt 口令、文件和仓库标识有效
+KeyFile --> Restore : 内存中的主密钥
+else 错误口令、文件损坏或仓库不匹配
+KeyFile --> UI : 明确失败且不返回密钥
+end
+else 仓库未加密
+note over Restore,Repo : 跳过解锁
+end
+Restore -> Repo : 读取并认证快照清单
+Repo --> UI : 快照与文件树
+User -> UI : 选择内容、目标和默认冲突策略
+UI -> Restore : restore(request)
+loop 每个选定文件
+Restore -> Target : 检查空间、权限和路径冲突
+opt 目标路径已存在
+Restore -> Conflict : 应用覆盖、跳过、重命名或询问策略
+Conflict --> Restore : 逐项决定
+end
+Restore -> Repo : 按 ChunkReference 读取 pack 范围
+Restore -> Pipeline : 解包 → 认证解密 → 解压
+Pipeline -> Target : 写入临时文件
+Restore -> Verify : 校验大小、哈希和必要元数据
+alt 认证和校验成功
+Verify -> Target : 原子放置并应用元数据
+else 认证、解码或哈希校验失败
+Verify -> Target : 删除临时文件并保留原文件
+end
+end
+Restore --> UI : 恢复报告：成功、跳过、失败
+@enduml

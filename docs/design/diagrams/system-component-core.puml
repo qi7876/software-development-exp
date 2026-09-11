@@ -1,0 +1,61 @@
+@startuml
+title 备份核心子系统构件图
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName PingFang SC
+skinparam ArrowColor #475569
+skinparam BorderColor #64748B
+skinparam packageStyle rectangle
+skinparam roundcorner 8
+top to bottom direction
+skinparam componentStyle uml2
+skinparam componentBorderColor #2563EB
+skinparam componentBackgroundColor #EFF6FF
+skinparam databaseBorderColor #64748B
+package "应用服务" {
+  component "任务服务" as TaskSvc <<service>>
+  component "备份协调器" as Backup <<service>>
+  component "恢复协调器" as Restore <<service>>
+}
+package "内容处理流水线" {
+  component "内容定义分块" as Chunk <<stage>>
+  component "压缩 / 解压" as Compress <<strategy>>
+  component "加密 / 解密" as Crypto <<strategy>>
+  component "打包 / 解包" as Pack <<strategy>>
+}
+package "领域服务" {
+  component "扫描与筛选" as Scan <<domain service>>
+  component "快照与索引管理" as Snapshot <<domain service>>
+  component "完整性校验" as Verify <<domain service>>
+  component "文本密钥文件服务" as KeyFile <<security service>>
+}
+package "端口与适配器" {
+  component "源文件端口" as SourcePort <<port>>
+  component "元数据端口" as MetaPort <<port>>
+  component "备份仓库端口" as RepoPort <<port>>
+  component "本地仓库适配器" as LocalAdapter <<adapter>>
+  component "WebDAV 适配器" as WebDAVAdapter <<adapter>>
+  component "S3 适配器" as S3Adapter <<adapter>>
+}
+SourcePort -[hidden]down- MetaPort
+MetaPort -[hidden]down- RepoPort
+TaskSvc --> Scan : 预览与校验
+TaskSvc --> KeyFile : 保护配置
+Backup --> Scan : 扫描候选文件
+Scan --> SourcePort : 读取元数据与内容
+Backup --> Chunk : 文件流
+Chunk --> Compress : 数据块
+Compress --> Crypto : 压缩块
+Crypto --> Pack : 认证密文块
+KeyFile --> Crypto : 解锁后的主密钥
+Pack --> RepoPort : 不可变 pack
+Backup --> Snapshot : 原子提交
+Snapshot --> MetaPort : 索引与状态
+Restore --> RepoPort : 读取对象
+Restore --> Pack : 逆向流水线
+Restore --> Verify : 恢复后校验
+Verify --> RepoPort : 读取并重算哈希
+LocalAdapter ..> RepoPort : 实现
+WebDAVAdapter ..> RepoPort : 实现
+S3Adapter ..> RepoPort : 实现
+@enduml

@@ -1,34 +1,7 @@
 # 初步架构
 
-本文档只定义需求阶段的组件边界，不替代后续架构决策记录（ADR）。
-
-```mermaid
-flowchart LR
-    GUI[Svelte GUI]
-    CLI[CLI]
-    Daemon[后台守护进程]
-    Core[Rust 备份核心]
-    Meta[(SQLite 元数据)]
-    Repo[(备份仓库)]
-    Source[(源文件系统)]
-    Filter[筛选引擎]
-    Chunk[内容定义分块]
-    Compress[块级压缩]
-    Crypto[块级认证加密/解密]
-    Pack[块聚合 pack]
-    WebDAV[(WebDAV)]
-    S3[(S3 兼容存储)]
-
-    GUI <-->|版本化本地 API| Daemon
-    CLI <-->|版本化本地 API| Daemon
-    Daemon --> Core
-    Daemon --> Meta
-    Core --> Source
-    Source --> Filter --> Chunk --> Compress --> Crypto --> Pack --> Repo
-    Core --> Meta
-    Core -.目标适配器.-> WebDAV
-    Core -.目标适配器.-> S3
-```
+本文档保留架构约束与待决事项，不替代后续架构决策记录（ADR）。标准 UML 构件图、类图、
+顺序图及其追踪说明统一维护在[数据备份系统逻辑设计](system-design.md)中，避免在两处重复维护图形。
 
 ## 组件职责
 

@@ -1,0 +1,133 @@
+@startuml
+title 服务与接口逻辑类图
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName PingFang SC
+skinparam ArrowColor #475569
+skinparam BorderColor #64748B
+skinparam packageStyle rectangle
+skinparam roundcorner 8
+left to right direction
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #2563EB
+skinparam classBackgroundColor #EFF6FF
+hide empty members
+package "应用服务" {
+  class "TaskService" as TaskService <<application service>> {
+    + saveTask(draft): TaskId
+    + previewFilter(draft): Preview
+    + validateTask(draft): ValidationResult
+  }
+  class "BackupCoordinator" as BackupCoordinator <<application service>> {
+    + execute(taskId, trigger): RunId
+    + cancel(runId): CancelResult
+  }
+  class "RestoreCoordinator" as RestoreCoordinator <<application service>> {
+    + browse(snapshotId): EntryPage
+    + restore(request): RestoreResult
+  }
+}
+package "领域服务" {
+  class "SourceScanner" as Scanner <<domain service>> {
+    + scan(sources, filter): FileStream
+  }
+  class "FilterEngine" as FilterEngine <<domain service>> {
+    + compile(rules): CompiledFilter
+    + decide(metadata): Decision
+  }
+  class "Chunker" as Chunker <<domain service>> {
+    + split(stream): ChunkStream
+  }
+  class "TransformationPipeline" as Pipeline <<domain service>> {
+    + encode(chunks, policy): EncodedBlocks
+    + decode(blocks, metadata): PlainChunks
+  }
+  class "SnapshotService" as SnapshotService <<domain service>> {
+    + buildManifest(entries): Manifest
+    + commit(manifest): SnapshotId
+  }
+  class "VerificationService" as VerificationService <<domain service>> {
+    + verifySnapshot(id): VerificationReport
+    + verifyRestored(file): Boolean
+  }
+  class "KeyFileService" as KeyFileService <<security service>> {
+    + create(path, password): KeyId
+    + unlock(path, password): MasterKey
+  }
+}
+package "策略接口" {
+  class "SourceReader" as SourceReader <<interface>> {
+    + walk(root): EntryStream
+    + open(path): ByteStream
+  }
+  class "BackupRepository" as Repository <<interface>> {
+    + putTemporary(id, data): Void
+    + read(range): ByteStream
+    + commit(snapshot): Void
+    + capabilities(): Capabilities
+  }
+  class "MetadataStore" as MetadataStore <<interface>> {
+    + saveTask(task): Void
+    + recordRun(run): Void
+    + publishSnapshot(snapshot): Void
+  }
+  class "Compressor" as Compressor <<interface>> {
+    + compress(block): Encoded
+    + decompress(block): Plain
+  }
+  class "Encryptor" as Encryptor <<interface>> {
+    + encrypt(block, key): Ciphertext
+    + decrypt(block, key): Plain
+  }
+  class "Packer" as Packer <<interface>> {
+    + append(block): PackLocation
+    + read(location): EncodedBlock
+  }
+  class "NoCompression" as NoCompression <<strategy>> {
+  }
+  class "ZstandardCompression" as Zstandard <<strategy>> {
+    + level: CompressionLevel
+  }
+  class "NoEncryption" as NoEncryptionStrategy <<strategy>> {
+  }
+  class "XChaCha20Poly1305" as XChaCha <<strategy>> {
+  }
+  class "PackFormatV1" as PackV1 <<strategy>> {
+    + targetSize: UInt64
+  }
+}
+package "仓库适配器" {
+  class "LocalRepositoryAdapter" as LocalRepository <<adapter>> {
+  }
+  class "WebDAVRepositoryAdapter" as WebDAVRepository <<adapter>> {
+  }
+  class "S3RepositoryAdapter" as S3Repository <<adapter>> {
+  }
+}
+TaskService ..> FilterEngine : 预览与编译
+TaskService ..> KeyFileService : 保护配置
+TaskService ..> MetadataStore : 保存任务
+BackupCoordinator ..> Scanner : 扫描
+BackupCoordinator ..> Chunker : 分块
+BackupCoordinator ..> Pipeline : 编码
+BackupCoordinator ..> SnapshotService : 提交
+RestoreCoordinator ..> Pipeline : 解码
+RestoreCoordinator ..> VerificationService : 校验
+RestoreCoordinator ..> KeyFileService : 解锁
+Scanner ..> SourceReader : 读取
+Scanner ..> FilterEngine : 判断
+Pipeline ..> Compressor : 策略
+Pipeline ..> Encryptor : 策略
+Pipeline ..> Packer : 策略
+SnapshotService ..> Repository : 对象与提交
+SnapshotService ..> MetadataStore : 发布索引
+VerificationService ..> Repository : 读取对象
+NoCompression ..|> Compressor
+Zstandard ..|> Compressor
+NoEncryptionStrategy ..|> Encryptor
+XChaCha ..|> Encryptor
+PackV1 ..|> Packer
+LocalRepository ..|> Repository
+WebDAVRepository ..|> Repository
+S3Repository ..|> Repository
+@enduml

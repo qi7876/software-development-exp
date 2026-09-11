@@ -1,0 +1,47 @@
+@startuml
+title 数据备份系统顶层构件图
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName PingFang SC
+skinparam ArrowColor #475569
+skinparam BorderColor #64748B
+skinparam packageStyle rectangle
+skinparam roundcorner 8
+top to bottom direction
+skinparam componentStyle uml2
+skinparam componentBorderColor #2563EB
+skinparam componentBackgroundColor #EFF6FF
+skinparam databaseBorderColor #64748B
+package "客户端" {
+  component "桌面 GUI" as GUI <<Svelte 客户端>>
+  component "命令行 CLI" as CLI <<自动化入口>>
+}
+package "后台服务" {
+  interface "版本化本地接口" as API <<逻辑接口>>
+  component "后台守护进程" as Daemon <<进程>>
+  component "任务调度与运行管理" as Scheduler <<应用服务>>
+}
+package "备份核心" {
+  interface "备份核心接口" as CoreAPI <<端口>>
+  component "Rust 备份核心" as Core <<领域核心>>
+  database "SQLite 元数据" as Meta <<索引与状态>>
+}
+package "外部设施" {
+  actor "操作系统调度器" as OS <<外部系统>>
+  folder "源文件系统" as Source <<数据源>>
+  folder "本地备份存储" as Local <<目标>>
+  cloud "WebDAV / S3 远程存储" as Remote <<目标>>
+}
+GUI --> API : 任务、状态、恢复
+CLI --> API : 命令与 JSON 结果
+API --> Daemon : 提供
+OS --> Scheduler : 计划触发
+Daemon --> Scheduler : 编排运行
+Scheduler --> CoreAPI : 调用
+CoreAPI --> Core : 提供
+Daemon --> Meta : 任务与运行状态
+Core --> Meta : 快照索引
+Core --> Source : 流式读取
+Core --> Local : 仓库端口
+Core --> Remote : 仓库端口
+@enduml
