@@ -1,12 +1,60 @@
 {
-  "version": "1.0",
-  "updated": "2026-09-11",
+  "version": "1.1",
+  "updated": "2026-09-18",
   "title": "数据备份系统逻辑设计",
   "diagrams": [
     {
+      "id": "context",
+      "kind": "component",
+      "view": "system-context",
+      "title": "数据备份系统上下文图",
+      "purpose": "该图界定数据备份系统与使用者及外部系统的边界。桌面用户负责配置、查看和恢复，自动化用户与操作系统调度器可触发任务，系统从源文件系统读取数据并写入本地或远程备份存储。",
+      "direction": "left to right",
+      "packages": ["系统边界"],
+      "elements": [
+        {"id": "DesktopUser", "name": "桌面用户", "type": "actor", "package": "", "stereotype": "person"},
+        {"id": "AutomationUser", "name": "高级与自动化用户", "type": "actor", "package": "", "stereotype": "person"},
+        {"id": "BackupSystem", "name": "数据备份系统", "type": "component", "package": "系统边界", "stereotype": "software system"},
+        {"id": "OSScheduler", "name": "操作系统调度器", "type": "component", "package": "", "stereotype": "external system"},
+        {"id": "SourceFS", "name": "源文件系统", "type": "folder", "package": "", "stereotype": "external system"},
+        {"id": "LocalStore", "name": "本地备份存储", "type": "folder", "package": "", "stereotype": "external system"},
+        {"id": "RemoteStore", "name": "WebDAV / S3 远程存储", "type": "cloud", "package": "", "stereotype": "external system"}
+      ],
+      "relations": [
+        {"source": "DesktopUser", "target": "BackupSystem", "label": "配置、监控、浏览和恢复", "direction": "right", "style": "solid"},
+        {"source": "AutomationUser", "target": "BackupSystem", "label": "通过 CLI 自动化", "direction": "right", "style": "solid"},
+        {"source": "OSScheduler", "target": "BackupSystem", "label": "触发计划任务", "direction": "right", "style": "solid"},
+        {"source": "BackupSystem", "target": "SourceFS", "label": "读取文件和元数据", "direction": "right", "style": "solid"},
+        {"source": "BackupSystem", "target": "LocalStore", "label": "读写备份仓库", "direction": "right", "style": "solid"},
+        {"source": "BackupSystem", "target": "RemoteStore", "label": "通过 HTTPS 读写仓库", "direction": "right", "style": "solid"}
+      ],
+      "responsibilities": [
+        {"element": "数据备份系统", "responsibility": "配置并执行备份、维护快照、校验仓库以及安全恢复数据。"},
+        {"element": "桌面用户", "responsibility": "完成交互式任务配置、状态查看、快照浏览和恢复。"},
+        {"element": "高级与自动化用户", "responsibility": "通过 CLI 调用与桌面端一致的能力。"},
+        {"element": "外部系统", "responsibility": "提供计划触发、源数据及本地或远程持久化能力。"}
+      ],
+      "details": [
+        "系统拥有备份流程和元数据，源文件系统与备份存储位于信任边界之外。",
+        "本地存储与 WebDAV/S3 均是备份仓库目标，但远程目标还需处理网络故障和能力差异。",
+        "自动化用户是桌面用户能力的命令行表达，不获得绕过校验或安全约束的特权。"
+      ],
+      "constraints": [
+        "所有外部错误必须保留明确语义并呈现给调用者。",
+        "用户口令、明文主密钥和用户文件内容不得进入日志或诊断信息。",
+        "失败或取消的运行不得暴露为可恢复快照。"
+      ],
+      "trace": {
+        "use_cases": ["UC-01", "UC-02", "UC-03", "UC-04", "UC-05", "UC-06", "UC-07", "UC-08", "UC-16"],
+        "requirements": ["FR-01", "FR-02", "FR-03", "FR-04", "FR-05", "FR-06", "FR-07", "FR-08", "FR-09", "FR-10", "FR-11", "FR-12", "FR-13", "FR-14", "FR-15", "FR-16"],
+        "nfr": ["NFR-01", "NFR-02", "NFR-03", "NFR-04", "NFR-05", "NFR-06", "NFR-07", "NFR-08", "NFR-09", "NFR-10", "NFR-11", "NFR-12", "NFR-13"]
+      }
+    },
+    {
       "id": "component-overview",
       "kind": "component",
-      "title": "数据备份系统顶层构件图",
+      "view": "container",
+      "title": "数据备份系统容器图",
       "purpose": "该图从进程和外部系统边界说明桌面端、命令行、后台服务、备份核心及存储设施的协作方式。GUI 与 CLI 均通过同一版本化本地接口访问后台服务，核心逻辑不依赖具体交互端。",
       "direction": "top to bottom",
       "packages": ["客户端", "后台服务", "备份核心", "外部设施"],
@@ -66,6 +114,7 @@
     {
       "id": "component-core",
       "kind": "component",
+      "view": "component",
       "title": "备份核心子系统构件图",
       "purpose": "该图细化备份核心内部的应用服务、内容处理流水线和端口适配器。所有可替换算法与外部存储均位于稳定接口之后，以便独立测试和逐步接入远程目标。",
       "direction": "top to bottom",
@@ -139,6 +188,7 @@
     {
       "id": "class-domain",
       "kind": "class",
+      "view": "logical-class",
       "title": "备份领域模型类图",
       "purpose": "该图描述任务配置、运行、快照内容和恢复请求之间的稳定业务关系。组合关系用于表达生命周期所有权，泛化关系用于表达可替换的调度、筛选、保护和仓库配置。",
       "direction": "top to bottom",
@@ -235,6 +285,7 @@
     {
       "id": "class-services",
       "kind": "class",
+      "view": "logical-class",
       "title": "服务与接口逻辑类图",
       "purpose": "该图描述应用服务、领域服务、算法策略及存储端口之间的依赖倒置关系。接口只表达稳定能力，不绑定同步或异步调用形式，也不等同于最终 Rust trait 的完整签名。",
       "direction": "left to right",
@@ -321,6 +372,7 @@
     {
       "id": "sequence-configure",
       "kind": "sequence",
+      "view": "sequence",
       "title": "配置并保存备份任务顺序图",
       "purpose": "该图描述桌面用户建立任务草稿、预览筛选、配置数据保护、校验并保存任务的完整交互。保存操作仅在所有配置通过校验后发生。",
       "participants": [
@@ -390,6 +442,7 @@
     {
       "id": "sequence-backup",
       "kind": "sequence",
+      "view": "sequence",
       "title": "执行并提交备份顺序图",
       "purpose": "该图描述手动或计划触发后，从创建运行记录到原子发布快照的主要过程。对每个文件和数据块采用流式处理，并在明确的安全点响应取消。",
       "participants": [
@@ -466,6 +519,7 @@
     {
       "id": "sequence-restore",
       "kind": "sequence",
+      "view": "sequence",
       "title": "浏览快照并恢复数据顺序图",
       "purpose": "该图描述用户访问仓库、浏览快照并恢复所选内容的完整过程。加密仓库在读取受保护元数据前解锁，恢复内容先写入临时位置，认证和哈希校验成功后才原子放置。",
       "participants": [
@@ -539,6 +593,59 @@
         "use_cases": ["UC-04", "UC-05", "UC-06", "UC-14", "UC-14L", "UC-14R", "UC-15", "UC-17", "UC-18"],
         "requirements": ["FR-07", "FR-08", "FR-13", "FR-14", "FR-15"],
         "nfr": ["NFR-01", "NFR-02", "NFR-03", "NFR-05", "NFR-06", "NFR-10", "NFR-11", "NFR-12"]
+      }
+    },
+    {
+      "id": "deployment",
+      "kind": "component",
+      "view": "deployment",
+      "title": "数据备份系统部署图",
+      "purpose": "该图说明首发 macOS 部署拓扑及本地、远程数据边界。桌面应用、CLI、后台守护进程和备份核心运行在同一工作站，控制面数据写入 SQLite，受口令保护的文本密钥文件由用户保管。",
+      "direction": "left to right",
+      "packages": ["macOS 工作站", "本地存储设施", "远程存储设施"],
+      "elements": [
+        {"id": "DesktopApp", "name": "桌面应用", "type": "component", "package": "macOS 工作站", "stereotype": "process"},
+        {"id": "CLIProcess", "name": "CLI", "type": "component", "package": "macOS 工作站", "stereotype": "process"},
+        {"id": "DaemonProcess", "name": "后台守护进程", "type": "component", "package": "macOS 工作站", "stereotype": "process"},
+        {"id": "CoreLibrary", "name": "备份核心", "type": "component", "package": "macOS 工作站", "stereotype": "library"},
+        {"id": "SQLiteFile", "name": "SQLite 元数据文件", "type": "database", "package": "macOS 工作站", "stereotype": "file"},
+        {"id": "KeyFile", "name": "口令保护的文本密钥文件", "type": "folder", "package": "macOS 工作站", "stereotype": "versioned JSON"},
+        {"id": "SourceVolume", "name": "源数据卷", "type": "folder", "package": "本地存储设施", "stereotype": "APFS / mounted volume"},
+        {"id": "BackupVolume", "name": "本地备份卷", "type": "folder", "package": "本地存储设施", "stereotype": "repository"},
+        {"id": "WebDAV", "name": "WebDAV 服务", "type": "cloud", "package": "远程存储设施", "stereotype": "HTTPS"},
+        {"id": "S3", "name": "S3 兼容服务", "type": "cloud", "package": "远程存储设施", "stereotype": "HTTPS"}
+      ],
+      "relations": [
+        {"source": "DesktopApp", "target": "DaemonProcess", "label": "本地版本化接口", "direction": "right", "style": "solid"},
+        {"source": "CLIProcess", "target": "DaemonProcess", "label": "本地版本化接口", "direction": "right", "style": "solid"},
+        {"source": "DaemonProcess", "target": "CoreLibrary", "label": "进程内调用", "direction": "right", "style": "solid"},
+        {"source": "DaemonProcess", "target": "SQLiteFile", "label": "事务读写", "direction": "down", "style": "solid"},
+        {"source": "CoreLibrary", "target": "KeyFile", "label": "按需解锁", "direction": "down", "style": "solid"},
+        {"source": "CoreLibrary", "target": "SourceVolume", "label": "只读扫描", "direction": "right", "style": "solid"},
+        {"source": "CoreLibrary", "target": "BackupVolume", "label": "仓库协议", "direction": "right", "style": "solid"},
+        {"source": "CoreLibrary", "target": "WebDAV", "label": "HTTPS / WebDAV", "direction": "right", "style": "solid"},
+        {"source": "CoreLibrary", "target": "S3", "label": "HTTPS / S3 API", "direction": "right", "style": "solid"}
+      ],
+      "responsibilities": [
+        {"element": "macOS 工作站", "responsibility": "承载交互端、后台运行时、核心逻辑和本地控制面数据。"},
+        {"element": "文本密钥文件", "responsibility": "保存认证加密后的主密钥、KDF 参数和密钥标识，不保存口令。"},
+        {"element": "本地存储设施", "responsibility": "提供源数据卷和可选的本地备份仓库。"},
+        {"element": "远程存储设施", "responsibility": "通过 HTTPS 提供 WebDAV 或 S3 兼容对象持久化。"}
+      ],
+      "details": [
+        "GUI 退出不终止守护进程中的备份或恢复运行。",
+        "SQLite 是控制面元数据，不替代备份仓库中的快照清单和内容对象。",
+        "远程适配器必须将超时、认证、容量和一致性错误转换为明确的领域错误。"
+      ],
+      "constraints": [
+        "本地接口不得对非本机网络开放。",
+        "密钥文件权限应限制为当前用户，口令和明文主密钥仅短暂存在于内存。",
+        "远程传输必须使用经过证书验证的 HTTPS。"
+      ],
+      "trace": {
+        "use_cases": ["UC-01", "UC-02", "UC-03", "UC-04", "UC-05", "UC-06", "UC-08", "UC-14", "UC-14L", "UC-14R", "UC-15"],
+        "requirements": ["FR-01", "FR-02", "FR-03", "FR-04", "FR-06", "FR-07", "FR-08", "FR-10", "FR-13", "FR-14", "FR-15", "FR-16"],
+        "nfr": ["NFR-01", "NFR-02", "NFR-03", "NFR-04", "NFR-05", "NFR-06", "NFR-07", "NFR-08", "NFR-10", "NFR-11", "NFR-12", "NFR-13"]
       }
     }
   ]

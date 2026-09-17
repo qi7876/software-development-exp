@@ -1,0 +1,30 @@
+@startuml
+title 数据备份系统上下文图
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName PingFang SC
+skinparam ArrowColor #475569
+skinparam BorderColor #64748B
+skinparam packageStyle rectangle
+skinparam roundcorner 8
+left to right direction
+skinparam componentStyle uml2
+skinparam componentBorderColor #2563EB
+skinparam componentBackgroundColor #EFF6FF
+skinparam databaseBorderColor #64748B
+package "系统边界" {
+  component "数据备份系统" as BackupSystem <<software system>>
+}
+actor "桌面用户" as DesktopUser <<person>>
+actor "高级与自动化用户" as AutomationUser <<person>>
+component "操作系统调度器" as OSScheduler <<external system>>
+folder "源文件系统" as SourceFS <<external system>>
+folder "本地备份存储" as LocalStore <<external system>>
+cloud "WebDAV / S3 远程存储" as RemoteStore <<external system>>
+DesktopUser --> BackupSystem : 配置、监控、浏览和恢复
+AutomationUser --> BackupSystem : 通过 CLI 自动化
+OSScheduler --> BackupSystem : 触发计划任务
+BackupSystem --> SourceFS : 读取文件和元数据
+BackupSystem --> LocalStore : 读写备份仓库
+BackupSystem --> RemoteStore : 通过 HTTPS 读写仓库
+@enduml

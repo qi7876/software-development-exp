@@ -1,4 +1,4 @@
-"""Generate system-design Markdown and UML assets from system-design.yaml."""
+"""Generate C4 and supporting design documents from docs/c4/model.yaml."""
 
 from __future__ import annotations
 
@@ -17,10 +17,10 @@ from system_design_model import (
 )
 
 ROOT: Final = Path(__file__).resolve().parents[1]
-DESIGN_DIR: Final = ROOT / "docs" / "design"
-SOURCE_DIR: Final = DESIGN_DIR / "diagrams"
-GENERATED_DIR: Final = ROOT / "docs" / "generated"
-MARKDOWN_PATH: Final = DESIGN_DIR / "system-design.md"
+C4_DIR: Final = ROOT / "docs" / "c4"
+SOURCE_DIR: Final = C4_DIR / "diagrams"
+GENERATED_DIR: Final = C4_DIR / "generated"
+MARKDOWN_PATH: Final = C4_DIR / "system-design.md"
 
 
 def _common(title: str) -> list[str]:
@@ -213,24 +213,31 @@ def _trace_text(diagram: Diagram) -> str:
 def markdown_source(model: Model) -> str:
     """Build the complete logical system-design document."""
     lines = [
-        "# 数据备份系统逻辑设计",
+        "# 数据备份系统 C4 与逻辑设计",
         "",
         f"> 版本 {model['version']}；更新日期 {model['updated']}。",
         "",
-        "本文档描述实现前的逻辑设计边界。图中的类、接口和构件用于约束职责与协作，"
-        "不代表已经存在的 Rust 类型、进程协议或第三方库绑定。",
+        "本文档以 C1、C2、关键容器 C3 和部署图说明系统边界，并保留逻辑类图与关键顺序图。"
+        "图中的类、接口和构件用于约束职责与协作，不代表已经存在的 Rust 类型或已确定的 IPC。",
         "",
     ]
-    kind_titles = {"component": "构件设计", "class": "静态类模型", "sequence": "动态交互模型"}
+    view_groups = (
+        ("system-context", "C1 系统上下文"),
+        ("container", "C2 容器设计"),
+        ("component", "C3 关键容器构件设计"),
+        ("deployment", "部署设计"),
+        ("logical-class", "逻辑静态类模型"),
+        ("sequence", "动态交互模型"),
+    )
     figure = 1
-    for kind in ("component", "class", "sequence"):
-        lines.extend([f"## {kind_titles[kind]}", ""])
-        for diagram in [item for item in model["diagrams"] if item["kind"] == kind]:
+    for view, title in view_groups:
+        lines.extend([f"## {title}", ""])
+        for diagram in [item for item in model["diagrams"] if item["view"] == view]:
             lines.extend(
                 [
                     f"### {diagram['title']}",
                     "",
-                    f"![{diagram['title']}](../generated/system-{diagram['id']}.svg)",
+                    f"![{diagram['title']}](generated/system-{diagram['id']}.svg)",
                     "",
                     f"图 {figure} {diagram['title']}",
                     "",
@@ -255,6 +262,8 @@ def markdown_source(model: Model) -> str:
             "## 建模边界",
             "",
             "- 当前模型保持逻辑层级，不决定桌面外壳、本地 IPC 形式和具体 Rust 类型布局。",
+            "- 不手工维护 C4 Code 图；代码结构和单元测试在实现阶段成为该层级的事实来源。",
+            "- 当前不存在需要 System Landscape 单独表达的多系统环境。",
             "- 压缩、加密、打包和仓库访问均通过策略或端口替换，读取端依据版本化元数据自动识别。",
             "- 文本密钥文件只保存认证加密后的主密钥及 KDF 参数，不保存口令或明文主密钥。",
             "",

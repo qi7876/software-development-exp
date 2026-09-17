@@ -1,0 +1,40 @@
+@startuml
+title 数据备份系统部署图
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName PingFang SC
+skinparam ArrowColor #475569
+skinparam BorderColor #64748B
+skinparam packageStyle rectangle
+skinparam roundcorner 8
+left to right direction
+skinparam componentStyle uml2
+skinparam componentBorderColor #2563EB
+skinparam componentBackgroundColor #EFF6FF
+skinparam databaseBorderColor #64748B
+package "macOS 工作站" {
+  component "桌面应用" as DesktopApp <<process>>
+  component "CLI" as CLIProcess <<process>>
+  component "后台守护进程" as DaemonProcess <<process>>
+  component "备份核心" as CoreLibrary <<library>>
+  database "SQLite 元数据文件" as SQLiteFile <<file>>
+  folder "口令保护的文本密钥文件" as KeyFile <<versioned JSON>>
+}
+package "本地存储设施" {
+  folder "源数据卷" as SourceVolume <<APFS / mounted volume>>
+  folder "本地备份卷" as BackupVolume <<repository>>
+}
+package "远程存储设施" {
+  cloud "WebDAV 服务" as WebDAV <<HTTPS>>
+  cloud "S3 兼容服务" as S3 <<HTTPS>>
+}
+DesktopApp --> DaemonProcess : 本地版本化接口
+CLIProcess --> DaemonProcess : 本地版本化接口
+DaemonProcess --> CoreLibrary : 进程内调用
+DaemonProcess --> SQLiteFile : 事务读写
+CoreLibrary --> KeyFile : 按需解锁
+CoreLibrary --> SourceVolume : 只读扫描
+CoreLibrary --> BackupVolume : 仓库协议
+CoreLibrary --> WebDAV : HTTPS / WebDAV
+CoreLibrary --> S3 : HTTPS / S3 API
+@enduml

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from scripts.system_design_model import FR_IDS, UC_IDS, load_model
 
@@ -11,9 +12,18 @@ class SystemDesignModelTests(unittest.TestCase):
     def test_expected_diagram_mix(self) -> None:
         model = load_model()
         kinds = [diagram["kind"] for diagram in model["diagrams"]]
-        self.assertEqual(kinds.count("component"), 2)
+        self.assertEqual(kinds.count("component"), 4)
         self.assertEqual(kinds.count("class"), 2)
         self.assertEqual(kinds.count("sequence"), 3)
+
+    def test_expected_c4_views(self) -> None:
+        model = load_model()
+        views = [diagram["view"] for diagram in model["diagrams"]]
+        self.assertEqual(views.count("system-context"), 1)
+        self.assertEqual(views.count("container"), 1)
+        self.assertEqual(views.count("component"), 1)
+        self.assertEqual(views.count("deployment"), 1)
+        self.assertNotIn("code", views)
 
     def test_traceability_is_complete(self) -> None:
         model = load_model()
@@ -34,6 +44,10 @@ class SystemDesignModelTests(unittest.TestCase):
         model_text = str(load_model())
         self.assertIn("文本密钥文件", model_text)
         self.assertNotIn("钥匙串", model_text)
+
+    def test_canonical_model_lives_under_c4(self) -> None:
+        self.assertTrue(Path("docs/c4/model.yaml").is_file())
+        self.assertFalse(Path("docs/design/system-design.yaml").exists())
 
 
 if __name__ == "__main__":

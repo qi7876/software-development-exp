@@ -3,7 +3,7 @@
 一款以 macOS 为首发平台、面向个人桌面用户的数据备份软件。应用采用 Rust 实现备份核心与后台守护进程，Svelte 实现桌面图形界面，并提供 CLI 以便自动化和故障排查。
 
 > 项目当前处于逻辑设计阶段。需求基线见 [产品需求文档](docs/requirements/product-requirements.md)，
-> 系统设计见[数据备份系统逻辑设计](docs/design/system-design.md)。
+> 系统设计见 [C4 架构入口](docs/c4/README.md)，协作状态见[项目协作文档](docs/collab/main.md)。
 
 ## 产品目标
 
@@ -41,8 +41,8 @@
 - [产品需求文档](docs/requirements/product-requirements.md)
 - [用例模型](docs/requirements/use-cases.md)
 - [界面原型](docs/design/ui-wireframes.md)
-- [初步架构](docs/design/architecture.md)
-- [逻辑系统设计](docs/design/system-design.md)
+- [C4 架构与逻辑系统设计](docs/c4/README.md)
+- [项目协作状态](docs/collab/main.md)
 - [开发计划](docs/project/roadmap.md)
 - [决策记录](docs/decisions/README.md)
 - [实验报告](docs/report.docx)
@@ -55,10 +55,16 @@ uv run scripts/update_report.py
 ```
 
 用例模型以 `docs/requirements/use-cases.yaml` 为唯一事实来源，逻辑设计以
-`docs/design/system-design.yaml` 为唯一事实来源。上述命令会同步生成 Markdown、PlantUML、
+`docs/c4/model.yaml` 为唯一事实来源。上述命令会同步生成 Markdown、PlantUML、
 SVG、PNG，以及 Word 中的需求与系统设计章节。可分别运行
 `uv run scripts/update_use_cases.py --check` 和
 `uv run scripts/update_system_design.py --check` 检查生成内容是否漂移。
+
+提交前运行完整本地 CI：
+
+```shell
+uv run scripts/check.py
+```
 
 ## 开发阶段
 
@@ -75,7 +81,7 @@ SVG、PNG，以及 Word 中的需求与系统设计章节。可分别运行
 - [x] 建立 MVP 需求基线
 - [x] 建立用例模型与界面低保真原型
 - [x] 建立初步架构与项目计划
-- [x] 建立构件图、类图和关键场景顺序图
+- [x] 建立 C1、C2、关键容器 C3、部署图、逻辑类图和关键场景顺序图
 - [ ] 评审并冻结其余需求基线
 - [x] 确认 macOS 为首发平台
 - [ ] 完成架构原型和 ADR

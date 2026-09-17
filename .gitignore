@@ -249,6 +249,7 @@ rustc-ice-*.txt
 
 # General
 .DS_Store
+~$*.docx
 .localized
 __MACOSX/
 .AppleDouble
@@ -306,3 +307,4 @@ Backups.backupdb
 .MobileBackups.trash
 MobileBackups.trash
 tmbootpicker.efi
+.DS_Store
