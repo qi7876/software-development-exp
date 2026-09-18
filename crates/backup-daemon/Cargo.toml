@@ -1,0 +1,21 @@
+[package]
+name = "data-backup-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "data-backupd"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+data-backup-core = { path = "../backup-core" }
+data-backup-protocol = { path = "../backup-protocol" }
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

@@ -218,7 +218,7 @@ def markdown_source(model: Model) -> str:
         f"> 版本 {model['version']}；更新日期 {model['updated']}。",
         "",
         "本文档以 C1、C2、关键容器 C3 和部署图说明系统边界，并保留逻辑类图与关键顺序图。"
-        "图中的类、接口和构件用于约束职责与协作，不代表已经存在的 Rust 类型或已确定的 IPC。",
+        "Rust workspace 已映射核心容器；逻辑类和操作仍是未来实现约束，IPC 技术尚未确定。",
         "",
     ]
     view_groups = (

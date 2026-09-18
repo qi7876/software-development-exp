@@ -2,7 +2,7 @@
 
 一款以 macOS 为首发平台、面向个人桌面用户的数据备份软件。应用采用 Rust 实现备份核心与后台守护进程，Svelte 实现桌面图形界面，并提供 CLI 以便自动化和故障排查。
 
-> 项目当前处于逻辑设计阶段。需求基线见 [产品需求文档](docs/requirements/product-requirements.md)，
+> 项目当前处于代码框架阶段。需求基线见 [产品需求文档](docs/requirements/product-requirements.md)，
 > 系统设计见 [C4 架构入口](docs/c4/README.md)，协作状态见[项目协作文档](docs/collab/main.md)。
 
 ## 产品目标
@@ -43,6 +43,7 @@
 - [界面原型](docs/design/ui-wireframes.md)
 - [C4 架构与逻辑系统设计](docs/c4/README.md)
 - [项目协作状态](docs/collab/main.md)
+- [Rust 开发环境](docs/development/environment.md)
 - [开发计划](docs/project/roadmap.md)
 - [决策记录](docs/decisions/README.md)
 - [实验报告](docs/report.docx)
@@ -66,6 +67,14 @@ SVG、PNG，以及 Word 中的需求与系统设计章节。可分别运行
 uv run scripts/check.py
 ```
 
+Rust workspace 包含 `data-backup-core`、`data-backup-protocol`、`data-backup-daemon` 和
+`data-backup-cli`。当前可运行框架自检：
+
+```shell
+cargo run -p data-backup-cli -- check
+cargo run -p data-backup-daemon -- check
+```
+
 ## 开发阶段
 
 1. 需求分析与验收标准
@@ -85,7 +94,8 @@ uv run scripts/check.py
 - [ ] 评审并冻结其余需求基线
 - [x] 确认 macOS 为首发平台
 - [ ] 完成架构原型和 ADR
-- [ ] 初始化 Rust/Svelte 工程
+- [x] 初始化 Rust 多 crate 工程并通过统一编译
+- [ ] 初始化可选的 Svelte 桌面界面
 
 ## License
 
