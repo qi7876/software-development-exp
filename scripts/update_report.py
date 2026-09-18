@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
@@ -27,6 +26,7 @@ from use_case_model import Actor, Model, UseCase, actor_map, case_map, inverse_r
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_PATH = ROOT / "docs" / "report.docx"
 GENERATED_DIR = ROOT / "docs" / "generated"
+C4_GENERATED_DIR = ROOT / "docs" / "c4" / "generated"
 GENERATED_CONTENT_WIDTH_CM = 14.0
 BODY_FONT_SIZE_PT = 10.5
 TABLE_FONT_SIZE_PT = 10.5
@@ -87,55 +87,6 @@ def _font_run(run: Any, *, size: float = BODY_FONT_SIZE_PT, bold: bool = False) 
     run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
     run.font.size = Pt(size)
     run.bold = bold
-
-
-def _iter_document_paragraphs(document: DocumentType) -> Iterable[Paragraph]:
-    yielded_paragraphs: set[int] = set()
-    visited_cells: set[int] = set()
-
-    def visit_cell(cell: _Cell) -> Iterable[Paragraph]:
-        cell_identity = id(cell._tc)  # pyright: ignore[reportPrivateUsage]
-        if cell_identity in visited_cells:
-            return
-        visited_cells.add(cell_identity)
-        for paragraph in cell.paragraphs:
-            paragraph_identity = id(paragraph._p)  # pyright: ignore[reportPrivateUsage]
-            if paragraph_identity not in yielded_paragraphs:
-                yielded_paragraphs.add(paragraph_identity)
-                yield paragraph
-        for table in cell.tables:
-            for row in table.rows:
-                for nested_cell in row.cells:
-                    yield from visit_cell(nested_cell)
-
-    for paragraph in document.paragraphs:
-        paragraph_identity = id(paragraph._p)  # pyright: ignore[reportPrivateUsage]
-        if paragraph_identity not in yielded_paragraphs:
-            yielded_paragraphs.add(paragraph_identity)
-            yield paragraph
-    for table in document.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                yield from visit_cell(cell)
-
-
-HEADING_PATTERN = re.compile(r"^(?:[一二三四五六七八九十]+、|\d+(?:\.\d+)*(?:\s|$)|需求分析说明书)")
-
-
-def _normalize_document_fonts(document: DocumentType) -> None:
-    """Apply 五号 to prose, captions and tables while preserving heading sizes."""
-    for paragraph in _iter_document_paragraphs(document):
-        text = paragraph.text.strip()
-        explicit_sizes = [run.font.size.pt for run in paragraph.runs if run.font.size is not None]
-        is_heading = bool(HEADING_PATTERN.match(text)) and (
-            any(run.bold for run in paragraph.runs)
-            or (explicit_sizes and max(explicit_sizes) >= 11.5)
-        )
-        for run in paragraph.runs:
-            run.font.name = "Times New Roman"
-            run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
-            if not is_heading:
-                run.font.size = Pt(BODY_FONT_SIZE_PT)
 
 
 def _paragraph(
@@ -603,7 +554,7 @@ def _add_design_diagram(
     _picture(
         document,
         anchor,
-        GENERATED_DIR / f"system-{diagram['id']}.png",
+        C4_GENERATED_DIR / f"system-{diagram['id']}.png",
         f"图 {figure_number}  {diagram['title']}",
         width=width,
     )
@@ -736,15 +687,15 @@ def _populate_system_design(
         _paragraph(document, anchor, boundary, bullet=True)
 
 
-def main() -> None:
-    """Synchronize UML, Markdown, and the existing report through one entry point."""
-    if not REPORT_PATH.exists():
-        raise FileNotFoundError(f"Report is missing: {REPORT_PATH}")
+def synchronize_report(report_path: Path = REPORT_PATH) -> None:
+    """Synchronize generated sections without changing protected front matter."""
+    if not report_path.exists():
+        raise FileNotFoundError(f"Report is missing: {report_path}")
     generate_use_case_artifacts()
     generate_system_design_artifacts()
     model = load_model()
     design_model = load_system_design_model()
-    document = Document(str(REPORT_PATH))
+    document = Document(str(report_path))
     section_cell = _find_section_cell(document, "需求分析说明书（10分）")
     title = _find_cell_paragraph(section_cell, "需求分析说明书（10分）")
     _clear_after_paragraph(section_cell, title)
@@ -763,8 +714,12 @@ def main() -> None:
     design_anchor = design_cell.add_paragraph()
     _populate_system_design(document, design_anchor, design_model)
     design_anchor._element.getparent().remove(design_anchor._element)
-    _normalize_document_fonts(document)
-    document.save(str(REPORT_PATH))
+    document.save(str(report_path))
+
+
+def main() -> None:
+    """Synchronize UML, Markdown, and the existing report through one entry point."""
+    synchronize_report()
 
 
 if __name__ == "__main__":
