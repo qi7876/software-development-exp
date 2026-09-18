@@ -617,7 +617,11 @@ def _populate_system_design(
             ("调试工具", "LLDB 2103、RUST_BACKTRACE 与 tracing 结构化诊断。"),
             ("第三方库", "clap、serde、serde_json、thiserror、tracing、tracing-subscriber。"),
             ("版本控制", "Git 2.54、GitHub、gh 2.101；短期分支、PR、审查和 Squash Merge。"),
-            ("性能分析", "/usr/bin/time、sample、leaks、heap 和 Cargo release 构建。"),
+            (
+                "性能分析",
+                "samply、cargo-flamegraph、Xcode Instruments、/usr/bin/time；"
+                "profiling profile 保留调试符号。",
+            ),
             (
                 "集成与部署",
                 "scripts/check.py 本地 CI；cargo build --release 后人工验收，暂不配置 CD。",

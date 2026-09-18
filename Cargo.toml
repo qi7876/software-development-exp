@@ -29,3 +29,8 @@ all = { level = "deny", priority = -1 }
 expect_used = "deny"
 panic = "deny"
 unwrap_used = "deny"
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"

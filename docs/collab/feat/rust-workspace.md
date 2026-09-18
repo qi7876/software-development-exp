@@ -17,6 +17,7 @@
 - protocol 只定义版本和序列化类型，不决定 Unix socket、HTTP 或其他 IPC。
 - daemon 当前只提供框架自检，不伪装成可工作的长期后台服务。
 - 不引入 Tokio、SQLite、压缩、加密或云存储依赖，后续通过测试和 ADR 逐项加入。
+- 性能分析采用 `/usr/bin/time` 建立基线，使用 samply 和 cargo-flamegraph 定位 CPU 热点，并用 Xcode Instruments 分析 CPU、内存、调度和 I/O；workspace 的 profiling profile 保留优化与调试符号。
 
 ## 后续计划
 

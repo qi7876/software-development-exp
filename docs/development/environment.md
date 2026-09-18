@@ -55,12 +55,28 @@ uv run scripts/check.py
 
 ## 性能分析工具
 
-- `/usr/bin/time -l`：观察耗时、最大常驻内存和系统资源统计。
-- `sample`：采样运行中进程的调用栈。
-- `leaks` 与 `heap`：检查 macOS 进程的内存使用和泄漏线索。
-- Cargo release 构建：在优化配置下进行后续基准测试。
+- `/usr/bin/time -l`：采集端到端耗时、最大常驻内存和系统资源统计，作为优化前后的基础量化结果。
+- [samply 0.13.1](https://github.com/mstange/samply)：跨平台 CPU 采样工具，使用 Firefox Profiler 查看线程时间线、调用树、火焰图和源码热点。采样数据默认保留在本机，未经检查不得上传共享。
+- [cargo-flamegraph 0.6.13](https://github.com/flamegraph-rs/flamegraph)：生成可归档的 Rust CPU 火焰图；macOS 采样依赖 Xcode 提供的 `xctrace`。
+- Xcode Instruments：使用 Time Profiler 分析 CPU 调用树，使用 Allocations 分析内存分配及生命周期，并在需要时使用 System Trace 分析调度和 I/O 行为。
+- `sample`、`leaks` 与 `heap`：保留为无需启动图形工具时的 macOS 快速诊断手段。
 
-当前 Command Line Tools 环境不包含完整 Xcode Instruments，因此不把 Instruments 作为项目基线；需要图形化性能分析时再安装完整 Xcode，并在协作文档记录环境变化。
+workspace 定义了继承 release 优化且保留调试符号的 `profiling` profile，避免直接用缺少符号的普通 release 产物采样：
+
+```shell
+cargo build --profile profiling --workspace
+samply record ./target/profiling/data-backup check
+cargo flamegraph --profile profiling -p data-backup-cli --bin data-backup -- check
+```
+
+统一安装命令固定工具版本：
+
+```shell
+cargo install --locked samply --version 0.13.1
+cargo install --locked flamegraph --version 0.6.13
+```
+
+完整 Xcode 正在安装。安装后先运行 `xcrun xctrace version` 验证命令行采样后端，再用同一测试数据分别验证 samply、cargo-flamegraph 和 Instruments；在验证完成前不把本机已有 Command Line Tools 误记为完整 Instruments 环境。
 
 ## 集成与部署工具
 
