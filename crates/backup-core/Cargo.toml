@@ -1,0 +1,13 @@
+[package]
+name = "data-backup-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+data-backup-protocol = { path = "../backup-protocol" }
+thiserror.workspace = true
+
+[lints]
+workspace = true

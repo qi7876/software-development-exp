@@ -12,6 +12,21 @@ def _run(command: list[str]) -> None:
 
 
 def main() -> None:
+    _run(["cargo", "fmt", "--all", "--check"])
+    _run(
+        [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--all-features",
+            "--",
+            "-D",
+            "warnings",
+        ]
+    )
+    _run(["cargo", "test", "--workspace", "--all-targets"])
+    _run(["cargo", "build", "--workspace", "--all-targets"])
     _run(["uv", "run", "ruff", "check", "."])
     _run(["uv", "run", "basedpyright"])
     _run(["uv", "run", "python", "-m", "unittest", "discover", "-s", "tests"])

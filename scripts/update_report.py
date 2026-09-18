@@ -602,8 +602,8 @@ def _populate_system_design(
     _paragraph(
         document,
         anchor,
-        "本章在需求模型基础上说明系统的构件边界、静态类关系和关键动态交互。"
-        "图中的类与接口用于约束职责，不表示已经存在的 Rust 类型或已经确定的 IPC 技术。",
+        "本章在需求模型基础上说明开发环境、系统构件边界、静态类关系和关键动态交互。"
+        "Rust 多 crate 框架已经建立；业务类和接口仍是后续实现约束，IPC 技术尚未确定。",
     )
     _heading(document, anchor, "1. 开发环境和工具")
     _table(
@@ -611,12 +611,18 @@ def _populate_system_design(
         anchor,
         ("类别", "选择与用途"),
         (
-            ("首发平台", "macOS；同时兼顾 Apple Silicon 与 Intel Mac。"),
-            ("核心与后台", "Rust；用于备份核心、后台守护进程和 CLI。"),
-            ("桌面界面", "Svelte 与 TypeScript；桌面应用壳由后续 ADR 确定。"),
-            ("元数据", "SQLite；保存任务、运行、快照索引和校验结果。"),
-            ("建模与文档", "PlantUML 1.2026.8、Python、uv、python-docx。"),
-            ("质量工具", "ruff、basedpyright、Git 及自动化测试。"),
+            ("开发平台", "macOS 27.0、Apple Silicon arm64、zsh 与 Apple Command Line Tools。"),
+            ("编程语言", "Rust 1.98.0、2024 edition；Python 3.12 仅用于文档生成。"),
+            ("构建工具", "Cargo 1.98.0 workspace、Cargo.lock；uv 管理 Python 文档工具。"),
+            ("调试工具", "LLDB 2103、RUST_BACKTRACE 与 tracing 结构化诊断。"),
+            ("第三方库", "clap、serde、serde_json、thiserror、tracing、tracing-subscriber。"),
+            ("版本控制", "Git 2.54、GitHub、gh 2.101；短期分支、PR、审查和 Squash Merge。"),
+            ("性能分析", "/usr/bin/time、sample、leaks、heap 和 Cargo release 构建。"),
+            (
+                "集成与部署",
+                "scripts/check.py 本地 CI；cargo build --release 后人工验收，暂不配置 CD。",
+            ),
+            ("前端扩展", "Svelte 与 TypeScript 留待后续阶段，当前不纳入统一开发环境。"),
         ),
         (3.2, 10.8),
     )
