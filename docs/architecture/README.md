@@ -1,56 +1,7 @@
-# 数据备份系统架构视图
+# 项目架构
 
-本目录统一收纳产品需求与界面原型、用例、架构视图和技术决策；开发环境与计划见项目根目录的 [README](../../README.md)。用例模型位于 `use-cases.yaml`，系统设计模型位于 `model.yaml`；对应的 Markdown、PlantUML 源文件、SVG 和 PNG 由 `uv run scripts/update_use_cases.py` 与 `uv run scripts/update_system_design.py` 生成，不手工修改。
+此目录维护项目实际采用的架构。当前处于 Rust 代码框架阶段，只长期维护 [C1 系统上下文](c1-system-context.md)和 [C2 容器](c2-containers.md)。重要容器的职责与接口稳定后再补 C3；C4 以代码为准。
 
-## 文档入口
+部署、动态交互和 System Landscape 视图只在实际问题需要时添加。状态机、ER、流程图和数据流图也按需补充，统一放在此目录。课程报告使用的需求、预设设计和图表位于 [docs/report](../report/README.md)，不作为实现约束。
 
-- [产品需求与界面低保真原型](product-requirements.md)及[用例模型](use-cases.md)
-- 长期维护：[C1 系统上下文](c1-system-context.md)与[C2 容器](c2-containers.md)
-- 按需维护：[C3 备份核心构件](c3-backup-core.md)、[部署视图](deployment.md)与[动态交互视图](dynamic.md)
-- 课程设计基线：[逻辑类模型](logical-model.md)
-
-## 架构决策记录
-
-ADR 保留重要且难以逆转的技术选择、背景及验证方式，文件名采用 `NNNN-short-title.md`。
-
-- [ADR-0001：macOS 首发平台](decisions/0001-macos-first.md)（已接受）
-- [ADR-0008：加密、打包与压缩管线](decisions/0008-data-transformation.md)（已接受，参数待验证）
-- [ADR-0009：文件筛选规则语义](decisions/0009-file-selection.md)（拟议）
-
-桌面应用壳、本地 IPC、仓库格式、变更检测、调度和远程目标的一致性策略将在相应架构验证阶段按需记录。
-
-## 维护范围
-
-| 层级或视图 | 当前内容 | 维护策略 |
-|---|---|---|
-| C1 System Context | 用户、调度器、源文件系统、本地及 WebDAV/S3 存储 | 持续维护 |
-| C2 Container | GUI、CLI、守护进程、本地接口、备份核心和 SQLite | 持续维护 |
-| C3 Component | 仅展开关键的备份核心容器 | 职责或接口复杂到需要独立解释时更新 |
-| C4 Code | 不建立手工图 | 由未来代码和 API 表达 |
-| Deployment | macOS 工作站、本地卷和 HTTPS 远程存储 | 部署方式变化时更新 |
-| Dynamic / Sequence | 配置任务、执行备份、浏览与恢复 | 关键交互需要说明时更新 |
-| Logical class | 领域模型及服务接口 | 保留课程设计基线，代码落地后不逐项同步 |
-
-各视图文档包含对应图表和说明。现有九张图是设计与课程报告基线，不代表以后每次代码变更都要同步九张图。当前项目尚未处于包含多个同级软件系统的企业环境，因此不建立 System Landscape；状态机、ER、流程图和数据流图将在出现需要单独解释的复杂状态、持久化模型或算法后按需增加。
-
-## 一致性边界
-
-- C1 用自然语言行为规格和顺序图描述用户可观察结果。
-- C2 明确可运行单元、技术方向和通信边界，对应集成测试。
-- C3 明确核心内部职责、端口及适配器，对应构件测试。
-- C4 由代码和单元测试维护，不复制容易漂移的代码结构。
-- 所有层级都继承原子快照、认证恢复、错误透明和敏感信息不落日志的约束。
-
-当前模型不决定桌面外壳、本地 IPC 形式或具体 Rust 类型布局。压缩、加密、打包和仓库访问经策略或端口替换，读取端依据版本化元数据识别算法。文本密钥文件只保存认证加密后的主密钥及 KDF 参数，不保存口令或明文主密钥。
-
-## 代码框架映射
-
-| C4 元素 | Rust workspace 成员 | 当前状态 |
-|---|---|---|
-| 备份核心 | `data-backup-core` | 已建立领域契约和 C3 模块边界，业务行为待实现。 |
-| 版本化本地接口 | `data-backup-protocol` | 已建立版本与传输无关状态类型，IPC 待 ADR。 |
-| 后台守护进程 | `data-backup-daemon` | 已建立可执行入口和框架自检，调度及常驻服务待实现。 |
-| 命令行 CLI | `data-backup-cli` | 已建立可执行入口、版本信息和 JSON 自检。 |
-| 桌面 GUI | 尚未初始化 | 作为后续扩展加入，不影响当前 Rust 核心。 |
-
-不另画 C4 Code 图；crate、模块、公开接口和单元测试就是该层级的事实来源。
+当前 `main` 对应四个 Rust crate：CLI 和 daemon 是可运行程序，core 与 protocol 是库。它们能编译、运行框架自检；备份、恢复、调度、持久化和 GUI 尚未实现。架构文档描述当前边界，并把计划中的能力明确标出。

@@ -11,10 +11,10 @@ from render_uml import PLANTUML_SHA256, PLANTUML_VERSION, render_plantuml
 from use_case_model import Model, actor_map, case_map, inverse_relations, load_model
 
 ROOT: Final = Path(__file__).resolve().parents[1]
-ARCHITECTURE_DIR: Final = ROOT / "docs" / "architecture"
-DIAGRAM_SOURCE_DIR: Final = ARCHITECTURE_DIR / "diagrams"
-GENERATED_DIR: Final = ARCHITECTURE_DIR / "generated"
-MARKDOWN_PATH: Final = ARCHITECTURE_DIR / "use-cases.md"
+REPORT_DIR: Final = ROOT / "docs" / "report"
+DIAGRAM_SOURCE_DIR: Final = REPORT_DIR / "diagrams"
+GENERATED_DIR: Final = REPORT_DIR / "generated"
+MARKDOWN_PATH: Final = REPORT_DIR / "use-cases.md"
 
 CASE_LAYOUTS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
     "overview": (

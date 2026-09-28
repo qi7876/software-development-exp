@@ -2,7 +2,7 @@
 
 一款以 macOS 为首发平台、面向个人桌面用户的数据备份软件。项目计划用 Rust 实现备份核心与后台守护进程，用 Svelte 实现桌面图形界面，并提供 CLI 以便自动化和故障排查。
 
-> 项目当前处于代码框架阶段。需求、系统设计和决策记录统一从[架构与设计文档](docs/architecture/README.md)进入。
+> 项目当前处于代码框架阶段。实际架构见[项目架构](docs/architecture/README.md)；课程报告的需求与设计素材见[报告目录](docs/report/README.md)。
 
 ## 产品目标
 
@@ -24,7 +24,7 @@
 
 核心闭环稳定后，候选扩展将支持 WebDAV 和 S3 兼容对象存储。移动端、文件实时同步和多用户协作暂不纳入当前版本。
 
-数据默认采用内容定义分块；每块独立进行 Zstandard 压缩，启用加密时再使用 XChaCha20-Poly1305 认证加密，最后聚合进不可变 pack。用户选择安全预设，恢复时由软件自动识别实际算法。详细决策见 [ADR-0008](docs/architecture/decisions/0008-data-transformation.md)。
+课程报告采用内容定义分块、块级 Zstandard 压缩、可选 XChaCha20-Poly1305 认证加密及不可变 pack 的设计方案，详见[报告素材中的 ADR-0008](docs/report/decisions/0008-data-transformation.md)。实际实现以代码和技术验证结果为准。
 
 ## 技术方向
 
@@ -37,21 +37,19 @@
 
 ## 文档
 
-- [产品需求与界面原型](docs/architecture/product-requirements.md)
-- [用例模型](docs/architecture/use-cases.md)
-- [架构与逻辑系统设计](docs/architecture/README.md)
-- [决策记录](docs/architecture/README.md#架构决策记录)
-- [实验报告](docs/report.docx)
+- [项目架构 C1/C2](docs/architecture/README.md)
+- [课程报告资料、需求、用例与设计图](docs/report/README.md)
+- 实验报告：本地 `docs/report/report.docx`（不纳入 Git）
 
-实验报告以当前 `docs/report.docx` 为直接排版基准；`docs/report.template.docx` 只保留为课程样式参考。
+实验报告以当前 `docs/report/report.docx` 为直接排版基准；`docs/report/report.template.docx` 只保留为课程样式参考。
 需求或设计文档更新后，运行：
 
 ```shell
 uv run scripts/update_report.py
 ```
 
-用例模型以 `docs/architecture/use-cases.yaml` 为唯一事实来源，逻辑设计以
-`docs/architecture/model.yaml` 为唯一事实来源。上述命令会同步生成 Markdown、PlantUML、
+报告用例模型以 `docs/report/use-cases.yaml` 为来源，报告逻辑设计以
+`docs/report/model.yaml` 为来源。上述命令会同步生成 Markdown、PlantUML、
 SVG、PNG，以及 Word 中的需求与系统设计章节。可分别运行
 `uv run scripts/update_use_cases.py --check` 和
 `uv run scripts/update_system_design.py --check` 检查生成内容是否漂移。
@@ -115,7 +113,7 @@ flowchart LR
 - [x] 建立 MVP 需求基线
 - [x] 建立用例模型与界面低保真原型
 - [x] 建立初步架构与项目计划
-- [x] 建立 C1、C2、关键容器 C3、部署图、逻辑类图和关键场景顺序图
+- [x] 建立 C1、C2 项目架构视图；课程报告图表独立存放
 - [ ] 评审并冻结其余需求基线
 - [x] 确认 macOS 为首发平台
 - [ ] 完成架构原型和 ADR
@@ -128,7 +126,7 @@ flowchart LR
 
 从最新 `main` 创建短期分支，通过 PR 审查并以 squash merge 合入。当前优先验证可运行框架、自检命令和文档生成；业务闭环稳定后，再围绕备份、校验、恢复等外部行为和关键不变量逐步补充测试。明确的 bug 可先写回归测试，探索性工作不强制 TDD。
 
-远端仓库为 `qi7876/software-development-exp`，目前没有 GitHub Actions 工作流，因此只维护本地 CI，不配置 CD。课程报告以 `docs/report.docx` 为直接排版基准，生成器只修改需求分析和系统设计目标区域。
+远端仓库为 `qi7876/software-development-exp`，目前没有 GitHub Actions 工作流，因此只维护本地 CI，不配置 CD。课程报告以 `docs/report/report.docx` 为直接排版基准，生成器只修改需求分析和系统设计目标区域。
 
 ## License
 

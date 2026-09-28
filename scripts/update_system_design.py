@@ -1,4 +1,4 @@
-"""Generate C4 and supporting design documents from docs/architecture/model.yaml."""
+"""Generate course-report design documents from docs/report/model.yaml."""
 
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ from system_design_model import (
 )
 
 ROOT: Final = Path(__file__).resolve().parents[1]
-ARCHITECTURE_DIR: Final = ROOT / "docs" / "architecture"
-SOURCE_DIR: Final = ARCHITECTURE_DIR / "diagrams"
-GENERATED_DIR: Final = ARCHITECTURE_DIR / "generated"
+REPORT_DIR: Final = ROOT / "docs" / "report"
+SOURCE_DIR: Final = REPORT_DIR / "diagrams"
+GENERATED_DIR: Final = REPORT_DIR / "generated"
 VIEW_DOCUMENTS: Final = (
     ("c1-system-context.md", "C1 系统上下文", ("system-context",)),
     ("c2-containers.md", "C2 容器设计", ("container",)),
@@ -224,7 +224,8 @@ def markdown_source(model: Model, title: str, views: tuple[str, ...]) -> str:
         "",
         f"> 版本 {model['version']}；更新日期 {model['updated']}。",
         "",
-        "本文档由 `model.yaml` 生成；维护范围见[架构入口](README.md)。",
+        "本文档由 `model.yaml` 生成，仅用于课程报告；"
+        "项目架构见[架构入口](../architecture/README.md)。",
         "",
     ]
     figure = 1
@@ -262,7 +263,7 @@ def generate_artifacts(*, check: bool = False) -> None:
     """Validate and write or compare all generated design artifacts."""
     model = load_model()
     expected_text: dict[Path, str] = {
-        ARCHITECTURE_DIR / filename: markdown_source(model, title, views)
+        REPORT_DIR / filename: markdown_source(model, title, views)
         for filename, title, views in VIEW_DOCUMENTS
     }
     expected_binary: dict[Path, bytes] = {}
