@@ -1,11 +1,10 @@
 # 数据备份系统架构视图
 
-本目录统一收纳需求、界面设计、架构视图和技术决策；开发环境与计划见项目根目录的 [README](../../README.md)。用例模型位于 `use-cases.yaml`，系统设计模型位于 `model.yaml`；对应的 Markdown、PlantUML 源文件、SVG 和 PNG 由 `uv run scripts/update_use_cases.py` 与 `uv run scripts/update_system_design.py` 生成，不手工修改。
+本目录统一收纳产品需求与界面原型、用例、架构视图和技术决策；开发环境与计划见项目根目录的 [README](../../README.md)。用例模型位于 `use-cases.yaml`，系统设计模型位于 `model.yaml`；对应的 Markdown、PlantUML 源文件、SVG 和 PNG 由 `uv run scripts/update_use_cases.py` 与 `uv run scripts/update_system_design.py` 生成，不手工修改。
 
 ## 文档入口
 
-- [产品需求](product-requirements.md)与[用例模型](use-cases.md)
-- [界面低保真原型](ui-wireframes.md)
+- [产品需求与界面低保真原型](product-requirements.md)及[用例模型](use-cases.md)
 - 长期维护：[C1 系统上下文](c1-system-context.md)与[C2 容器](c2-containers.md)
 - 按需维护：[C3 备份核心构件](c3-backup-core.md)、[部署视图](deployment.md)与[动态交互视图](dynamic.md)
 - 课程设计基线：[逻辑类模型](logical-model.md)

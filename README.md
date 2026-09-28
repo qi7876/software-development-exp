@@ -37,9 +37,8 @@
 
 ## 文档
 
-- [产品需求文档](docs/architecture/product-requirements.md)
+- [产品需求与界面原型](docs/architecture/product-requirements.md)
 - [用例模型](docs/architecture/use-cases.md)
-- [界面原型](docs/architecture/ui-wireframes.md)
 - [架构与逻辑系统设计](docs/architecture/README.md)
 - [决策记录](docs/architecture/README.md#架构决策记录)
 - [实验报告](docs/report.docx)
