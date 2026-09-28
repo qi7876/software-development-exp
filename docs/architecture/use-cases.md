@@ -15,15 +15,15 @@
 
 ### 系统总览
 
-![数据备份系统用例总览](../generated/use-case-overview.svg)
+![数据备份系统用例总览](generated/use-case-overview.svg)
 
 ### 任务配置与执行
 
-![备份任务配置与执行用例](../generated/use-case-configuration-execution.svg)
+![备份任务配置与执行用例](generated/use-case-configuration-execution.svg)
 
 ### 浏览、恢复与维护
 
-![备份浏览恢复与维护用例](../generated/use-case-restore-maintenance.svg)
+![备份浏览恢复与维护用例](generated/use-case-restore-maintenance.svg)
 
 ## 参与者
 

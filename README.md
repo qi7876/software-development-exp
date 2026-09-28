@@ -2,8 +2,7 @@
 
 一款以 macOS 为首发平台、面向个人桌面用户的数据备份软件。项目计划用 Rust 实现备份核心与后台守护进程，用 Svelte 实现桌面图形界面，并提供 CLI 以便自动化和故障排查。
 
-> 项目当前处于代码框架阶段。需求基线见 [产品需求文档](docs/requirements/product-requirements.md)，
-> 系统设计见 [架构入口](docs/architecture/README.md)，协作状态见[项目协作文档](docs/collab/main.md)。
+> 项目当前处于代码框架阶段。需求、系统设计和决策记录统一从[架构与设计文档](docs/architecture/README.md)进入。
 
 ## 产品目标
 
@@ -25,7 +24,7 @@
 
 核心闭环稳定后，候选扩展将支持 WebDAV 和 S3 兼容对象存储。移动端、文件实时同步和多用户协作暂不纳入当前版本。
 
-数据默认采用内容定义分块；每块独立进行 Zstandard 压缩，启用加密时再使用 XChaCha20-Poly1305 认证加密，最后聚合进不可变 pack。用户选择安全预设，恢复时由软件自动识别实际算法。详细决策见 [ADR-0008](docs/decisions/0008-data-transformation.md)。
+数据默认采用内容定义分块；每块独立进行 Zstandard 压缩，启用加密时再使用 XChaCha20-Poly1305 认证加密，最后聚合进不可变 pack。用户选择安全预设，恢复时由软件自动识别实际算法。详细决策见 [ADR-0008](docs/architecture/decisions/0008-data-transformation.md)。
 
 ## 技术方向
 
@@ -38,14 +37,13 @@
 
 ## 文档
 
-- [产品需求文档](docs/requirements/product-requirements.md)
-- [用例模型](docs/requirements/use-cases.md)
-- [界面原型](docs/design/ui-wireframes.md)
+- [产品需求文档](docs/architecture/product-requirements.md)
+- [用例模型](docs/architecture/use-cases.md)
+- [界面原型](docs/architecture/ui-wireframes.md)
 - [架构与逻辑系统设计](docs/architecture/README.md)
-- [项目协作状态](docs/collab/main.md)
-- [Rust 开发环境](docs/development/environment.md)
-- [开发计划](docs/project/roadmap.md)
-- [决策记录](docs/decisions/README.md)
+- [Rust 开发环境](docs/architecture/environment.md)
+- [开发计划](docs/architecture/roadmap.md)
+- [决策记录](docs/architecture/README.md#架构决策记录)
 - [实验报告](docs/report.docx)
 
 实验报告以当前 `docs/report.docx` 为直接排版基准；`docs/report.template.docx` 只保留为课程样式参考。
@@ -55,7 +53,7 @@
 uv run scripts/update_report.py
 ```
 
-用例模型以 `docs/requirements/use-cases.yaml` 为唯一事实来源，逻辑设计以
+用例模型以 `docs/architecture/use-cases.yaml` 为唯一事实来源，逻辑设计以
 `docs/architecture/model.yaml` 为唯一事实来源。上述命令会同步生成 Markdown、PlantUML、
 SVG、PNG，以及 Word 中的需求与系统设计章节。可分别运行
 `uv run scripts/update_use_cases.py --check` 和
@@ -83,7 +81,7 @@ cargo run -p data-backup-daemon -- check
 4. 系统测试与恢复演练
 5. 发布、运维与反馈闭环
 
-进入下一阶段的条件、迭代 backlog 和交付路线见[开发计划](docs/project/roadmap.md)。
+进入下一阶段的条件、迭代 backlog 和交付路线见[开发计划](docs/architecture/roadmap.md)。
 
 ## 状态
 
@@ -96,6 +94,14 @@ cargo run -p data-backup-daemon -- check
 - [ ] 完成架构原型和 ADR
 - [x] 初始化 Rust 多 crate 工程并通过统一编译
 - [ ] 初始化可选的 Svelte 桌面界面
+
+需求和 20 个用例已结构化，可生成 Markdown、UML 和课程报告；当前四个 Rust crate 已能统一编译和执行框架自检。下一步完成高风险技术探针，并实现筛选与本地备份的最小可运行闭环。
+
+## 协作与验证
+
+从最新 `main` 创建短期分支，通过 PR 审查并以 squash merge 合入。当前优先验证可运行框架、自检命令和文档生成；业务闭环稳定后，再围绕备份、校验、恢复等外部行为和关键不变量逐步补充测试。明确的 bug 可先写回归测试，探索性工作不强制 TDD。
+
+远端仓库为 `qi7876/software-development-exp`，目前没有 GitHub Actions 工作流，因此只维护本地 CI，不配置 CD。课程报告以 `docs/report.docx` 为直接排版基准，生成器只修改需求分析和系统设计目标区域。
 
 ## License
 

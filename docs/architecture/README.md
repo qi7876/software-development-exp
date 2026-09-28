@@ -1,6 +1,23 @@
 # 数据备份系统架构视图
 
-本目录是系统架构设计的唯一入口。结构化模型位于 `model.yaml`，生成的 PlantUML 源文件、SVG、PNG 和说明文档不得手工修改；统一运行 `uv run scripts/update_system_design.py` 更新。
+本目录统一收纳需求、界面设计、架构、开发资料和技术决策。用例模型位于 `use-cases.yaml`，系统设计模型位于 `model.yaml`；对应的 Markdown、PlantUML 源文件、SVG 和 PNG 由 `uv run scripts/update_use_cases.py` 与 `uv run scripts/update_system_design.py` 生成，不手工修改。
+
+## 文档入口
+
+- [产品需求](product-requirements.md)与[用例模型](use-cases.md)
+- [界面低保真原型](ui-wireframes.md)
+- [系统设计与图表](system-design.md)
+- [开发环境](environment.md)与[开发计划](roadmap.md)
+
+## 架构决策记录
+
+ADR 保留重要且难以逆转的技术选择、背景及验证方式，文件名采用 `NNNN-short-title.md`。
+
+- [ADR-0001：macOS 首发平台](decisions/0001-macos-first.md)（已接受）
+- [ADR-0008：加密、打包与压缩管线](decisions/0008-data-transformation.md)（已接受，参数待验证）
+- [ADR-0009：文件筛选规则语义](decisions/0009-file-selection.md)（拟议）
+
+桌面应用壳、本地 IPC、仓库格式、变更检测、调度和远程目标的一致性策略将在相应架构验证阶段按需记录。
 
 ## 维护范围
 

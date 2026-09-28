@@ -47,7 +47,7 @@ class SystemDesignModelTests(unittest.TestCase):
 
     def test_canonical_model_lives_under_architecture(self) -> None:
         self.assertTrue(Path("docs/architecture/model.yaml").is_file())
-        self.assertFalse(Path("docs/design/system-design.yaml").exists())
+        self.assertTrue(Path("docs/architecture/use-cases.yaml").is_file())
 
 
 if __name__ == "__main__":

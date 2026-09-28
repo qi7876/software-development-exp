@@ -11,10 +11,10 @@ from render_uml import PLANTUML_SHA256, PLANTUML_VERSION, render_plantuml
 from use_case_model import Model, actor_map, case_map, inverse_relations, load_model
 
 ROOT: Final = Path(__file__).resolve().parents[1]
-REQUIREMENTS_DIR: Final = ROOT / "docs" / "requirements"
-DIAGRAM_SOURCE_DIR: Final = REQUIREMENTS_DIR / "diagrams"
-GENERATED_DIR: Final = ROOT / "docs" / "generated"
-MARKDOWN_PATH: Final = REQUIREMENTS_DIR / "use-cases.md"
+ARCHITECTURE_DIR: Final = ROOT / "docs" / "architecture"
+DIAGRAM_SOURCE_DIR: Final = ARCHITECTURE_DIR / "diagrams"
+GENERATED_DIR: Final = ARCHITECTURE_DIR / "generated"
+MARKDOWN_PATH: Final = ARCHITECTURE_DIR / "use-cases.md"
 
 CASE_LAYOUTS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
     "overview": (
@@ -180,7 +180,7 @@ def markdown_source(model: Model) -> str:
             [
                 f"### {caption}",
                 "",
-                f"![{diagram['title']}](../generated/use-case-{diagram['id']}.svg)",
+                f"![{diagram['title']}](generated/use-case-{diagram['id']}.svg)",
                 "",
             ]
         )
