@@ -26,7 +26,7 @@ from use_case_model import Actor, Model, UseCase, actor_map, case_map, inverse_r
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_PATH = ROOT / "docs" / "report.docx"
 GENERATED_DIR = ROOT / "docs" / "generated"
-C4_GENERATED_DIR = ROOT / "docs" / "c4" / "generated"
+ARCHITECTURE_GENERATED_DIR = ROOT / "docs" / "architecture" / "generated"
 GENERATED_CONTENT_WIDTH_CM = 14.0
 BODY_FONT_SIZE_PT = 10.5
 TABLE_FONT_SIZE_PT = 10.5
@@ -554,7 +554,7 @@ def _add_design_diagram(
     _picture(
         document,
         anchor,
-        C4_GENERATED_DIR / f"system-{diagram['id']}.png",
+        ARCHITECTURE_GENERATED_DIR / f"system-{diagram['id']}.png",
         f"图 {figure_number}  {diagram['title']}",
         width=width,
     )

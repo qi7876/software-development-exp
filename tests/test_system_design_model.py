@@ -45,8 +45,8 @@ class SystemDesignModelTests(unittest.TestCase):
         self.assertIn("文本密钥文件", model_text)
         self.assertNotIn("钥匙串", model_text)
 
-    def test_canonical_model_lives_under_c4(self) -> None:
-        self.assertTrue(Path("docs/c4/model.yaml").is_file())
+    def test_canonical_model_lives_under_architecture(self) -> None:
+        self.assertTrue(Path("docs/architecture/model.yaml").is_file())
         self.assertFalse(Path("docs/design/system-design.yaml").exists())
 
 

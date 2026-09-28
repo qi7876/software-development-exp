@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Literal, NotRequired, TypedDict, cast
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL_PATH = ROOT / "docs" / "c4" / "model.yaml"
+MODEL_PATH = ROOT / "docs" / "architecture" / "model.yaml"
 FR_IDS = {f"FR-{index:02d}" for index in range(1, 17)}
 NFR_IDS = {f"NFR-{index:02d}" for index in range(1, 14)}
 UC_IDS = {
@@ -209,7 +209,7 @@ def validate_model(model: Model) -> None:
     """Reject incomplete diagrams, dangling references, and traceability gaps."""
     diagrams = model.get("diagrams", [])
     if len(diagrams) != 9:
-        raise ValueError("docs/c4/model.yaml must define exactly nine diagrams")
+        raise ValueError("docs/architecture/model.yaml must define exactly nine diagrams")
     ids = [diagram.get("id", "") for diagram in diagrams]
     if len(ids) != len(set(ids)):
         raise ValueError("diagram IDs must be unique")
@@ -259,7 +259,7 @@ def load_model(path: Path = MODEL_PATH) -> Model:
     """Read JSON-formatted YAML 1.2 and validate all cross references."""
     raw = cast(Any, json.loads(path.read_text(encoding="utf-8")))
     if not isinstance(raw, dict):
-        raise ValueError("docs/c4/model.yaml must contain an object")
+        raise ValueError("docs/architecture/model.yaml must contain an object")
     model = cast(Model, raw)
     validate_model(model)
     return model

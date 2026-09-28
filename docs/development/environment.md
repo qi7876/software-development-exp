@@ -48,10 +48,10 @@ uv run scripts/check.py
 
 ## 版本控制与协作
 
-- Git 2.54.0 管理本地历史，GitHub 仓库 `qi7876/software-development-exp` 承载远端协作。
+- Git 管理本地历史，远端配置为 `qi7876/data-backup`；远端仓库是否可用以实际访问结果为准。
 - GitHub CLI 2.101.0 用于创建和检查 Pull Request。
 - 采用 Trunk-Based Development：`main` 是唯一长期分支，工作从最新 `main` 建立短期分支，经本地 CI、PR 和审查后 Squash Merge。
-- 长期提交使用 `<subsystem>: <imperative description>` 格式；每个分支在 `docs/collab/` 保存同名进度文档。
+- 长期提交使用 `<subsystem>: <imperative description>` 格式；只在协作确有需要时记录分支进度。
 
 ## 性能分析工具
 
@@ -80,6 +80,6 @@ cargo install --locked flamegraph --version 0.6.13
 
 ## 集成与部署工具
 
-`uv run scripts/check.py` 是当前唯一 CI 入口，依次执行 Rust 格式、Clippy、测试、多目标编译，以及 Python 文档工具的静态检查和生成漂移检查。仓库已有 GitHub 远端但尚未启用远程 CI，按项目约定不主动添加 GitHub Actions。
+`uv run scripts/check.py` 是当前唯一 CI 入口，依次执行 Rust 格式、Clippy、测试、多目标编译，以及 Python 文档工具的静态检查和生成漂移检查。远端地址当前不可访问，远端 CI 状态未核实；按项目约定不主动添加 GitHub Actions。
 
 部署阶段当前只定义 `cargo build --release --workspace` 和人工验收，不配置 CD。桌面应用打包、自启动和签名需要在桌面壳 ADR 确定后补充。

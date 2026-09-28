@@ -1,4 +1,4 @@
-"""Generate C4 and supporting design documents from docs/c4/model.yaml."""
+"""Generate C4 and supporting design documents from docs/architecture/model.yaml."""
 
 from __future__ import annotations
 
@@ -17,10 +17,10 @@ from system_design_model import (
 )
 
 ROOT: Final = Path(__file__).resolve().parents[1]
-C4_DIR: Final = ROOT / "docs" / "c4"
-SOURCE_DIR: Final = C4_DIR / "diagrams"
-GENERATED_DIR: Final = C4_DIR / "generated"
-MARKDOWN_PATH: Final = C4_DIR / "system-design.md"
+ARCHITECTURE_DIR: Final = ROOT / "docs" / "architecture"
+SOURCE_DIR: Final = ARCHITECTURE_DIR / "diagrams"
+GENERATED_DIR: Final = ARCHITECTURE_DIR / "generated"
+MARKDOWN_PATH: Final = ARCHITECTURE_DIR / "system-design.md"
 
 
 def _common(title: str) -> list[str]:

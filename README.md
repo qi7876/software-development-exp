@@ -1,9 +1,9 @@
 # Data Backup
 
-一款以 macOS 为首发平台、面向个人桌面用户的数据备份软件。应用采用 Rust 实现备份核心与后台守护进程，Svelte 实现桌面图形界面，并提供 CLI 以便自动化和故障排查。
+一款以 macOS 为首发平台、面向个人桌面用户的数据备份软件。项目计划用 Rust 实现备份核心与后台守护进程，用 Svelte 实现桌面图形界面，并提供 CLI 以便自动化和故障排查。
 
 > 项目当前处于代码框架阶段。需求基线见 [产品需求文档](docs/requirements/product-requirements.md)，
-> 系统设计见 [C4 架构入口](docs/c4/README.md)，协作状态见[项目协作文档](docs/collab/main.md)。
+> 系统设计见 [架构入口](docs/architecture/README.md)，协作状态见[项目协作文档](docs/collab/main.md)。
 
 ## 产品目标
 
@@ -41,7 +41,7 @@
 - [产品需求文档](docs/requirements/product-requirements.md)
 - [用例模型](docs/requirements/use-cases.md)
 - [界面原型](docs/design/ui-wireframes.md)
-- [C4 架构与逻辑系统设计](docs/c4/README.md)
+- [架构与逻辑系统设计](docs/architecture/README.md)
 - [项目协作状态](docs/collab/main.md)
 - [Rust 开发环境](docs/development/environment.md)
 - [开发计划](docs/project/roadmap.md)
@@ -56,7 +56,7 @@ uv run scripts/update_report.py
 ```
 
 用例模型以 `docs/requirements/use-cases.yaml` 为唯一事实来源，逻辑设计以
-`docs/c4/model.yaml` 为唯一事实来源。上述命令会同步生成 Markdown、PlantUML、
+`docs/architecture/model.yaml` 为唯一事实来源。上述命令会同步生成 Markdown、PlantUML、
 SVG、PNG，以及 Word 中的需求与系统设计章节。可分别运行
 `uv run scripts/update_use_cases.py --check` 和
 `uv run scripts/update_system_design.py --check` 检查生成内容是否漂移。
