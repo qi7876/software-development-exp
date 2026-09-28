@@ -26,7 +26,7 @@ Data Backup 是面向个人桌面用户、以 macOS 为首发平台的数据备�
 uv run scripts/check.py
 ```
 
-本地已配置远端地址，但当前访问返回“Repository not found”，无法核查远端 CI。当前只维护本地 CI，不配置 CD；远端可用后再核查现有工作流。
+远端仓库为 `qi7876/software-development-exp`，目前没有 GitHub Actions 工作流，因此只维护本地 CI，不配置 CD。
 
 ## 后续计划
 
