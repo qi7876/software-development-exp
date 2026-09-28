@@ -1,4 +1,4 @@
-"""Generate use-case Markdown and UML assets from use-cases.yaml."""
+"""Generate report use-case images from use-cases.yaml."""
 
 from __future__ import annotations
 
@@ -7,14 +7,12 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Final
 
-from render_uml import PLANTUML_SHA256, PLANTUML_VERSION, render_plantuml
-from use_case_model import Model, actor_map, case_map, inverse_relations, load_model
+from render_uml import render_plantuml
+from use_case_model import Model, actor_map, case_map, load_model
 
 ROOT: Final = Path(__file__).resolve().parents[1]
 REPORT_DIR: Final = ROOT / "docs" / "report"
-DIAGRAM_SOURCE_DIR: Final = REPORT_DIR / "diagrams"
 GENERATED_DIR: Final = REPORT_DIR / "generated"
-MARKDOWN_PATH: Final = REPORT_DIR / "use-cases.md"
 
 CASE_LAYOUTS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
     "overview": (
@@ -99,9 +97,7 @@ def plantuml_source(model: Model, diagram_id: str) -> str:
     vertical_direction = "right" if diagram_id == "overview" else "down"
     for row in layout:
         for left, right in pairwise(row):
-            lines.append(
-                f"  {_alias(left)} -[hidden]{horizontal_direction}- {_alias(right)}"
-            )
+            lines.append(f"  {_alias(left)} -[hidden]{horizontal_direction}- {_alias(right)}")
     for upper, lower in pairwise(layout):
         for upper_case, lower_case in zip(upper, lower, strict=False):
             lines.append(
@@ -141,197 +137,29 @@ def plantuml_source(model: Model, diagram_id: str) -> str:
     return "\n".join(lines)
 
 
-def _names(ids: list[str], names: dict[str, str]) -> str:
-    return "、".join(f"{identifier} {names[identifier]}" for identifier in ids) if ids else "无"
-
-
-def _list_text(values: list[str]) -> str:
-    return "；".join(values) if values else "无"
-
-
-def markdown_source(model: Model) -> str:
-    """Generate the complete course-report-grade use-case specification."""
-    cases = case_map(model)
-    actors = actor_map(model)
-    case_names = {identifier: case["name"] for identifier, case in cases.items()}
-    actor_names = {identifier: actor["name"] for identifier, actor in actors.items()}
-    included_by, specialized_by = inverse_relations(model)
-    lines = [
-        "# 数据备份系统用例模型",
-        "",
-        f"> 版本 {model['version']}；更新日期 {model['updated']}；创建人：{model['author']}。",
-        "",
-        "本文档由 `use-cases.yaml` 自动生成。算法是用例步骤或配置项；"
-        "只有参与者可感知、可复用或条件触发的行为才建模为独立用例。",
-        "",
-        "## 建模约定",
-        "",
-        "- `<<include>>` 表示基础用例无条件复用目标用例，箭头指向被包含用例。",
-        "- `<<extend>>` 表示满足条件时插入基础用例的扩展点，箭头指向基础用例。",
-        "- 空心三角箭头表示参与者或用例泛化；图中不使用普通依赖箭头。",
-        "- 总览图表达系统范围，专题图表达细化关系，避免把所有关系堆叠在一张图中。",
-        "",
-        "## 用例图",
-        "",
-    ]
-    captions = ["系统总览", "任务配置与执行", "浏览、恢复与维护"]
-    for diagram, caption in zip(model["diagrams"], captions, strict=True):
-        lines.extend(
-            [
-                f"### {caption}",
-                "",
-                f"![{diagram['title']}](generated/use-case-{diagram['id']}.svg)",
-                "",
-            ]
-        )
-    lines.extend(["## 参与者", "", "| 标识 | 参与者 | 类型 | 泛化自 |", "|---|---|---|---|"])
-    for actor in model["actors"]:
-        parent = actor.get("parent")
-        lines.append(
-            f"| {actor['id']} | {actor['name']} | {actor.get('stereotype', 'person')} | "
-            f"{actor_names[parent] if parent else '无'} |"
-        )
-    lines.extend(
-        [
-            "",
-            "## 用例关系说明",
-            "",
-            "| 关系 | 源用例 | 目标/基础用例 | 条件或含义 |",
-            "|---|---|---|---|",
-        ]
-    )
-    for case in model["use_cases"]:
-        for target in case["includes"]:
-            lines.append(
-                f"| include | {case['id']} {case['name']} | {target} {case_names[target]} "
-                "| 必须执行 |"
-            )
-        if case["extends"] is not None:
-            extension = case["extends"]
-            lines.append(
-                f"| extend | {case['id']} {case['name']} | {extension['base']} "
-                f"{case_names[extension['base']]} | {extension['condition']}；"
-                f"扩展点：{extension['point']} |"
-            )
-        if case["parent"] is not None:
-            lines.append(
-                f"| 泛化 | {case['id']} {case['name']} | {case['parent']} "
-                f"{case_names[case['parent']]} | 特化行为 |"
-            )
-    lines.extend(["", "## 用例描述", ""])
-    for case in model["use_cases"]:
-        extension = case["extends"]
-        relation_parts = [f"包含：{_names(case['includes'], case_names)}"]
-        relation_parts.append(f"被包含于：{_names(included_by[case['id']], case_names)}")
-        relation_parts.append(
-            "扩展：无"
-            if extension is None
-            else (
-                f"扩展 {extension['base']} {case_names[extension['base']]}"
-                f"（{extension['condition']}）"
-            )
-        )
-        relation_parts.append(
-            "泛化：无"
-            if case["parent"] is None
-            else f"泛化自 {case['parent']} {case_names[case['parent']]}"
-        )
-        if specialized_by[case["id"]]:
-            relation_parts.append(f"特化用例：{_names(specialized_by[case['id']], case_names)}")
-        metadata = [
-            ("用例标识", case["id"]),
-            ("用例名称", case["name"]),
-            ("创建人", model["author"]),
-            ("创建日期", model["updated"]),
-            ("语境目标", case["goal"]),
-            ("主参与者", actor_names.get(case["primary_actor"], case["primary_actor"])),
-            ("辅助参与者", _names(case["supporting_actors"], actor_names)),
-            ("触发器", case["trigger"]),
-            ("优先级", case["priority"]),
-            ("前置条件", _list_text(case["preconditions"])),
-            ("成功结束状态", case["success"]),
-            ("失败结束状态", case["failure"]),
-            ("用例关系", "；".join(relation_parts)),
-            ("扩展点", _list_text(case["extension_points"])),
-            ("关联 FR", "、".join(case["requirements"])),
-            ("关联 NFR", "、".join(case["nfr"])),
-            ("业务规则", _list_text(case["business_rules"])),
-            ("补充说明", case["notes"]),
-        ]
-        lines.extend([f"### {case['id']} {case['name']}", "", "| 字段 | 内容 |", "|---|---|"])
-        lines.extend(f"| {field} | {value.replace('|', '\\|')} |" for field, value in metadata)
-        lines.extend(["", "| 流程类型 | 步骤 | 执行者 | 动作/系统响应 |", "|---|---|---|---|"])
-        for step in case["basic_flow"]:
-            actor = actor_names.get(step["actor"], step["actor"])
-            lines.append(f"| 基本流程 | {step['id']} | {actor} | {step['action']} |")
-        for flow_type, branches in (
-            ("备选流程", case["alternative_flows"]),
-            ("异常流程", case["exception_flows"]),
-        ):
-            for branch in branches:
-                for index, action in enumerate(branch["steps"], 1):
-                    prefix = (
-                        f"从 {branch['from']} 分支；条件：{branch['condition']}。"
-                        if index == 1
-                        else ""
-                    )
-                    lines.append(
-                        f"| {flow_type} | {branch['id']}.{index} | 系统/参与者 | {prefix}{action} |"
-                    )
-        lines.append("")
-    lines.extend(["## 功能需求追踪矩阵", "", "| 功能需求 | 覆盖用例 |", "|---|---|"])
-    for number in range(1, 17):
-        requirement = f"FR-{number:02d}"
-        covering = [
-            case["id"] for case in model["use_cases"] if requirement in case["requirements"]
-        ]
-        lines.append(f"| {requirement} | {_names(covering, case_names)} |")
-    lines.extend(
-        [
-            "",
-            f"PlantUML 固定版本：{PLANTUML_VERSION}；SHA-256：`{PLANTUML_SHA256}`。",
-            "",
-        ]
-    )
-    return "\n".join(lines)
-
-
 def generate_artifacts(*, check: bool = False) -> None:
-    """Validate and write or compare all generated use-case artifacts."""
+    """Validate and write or compare images used by the Word report."""
     model = load_model()
-    expected_text: dict[Path, str] = {MARKDOWN_PATH: markdown_source(model)}
     expected_binary: dict[Path, bytes] = {}
     for diagram in model["diagrams"]:
         source = plantuml_source(model, diagram["id"])
         for line in source.splitlines():
             if "..>" in line and "<<include>>" not in line and "<<extend>>" not in line:
                 raise RuntimeError(f"ordinary dependency arrow is forbidden: {line}")
-        expected_text[DIAGRAM_SOURCE_DIR / f"use-case-{diagram['id']}.puml"] = source
-        expected_binary[GENERATED_DIR / f"use-case-{diagram['id']}.svg"] = render_plantuml(
-            source, "svg"
-        )
         expected_binary[GENERATED_DIR / f"use-case-{diagram['id']}.png"] = render_plantuml(
             source, "png"
         )
     if check:
         stale = [
             path
-            for path, value in expected_text.items()
-            if not path.exists() or path.read_text(encoding="utf-8") != value
-        ]
-        stale.extend(
-            path
             for path, value in expected_binary.items()
             if not path.exists() or path.read_bytes() != value
-        )
+        ]
         if stale:
             raise RuntimeError(
                 "generated artifacts are stale: " + ", ".join(str(path) for path in stale)
             )
         return
-    for path, value in expected_text.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(value, encoding="utf-8")
     for path, value in expected_binary.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(value)

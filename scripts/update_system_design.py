@@ -1,4 +1,4 @@
-"""Generate course-report design documents from docs/report/model.yaml."""
+"""Generate report design images from docs/report/model.yaml."""
 
 from __future__ import annotations
 
@@ -6,28 +6,18 @@ import argparse
 from pathlib import Path
 from typing import Final
 
-from render_uml import PLANTUML_SHA256, PLANTUML_VERSION, render_plantuml
+from render_uml import render_plantuml
 from system_design_model import (
     ClassDiagram,
     ComponentDiagram,
     Diagram,
-    Model,
     SequenceDiagram,
     load_model,
 )
 
 ROOT: Final = Path(__file__).resolve().parents[1]
 REPORT_DIR: Final = ROOT / "docs" / "report"
-SOURCE_DIR: Final = REPORT_DIR / "diagrams"
 GENERATED_DIR: Final = REPORT_DIR / "generated"
-VIEW_DOCUMENTS: Final = (
-    ("c1-system-context.md", "C1 系统上下文", ("system-context",)),
-    ("c2-containers.md", "C2 容器设计", ("container",)),
-    ("c3-backup-core.md", "C3 备份核心构件", ("component",)),
-    ("deployment.md", "部署视图", ("deployment",)),
-    ("dynamic.md", "动态交互视图", ("sequence",)),
-    ("logical-model.md", "逻辑类模型", ("logical-class",)),
-)
 
 
 def _common(title: str) -> list[str]:
@@ -83,16 +73,8 @@ def _class_source(diagram: ClassDiagram) -> str:
         "dependency": "..>",
     }
     for relation in diagram["relations"]:
-        left = (
-            f' "{relation["source_multiplicity"]}"'
-            if relation["source_multiplicity"]
-            else ""
-        )
-        right = (
-            f' "{relation["target_multiplicity"]}"'
-            if relation["target_multiplicity"]
-            else ""
-        )
+        left = f' "{relation["source_multiplicity"]}"' if relation["source_multiplicity"] else ""
+        right = f' "{relation["target_multiplicity"]}"' if relation["target_multiplicity"] else ""
         label = f" : {relation['label']}" if relation["label"] else ""
         lines.append(
             f"{relation['source']}{left} {symbols[relation['type']]}{right} "
@@ -179,7 +161,7 @@ def _component_source(diagram: ComponentDiagram) -> str:
             stereotype = f" <<{element['stereotype']}>>" if element["stereotype"] else ""
             lines.append(
                 f'  {declarations[element["type"]]} "{element["name"]}" as '
-                f'{element["id"]}{stereotype}'
+                f"{element['id']}{stereotype}"
             )
         lines.append("}")
     for element in diagram["elements"]:
@@ -187,8 +169,7 @@ def _component_source(diagram: ComponentDiagram) -> str:
             continue
         stereotype = f" <<{element['stereotype']}>>" if element["stereotype"] else ""
         lines.append(
-            f'{declarations[element["type"]]} "{element["name"]}" as '
-            f'{element["id"]}{stereotype}'
+            f'{declarations[element["type"]]} "{element["name"]}" as {element["id"]}{stereotype}'
         )
     for chain in diagram.get("layout_chains", []):
         for index in range(len(chain) - 1):
@@ -208,88 +189,23 @@ def plantuml_source(diagram: Diagram) -> str:
     return _component_source(diagram)
 
 
-def _trace_text(diagram: Diagram) -> str:
-    trace = diagram["trace"]
-    return (
-        f"用例：{'、'.join(trace['use_cases'])}；"
-        f"功能需求：{'、'.join(trace['requirements'])}；"
-        f"非功能需求：{'、'.join(trace['nfr'])}。"
-    )
-
-
-def markdown_source(model: Model, title: str, views: tuple[str, ...]) -> str:
-    """Build one design view from the canonical model."""
-    lines = [
-        f"# {title}",
-        "",
-        f"> 版本 {model['version']}；更新日期 {model['updated']}。",
-        "",
-        "本文档由 `model.yaml` 生成，仅用于课程报告；"
-        "项目架构见[架构入口](../architecture/README.md)。",
-        "",
-    ]
-    figure = 1
-    for diagram in model["diagrams"]:
-        if diagram["view"] in views:
-            lines.extend(
-                [
-                    f"## {diagram['title']}",
-                    "",
-                    f"![{diagram['title']}](generated/system-{diagram['id']}.svg)",
-                    "",
-                    f"图 {figure} {diagram['title']}",
-                    "",
-                    diagram["purpose"],
-                    "",
-                    "| 元素 | 职责 |",
-                    "|---|---|",
-                ]
-            )
-            lines.extend(
-                f"| {row['element']} | {row['responsibility']} |"
-                for row in diagram["responsibilities"]
-            )
-            lines.extend(["", "关系与交互说明：", ""])
-            lines.extend(f"- {detail}" for detail in diagram["details"])
-            lines.extend(["", "关键约束：", ""])
-            lines.extend(f"- {constraint}" for constraint in diagram["constraints"])
-            lines.extend(["", f"追踪关系：{_trace_text(diagram)}", ""])
-            figure += 1
-    lines.extend([f"PlantUML 固定版本：{PLANTUML_VERSION}；SHA-256：`{PLANTUML_SHA256}`。", ""])
-    return "\n".join(lines)
-
-
 def generate_artifacts(*, check: bool = False) -> None:
-    """Validate and write or compare all generated design artifacts."""
+    """Validate and write or compare images used by the Word report."""
     model = load_model()
-    expected_text: dict[Path, str] = {
-        REPORT_DIR / filename: markdown_source(model, title, views)
-        for filename, title, views in VIEW_DOCUMENTS
-    }
     expected_binary: dict[Path, bytes] = {}
     for diagram in model["diagrams"]:
         source = plantuml_source(diagram)
         stem = f"system-{diagram['id']}"
-        expected_text[SOURCE_DIR / f"{stem}.puml"] = source
-        expected_binary[GENERATED_DIR / f"{stem}.svg"] = render_plantuml(source, "svg")
         expected_binary[GENERATED_DIR / f"{stem}.png"] = render_plantuml(source, "png")
     if check:
         stale = [
             path
-            for path, value in expected_text.items()
-            if not path.exists() or path.read_text(encoding="utf-8") != value
-        ]
-        stale.extend(
-            path
             for path, value in expected_binary.items()
             if not path.exists() or path.read_bytes() != value
-        )
+        ]
         if stale:
             raise RuntimeError("generated artifacts are stale: " + ", ".join(map(str, stale)))
         return
-    for path, value in expected_text.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(value, encoding="utf-8")
     for path, value in expected_binary.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(value)

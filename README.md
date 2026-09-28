@@ -24,7 +24,7 @@
 
 核心闭环稳定后，候选扩展将支持 WebDAV 和 S3 兼容对象存储。移动端、文件实时同步和多用户协作暂不纳入当前版本。
 
-课程报告采用内容定义分块、块级 Zstandard 压缩、可选 XChaCha20-Poly1305 认证加密及不可变 pack 的设计方案，详见[报告素材中的 ADR-0008](docs/report/decisions/0008-data-transformation.md)。实际实现以代码和技术验证结果为准。
+课程报告采用内容定义分块、块级 Zstandard 压缩、可选 XChaCha20-Poly1305 认证加密及不可变 pack 的设计方案。实际实现以代码和技术验证结果为准。
 
 ## 技术方向
 
@@ -38,7 +38,7 @@
 ## 文档
 
 - [项目架构 C1/C2](docs/architecture/README.md)
-- [课程报告资料、需求、用例与设计图](docs/report/README.md)
+- [课程报告资料](docs/report/README.md)
 - 实验报告：本地 `docs/report/report.docx`（不纳入 Git）
 
 实验报告以当前 `docs/report/report.docx` 为直接排版基准；`docs/report/report.template.docx` 只保留为课程样式参考。
@@ -49,8 +49,8 @@ uv run scripts/update_report.py
 ```
 
 报告用例模型以 `docs/report/use-cases.yaml` 为来源，报告逻辑设计以
-`docs/report/model.yaml` 为来源。上述命令会同步生成 Markdown、PlantUML、
-SVG、PNG，以及 Word 中的需求与系统设计章节。可分别运行
+`docs/report/model.yaml` 为来源。上述命令会同步生成报告使用的 PNG，
+以及 Word 中的需求与系统设计章节。可分别运行
 `uv run scripts/update_use_cases.py --check` 和
 `uv run scripts/update_system_design.py --check` 检查生成内容是否漂移。完整报告资料检查使用 `uv run scripts/check.py --report`。
 

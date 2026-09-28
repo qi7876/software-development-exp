@@ -1,10 +1,10 @@
 # 课程报告资料
 
-此目录只保存撰写 `report.docx` 所需的资料、模型和生成物，不作为项目实现规范。项目当前架构见 [docs/architecture](../architecture/README.md)，开发与使用方式见根目录 [README](../../README.md)。
+此目录只保存撰写 `report.docx` 所需的输入和图像，不作为项目实现规范。项目当前架构见 [docs/architecture](../architecture/README.md)，开发与使用方式见根目录 [README](../../README.md)。
 
-- [产品需求与界面原型](product-requirements.md)、[用例模型](use-cases.md)及其结构化来源 `use-cases.yaml`
-- 由 `model.yaml` 生成的 C1、C2、C3、部署、动态交互和[逻辑类图](logical-model.md)等课程设计视图
-- [ADR-0001](decisions/0001-macos-first.md)、[ADR-0008](decisions/0008-data-transformation.md)、[ADR-0009](decisions/0009-file-selection.md)等报告素材
-- `diagrams/` 中的 PlantUML 源文件、`generated/` 中的图像、报告排版基准 `report.docx` 与课程样式参考 `report.template.docx`；两份 Word 文件仅存本地，不纳入 Git
+- `use-cases.yaml`：报告中的参与者、用例、流程和需求追踪来源。
+- `model.yaml`：报告中的构件图、类图、时序图及其说明来源。
+- `generated/`：报告实际引用的 PNG 图像。图像由上述模型生成，纳入 Git 以便检查漂移。
+- `report.docx`：当前报告与排版基准；`report.template.docx`：课程样式参考。两份 Word 文件仅存本地，不纳入 Git。
 
-修改结构化模型后运行 `uv run scripts/update_report.py` 同步报告；只检查报告资料时运行 `uv run scripts/check.py --report`。报告生成器只替换需求分析和系统设计目标区域，不重排封面。
+修改结构化模型后运行 `uv run scripts/update_report.py` 同步图像和报告；检查用例图、设计图及报告生成逻辑时运行 `uv run scripts/check.py --report`。报告生成器只替换需求分析和系统设计目标区域，不重排封面。早期需求细稿、ADR 和可再生的视图文档已从当前目录移除，需要追溯时可查 Git 历史。
