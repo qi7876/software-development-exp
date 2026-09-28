@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 
@@ -11,7 +12,7 @@ def _run(command: list[str]) -> None:
     subprocess.run(command, check=True)
 
 
-def main() -> None:
+def main(*, report: bool = False) -> None:
     _run(["cargo", "fmt", "--all", "--check"])
     _run(
         [
@@ -29,13 +30,17 @@ def main() -> None:
     _run(["cargo", "build", "--workspace", "--all-targets"])
     _run(["uv", "run", "ruff", "check", "."])
     _run(["uv", "run", "basedpyright"])
-    _run(["uv", "run", "python", "-m", "unittest", "discover", "-s", "tests"])
-    _run(["uv", "run", "scripts/update_use_cases.py", "--check"])
-    _run(["uv", "run", "scripts/update_system_design.py", "--check"])
+    if report:
+        _run(["uv", "run", "python", "-m", "unittest", "discover", "-s", "docs/report/tests"])
+        _run(["uv", "run", "scripts/update_use_cases.py", "--check"])
+        _run(["uv", "run", "scripts/update_system_design.py", "--check"])
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--report", action="store_true", help="also check course-report artifacts")
+    arguments = parser.parse_args()
     try:
-        main()
+        main(report=arguments.report)
     except subprocess.CalledProcessError as error:
         sys.exit(error.returncode)

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Literal, NotRequired, TypedDict, cast
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL_PATH = ROOT / "docs" / "c4" / "model.yaml"
+MODEL_PATH = ROOT / "docs" / "report" / "model.yaml"
 FR_IDS = {f"FR-{index:02d}" for index in range(1, 17)}
 NFR_IDS = {f"NFR-{index:02d}" for index in range(1, 14)}
 UC_IDS = {
@@ -32,12 +32,10 @@ class DiagramBase(TypedDict):
     id: str
     title: str
     view: Literal[
-        "system-context",
         "container",
         "component",
         "logical-class",
         "sequence",
-        "deployment",
     ]
     purpose: str
     responsibilities: list[Responsibility]
@@ -208,24 +206,22 @@ def _validate_component(diagram: ComponentDiagram) -> None:
 def validate_model(model: Model) -> None:
     """Reject incomplete diagrams, dangling references, and traceability gaps."""
     diagrams = model.get("diagrams", [])
-    if len(diagrams) != 9:
-        raise ValueError("docs/c4/model.yaml must define exactly nine diagrams")
+    if len(diagrams) != 7:
+        raise ValueError("docs/report/model.yaml must define exactly seven diagrams")
     ids = [diagram.get("id", "") for diagram in diagrams]
     if len(ids) != len(set(ids)):
         raise ValueError("diagram IDs must be unique")
-    expected_kinds = {"class": 2, "sequence": 3, "component": 4}
+    expected_kinds = {"class": 2, "sequence": 3, "component": 2}
     actual_kinds = {
         kind: sum(diagram["kind"] == kind for diagram in diagrams) for kind in expected_kinds
     }
     if actual_kinds != expected_kinds:
         raise ValueError(f"expected diagram mix {expected_kinds}, got {actual_kinds}")
     expected_views = {
-        "system-context": 1,
         "container": 1,
         "component": 1,
         "logical-class": 2,
         "sequence": 3,
-        "deployment": 1,
     }
     actual_views = {
         view: sum(diagram["view"] == view for diagram in diagrams) for view in expected_views
@@ -259,7 +255,7 @@ def load_model(path: Path = MODEL_PATH) -> Model:
     """Read JSON-formatted YAML 1.2 and validate all cross references."""
     raw = cast(Any, json.loads(path.read_text(encoding="utf-8")))
     if not isinstance(raw, dict):
-        raise ValueError("docs/c4/model.yaml must contain an object")
+        raise ValueError("docs/report/model.yaml must contain an object")
     model = cast(Model, raw)
     validate_model(model)
     return model

@@ -11,7 +11,7 @@ from shutil import copy2
 from docx import Document
 from docx.table import _Cell  # pyright: ignore[reportPrivateUsage]
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from update_report import REPORT_PATH, synchronize_report  # noqa: E402
@@ -43,6 +43,8 @@ def _protected_prefix(path: Path) -> tuple[bytes, ...]:
 
 class ReportPreservationTests(unittest.TestCase):
     def test_sync_preserves_cover_and_front_matter(self) -> None:
+        if not REPORT_PATH.is_file():
+            self.skipTest("local report.docx is ignored by Git and is not present")
         with tempfile.TemporaryDirectory() as directory:
             temporary_report = Path(directory) / "report.docx"
             copy2(REPORT_PATH, temporary_report)

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, NotRequired, TypedDict, cast
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL_PATH = ROOT / "docs" / "requirements" / "use-cases.yaml"
+MODEL_PATH = ROOT / "docs" / "report" / "use-cases.yaml"
 FR_IDS = {f"FR-{index:02d}" for index in range(1, 17)}
 
 
