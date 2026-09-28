@@ -41,8 +41,6 @@
 - [用例模型](docs/architecture/use-cases.md)
 - [界面原型](docs/architecture/ui-wireframes.md)
 - [架构与逻辑系统设计](docs/architecture/README.md)
-- [Rust 开发环境](docs/architecture/environment.md)
-- [开发计划](docs/architecture/roadmap.md)
 - [决策记录](docs/architecture/README.md#架构决策记录)
 - [实验报告](docs/report.docx)
 
@@ -59,29 +57,59 @@ SVG、PNG，以及 Word 中的需求与系统设计章节。可分别运行
 `uv run scripts/update_use_cases.py --check` 和
 `uv run scripts/update_system_design.py --check` 检查生成内容是否漂移。
 
-提交前运行完整本地 CI：
+## 开发环境
+
+当前在 macOS Apple Silicon 上开发，使用 zsh、Apple Command Line Tools 和 LLDB；Intel Mac 在发布阶段补充验证。`rust-toolchain.toml` 固定 Rust 1.98.0、Clippy 和 rustfmt，`Cargo.lock` 固定依赖解析。Rust 2024 edition 用于产品代码；Python 3.12 与 uv 只用于需求、UML 和 Word 报告生成，不进入产品运行时。
+
+Rust workspace 包含 `data-backup-core`、`data-backup-protocol`、`data-backup-daemon` 和 `data-backup-cli`。常用命令：
 
 ```shell
+cargo build --workspace --all-targets
+cargo test --workspace --all-targets
+cargo run -p data-backup-cli -- check
+cargo run -p data-backup-daemon -- check
 uv run scripts/check.py
 ```
 
-Rust workspace 包含 `data-backup-core`、`data-backup-protocol`、`data-backup-daemon` 和
-`data-backup-cli`。当前可运行框架自检：
+当前依赖 `clap` 解析命令，`serde`/`serde_json` 定义传输无关的状态类型，`thiserror` 表达核心错误，`tracing`/`tracing-subscriber` 向标准错误输出诊断。JSON 自检不代表最终 IPC 已选定 JSON。本阶段不引入异步运行时、SQLite、压缩、加密和远程存储库；在对应业务能力和 ADR 明确后再加入。
+
+调试 Rust 二进制使用 LLDB，未捕获 panic 可用 `RUST_BACKTRACE=1` 查看调用栈；业务错误通过 `Result` 返回。性能分析先用 `/usr/bin/time -l` 建立基线，再按需要用 samply、cargo-flamegraph 或 Xcode Instruments 定位 CPU、内存和 I/O 热点。`profiling` profile 继承 release 优化并保留调试符号：
 
 ```shell
-cargo run -p data-backup-cli -- check
-cargo run -p data-backup-daemon -- check
+cargo build --profile profiling --workspace
+samply record ./target/profiling/data-backup check
+cargo flamegraph --profile profiling -p data-backup-cli --bin data-backup -- check
 ```
 
-## 开发阶段
+采样工具可通过 `cargo install --locked samply --version 0.13.1` 和 `cargo install --locked flamegraph --version 0.6.13` 安装。发布构建使用 `cargo build --release --workspace` 并人工验收；桌面应用打包、自启动和签名将在桌面壳 ADR 确定后补充。
 
-1. 需求分析与验收标准
-2. 架构验证与技术选型
-3. MVP 迭代实现
-4. 系统测试与恢复演练
-5. 发布、运维与反馈闭环
+## 开发计划
 
-进入下一阶段的条件、迭代 backlog 和交付路线见[开发计划](docs/architecture/roadmap.md)。
+项目按单人、小批量迭代推进，不设置固定日历期限。同一时间只保留一个主要目标；先明确验收标准，再交付可运行增量。恢复正确性、格式兼容和删除安全优先于功能数量。
+
+```mermaid
+flowchart LR
+    I0[需求基线与架构探针] --> I1[筛选与本地备份]
+    I1 --> I2[压缩加密与恢复]
+    I2 --> I3[增量与保留策略]
+    I3 --> I4[Daemon / CLI / GUI]
+    I4 --> I5[macOS 发布质量]
+    I3 -.核心稳定后.-> IX[候选扩展<br/>WebDAV / S3]
+```
+
+| 迭代 | 可交付增量 | 完成定义 |
+|---|---|---|
+| 0 架构风险 | 仓库格式、分块与加密管线、故障探针 | 随机恢复、元数据保密、认证失败、原子提交和崩溃清理得到验证 |
+| 1 本地备份 | 扫描、筛选预览、对象写入、快照清单和基础 CLI | 结果可解释，重复执行不重复存储内容 |
+| 2 恢复 | 压缩、认证加密、校验、浏览和恢复 | 完成备份—破坏源—恢复—哈希核对；错误口令不输出文件 |
+| 3 长期使用 | 增量、保留和垃圾回收 | 清理后保留快照仍可校验和恢复 |
+| 4 桌面闭环 | 守护进程、调度、本地 API、GUI 和通知 | GUI 关闭时计划仍执行，核心用例可从 GUI 完成 |
+| 5 发布质量 | 安装、升级、自启动、诊断和性能验证 | macOS 发布验收通过 |
+| 候选远程目标 | WebDAV 或 S3 适配器 | 网络中断可恢复，未完成上传不产生有效快照 |
+
+当前迭代聚焦 Must 需求评审、macOS 文件元数据恢复预期、仓库格式及 ADR-0008/0009 技术探针，并用大小文件数据集验证中断安全。完成条件是关键选择有可复现证据，仓库探针能写入、提交、发现并清理未完成快照，下一迭代的验收标准明确。
+
+业务闭环稳定后，优先以纯逻辑单元或属性测试检查规则、清单和保留不变量，以临时文件系统集成测试覆盖备份、校验和恢复。故障注入覆盖读取失败、空间不足、目标断开与进程中断；端到端测试只覆盖关键路径。快照格式进入可用版本后，变更需兼容读取或迁移方案；删除、垃圾回收和覆盖恢复在发布前安排独立评审。
 
 ## 状态
 

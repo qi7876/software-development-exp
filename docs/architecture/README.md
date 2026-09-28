@@ -1,13 +1,14 @@
 # 数据备份系统架构视图
 
-本目录统一收纳需求、界面设计、架构、开发资料和技术决策。用例模型位于 `use-cases.yaml`，系统设计模型位于 `model.yaml`；对应的 Markdown、PlantUML 源文件、SVG 和 PNG 由 `uv run scripts/update_use_cases.py` 与 `uv run scripts/update_system_design.py` 生成，不手工修改。
+本目录统一收纳需求、界面设计、架构视图和技术决策；开发环境与计划见项目根目录的 [README](../../README.md)。用例模型位于 `use-cases.yaml`，系统设计模型位于 `model.yaml`；对应的 Markdown、PlantUML 源文件、SVG 和 PNG 由 `uv run scripts/update_use_cases.py` 与 `uv run scripts/update_system_design.py` 生成，不手工修改。
 
 ## 文档入口
 
 - [产品需求](product-requirements.md)与[用例模型](use-cases.md)
 - [界面低保真原型](ui-wireframes.md)
-- [系统设计与图表](system-design.md)
-- [开发环境](environment.md)与[开发计划](roadmap.md)
+- 长期维护：[C1 系统上下文](c1-system-context.md)与[C2 容器](c2-containers.md)
+- 按需维护：[C3 备份核心构件](c3-backup-core.md)、[部署视图](deployment.md)与[动态交互视图](dynamic.md)
+- 课程设计基线：[逻辑类模型](logical-model.md)
 
 ## 架构决策记录
 
@@ -31,7 +32,7 @@ ADR 保留重要且难以逆转的技术选择、背景及验证方式，文件�
 | Dynamic / Sequence | 配置任务、执行备份、浏览与恢复 | 关键交互需要说明时更新 |
 | Logical class | 领域模型及服务接口 | 保留课程设计基线，代码落地后不逐项同步 |
 
-完整图表和逐图说明见[系统设计文档](system-design.md)。现有九张图是设计与课程报告基线，不代表以后每次代码变更都要同步九张图。当前项目尚未处于包含多个同级软件系统的企业环境，因此不建立 System Landscape；状态机、ER、流程图和数据流图将在出现需要单独解释的复杂状态、持久化模型或算法后按需增加。
+各视图文档包含对应图表和说明。现有九张图是设计与课程报告基线，不代表以后每次代码变更都要同步九张图。当前项目尚未处于包含多个同级软件系统的企业环境，因此不建立 System Landscape；状态机、ER、流程图和数据流图将在出现需要单独解释的复杂状态、持久化模型或算法后按需增加。
 
 ## 一致性边界
 
@@ -40,6 +41,8 @@ ADR 保留重要且难以逆转的技术选择、背景及验证方式，文件�
 - C3 明确核心内部职责、端口及适配器，对应构件测试。
 - C4 由代码和单元测试维护，不复制容易漂移的代码结构。
 - 所有层级都继承原子快照、认证恢复、错误透明和敏感信息不落日志的约束。
+
+当前模型不决定桌面外壳、本地 IPC 形式或具体 Rust 类型布局。压缩、加密、打包和仓库访问经策略或端口替换，读取端依据版本化元数据识别算法。文本密钥文件只保存认证加密后的主密钥及 KDF 参数，不保存口令或明文主密钥。
 
 ## 代码框架映射
 
