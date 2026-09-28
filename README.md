@@ -31,9 +31,9 @@
 - Rust：备份核心、守护进程、CLI。
 - Svelte + TypeScript：桌面 GUI。
 - SQLite：任务元数据、快照索引和运行历史。
-- PlantUML 1.2026.8：标准 UML 用例图、构件图、类图和顺序图；Mermaid：线框图。
+- Mermaid：项目架构中的简明视图；PlantUML 1.2026.8：课程报告所需的 UML 图。
 
-桌面壳、快照存储格式及 RPC 方案将在架构验证阶段通过 ADR 决定，不在需求阶段过早锁定。
+桌面壳、快照存储格式及 RPC 方案将在技术验证后决定，不在当前框架阶段过早锁定。
 
 ## 文档
 
@@ -42,7 +42,7 @@
 - 实验报告：本地 `docs/report/report.docx`（不纳入 Git）
 
 实验报告以当前 `docs/report/report.docx` 为直接排版基准；`docs/report/report.template.docx` 只保留为课程样式参考。
-需求或设计文档更新后，运行：
+报告素材更新后，运行：
 
 ```shell
 uv run scripts/update_report.py
@@ -52,7 +52,7 @@ uv run scripts/update_report.py
 `docs/report/model.yaml` 为来源。上述命令会同步生成 Markdown、PlantUML、
 SVG、PNG，以及 Word 中的需求与系统设计章节。可分别运行
 `uv run scripts/update_use_cases.py --check` 和
-`uv run scripts/update_system_design.py --check` 检查生成内容是否漂移。
+`uv run scripts/update_system_design.py --check` 检查生成内容是否漂移。完整报告资料检查使用 `uv run scripts/check.py --report`。
 
 ## 开发环境
 
@@ -68,7 +68,7 @@ cargo run -p data-backup-daemon -- check
 uv run scripts/check.py
 ```
 
-当前依赖 `clap` 解析命令，`serde`/`serde_json` 定义传输无关的状态类型，`thiserror` 表达核心错误，`tracing`/`tracing-subscriber` 向标准错误输出诊断。JSON 自检不代表最终 IPC 已选定 JSON。本阶段不引入异步运行时、SQLite、压缩、加密和远程存储库；在对应业务能力和 ADR 明确后再加入。
+当前依赖 `clap` 解析命令，`serde`/`serde_json` 定义传输无关的状态类型，`thiserror` 表达核心错误，`tracing`/`tracing-subscriber` 向标准错误输出诊断。JSON 自检不代表最终 IPC 已选定 JSON。本阶段不引入异步运行时、SQLite、压缩、加密和远程存储库；在对应业务能力及技术选择明确后再加入。
 
 调试 Rust 二进制使用 LLDB，未捕获 panic 可用 `RUST_BACKTRACE=1` 查看调用栈；业务错误通过 `Result` 返回。性能分析先用 `/usr/bin/time -l` 建立基线，再按需要用 samply、cargo-flamegraph 或 Xcode Instruments 定位 CPU、内存和 I/O 热点。`profiling` profile 继承 release 优化并保留调试符号：
 
@@ -78,7 +78,7 @@ samply record ./target/profiling/data-backup check
 cargo flamegraph --profile profiling -p data-backup-cli --bin data-backup -- check
 ```
 
-采样工具可通过 `cargo install --locked samply --version 0.13.1` 和 `cargo install --locked flamegraph --version 0.6.13` 安装。发布构建使用 `cargo build --release --workspace` 并人工验收；桌面应用打包、自启动和签名将在桌面壳 ADR 确定后补充。
+采样工具可通过 `cargo install --locked samply --version 0.13.1` 和 `cargo install --locked flamegraph --version 0.6.13` 安装。发布构建使用 `cargo build --release --workspace` 并人工验收；桌面应用打包、自启动和签名将在桌面壳选型后补充。
 
 ## 开发计划
 
@@ -104,7 +104,7 @@ flowchart LR
 | 5 发布质量 | 安装、升级、自启动、诊断和性能验证 | macOS 发布验收通过 |
 | 候选远程目标 | WebDAV 或 S3 适配器 | 网络中断可恢复，未完成上传不产生有效快照 |
 
-当前迭代聚焦 Must 需求评审、macOS 文件元数据恢复预期、仓库格式及 ADR-0008/0009 技术探针，并用大小文件数据集验证中断安全。完成条件是关键选择有可复现证据，仓库探针能写入、提交、发现并清理未完成快照，下一迭代的验收标准明确。
+当前迭代聚焦本地备份需求、macOS 文件元数据恢复预期、仓库格式、数据管线与筛选规则技术探针，并用大小文件数据集验证中断安全。完成条件是关键选择有可复现证据，仓库探针能写入、提交、发现并清理未完成快照，下一迭代的验收标准明确。
 
 业务闭环稳定后，优先以纯逻辑单元或属性测试检查规则、清单和保留不变量，以临时文件系统集成测试覆盖备份、校验和恢复。故障注入覆盖读取失败、空间不足、目标断开与进程中断；端到端测试只覆盖关键路径。快照格式进入可用版本后，变更需兼容读取或迁移方案；删除、垃圾回收和覆盖恢复在发布前安排独立评审。
 
@@ -116,7 +116,7 @@ flowchart LR
 - [x] 建立 C1、C2 项目架构视图；课程报告图表独立存放
 - [ ] 评审并冻结其余需求基线
 - [x] 确认 macOS 为首发平台
-- [ ] 完成架构原型和 ADR
+- [ ] 完成仓库格式等关键技术探针
 - [x] 初始化 Rust 多 crate 工程并通过统一编译
 - [ ] 初始化可选的 Svelte 桌面界面
 
@@ -124,7 +124,7 @@ flowchart LR
 
 ## 协作与验证
 
-从最新 `main` 创建短期分支，通过 PR 审查并以 squash merge 合入。当前优先验证可运行框架、自检命令和文档生成；业务闭环稳定后，再围绕备份、校验、恢复等外部行为和关键不变量逐步补充测试。明确的 bug 可先写回归测试，探索性工作不强制 TDD。
+从最新 `main` 创建短期分支，通过 PR 审查并以 squash merge 合入。当前优先验证可运行框架和自检命令，报告生成单独检查；业务闭环稳定后，再围绕备份、校验、恢复等外部行为和关键不变量逐步补充测试。明确的 bug 可先写回归测试，探索性工作不强制 TDD。
 
 远端仓库为 `qi7876/software-development-exp`，目前没有 GitHub Actions 工作流，因此只维护本地 CI，不配置 CD。课程报告以 `docs/report/report.docx` 为直接排版基准，生成器只修改需求分析和系统设计目标区域。
 
