@@ -308,3 +308,6 @@ Backups.backupdb
 MobileBackups.trash
 tmbootpicker.efi
 .DS_Store
+
+# Local server configuration contains the API secret
+/data-backup.json
