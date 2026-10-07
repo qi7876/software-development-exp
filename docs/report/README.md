@@ -2,6 +2,8 @@
 
 此目录只保存撰写 `report.docx` 所需的输入和图像，不作为项目实现规范。项目当前架构见 [docs/architecture](../architecture/README.md)，开发与使用方式见根目录 [README](../../README.md)。
 
+报告模型保留早期的 core / daemon / CLI / GUI 预设设计。当前实现已改为单一服务器二进制、内置 Web 控制台和 secret key 认证的 HTTP API；报告素材尚未同步此架构变更。
+
 - `use-cases.yaml`：报告中的参与者、用例、流程和需求追踪来源。
 - `model.yaml`：报告中的构件图、类图、时序图及其说明来源。
 - `generated/`：报告实际引用的 PNG 图像。图像由上述模型生成，纳入 Git 以便检查漂移。

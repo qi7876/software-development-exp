@@ -20,8 +20,14 @@ pub(crate) enum ConfigError {
         source: std::io::Error,
     },
     // Do not include serde's source: malformed values can contain the secret.
-    #[error("invalid configuration {path}: expected JSON with listen (IP:port) and secret_key")]
-    Parse { path: PathBuf },
+    #[error(
+        "invalid configuration {path} at line {line}, column {column}: expected JSON with listen (IP:port) and secret_key"
+    )]
+    Parse {
+        path: PathBuf,
+        line: usize,
+        column: usize,
+    },
     #[error(
         "secret_key must be non-empty and contain only visible ASCII characters without spaces"
     )]
@@ -36,8 +42,11 @@ impl Config {
             path: path.clone(),
             source,
         })?;
-        let config: Self =
-            serde_json::from_slice(&bytes).map_err(|_| ConfigError::Parse { path })?;
+        let config: Self = serde_json::from_slice(&bytes).map_err(|source| ConfigError::Parse {
+            path,
+            line: source.line(),
+            column: source.column(),
+        })?;
         config.validate()?;
         Ok(config)
     }

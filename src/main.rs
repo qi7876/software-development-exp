@@ -1,6 +1,7 @@
 //! The single Data Backup process: HTTP API, web console, and backup services.
 
 mod config;
+pub mod domain;
 mod server;
 
 use std::{error::Error, process::ExitCode};
@@ -10,6 +11,7 @@ async fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_target(false)
+        .with_ansi(false)
         .init();
 
     match run().await {
@@ -36,10 +38,10 @@ async fn run() -> Result<(), Box<dyn Error>> {
                 format!("cannot listen on {}: {error}", config.listen),
             )
         })?;
-    tracing::info!(address = %listener.local_addr()?, "web console and API listening");
     // Install fallible signal handlers before serving, so failures reach main.
     let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    tracing::info!(address = %listener.local_addr()?, "web console and API listening");
     axum::serve(listener, server::router(config))
         .with_graceful_shutdown(async move {
             tokio::select! {

@@ -159,3 +159,30 @@ fn removed_cli_subcommands_fail() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("accepts no arguments"));
 }
+
+#[test]
+fn missing_configuration_fails_with_the_path() {
+    let config = TestConfig::new("{}");
+    let mut command = config.command();
+    let path = config.0.clone();
+    drop(config);
+    let output = command.output().expect("start binary");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot read configuration"));
+    assert!(stderr.contains(path.to_str().expect("UTF-8 test path")));
+}
+
+#[test]
+fn occupied_address_fails_with_the_address() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve address");
+    let address = listener.local_addr().expect("reserved address");
+    let config = TestConfig::new(&format!(
+        r#"{{"listen":"{address}","secret_key":"do-not-log-this"}}"#
+    ));
+    let output = config.command().output().expect("start binary");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(&format!("cannot listen on {address}")));
+    assert!(!stderr.contains("do-not-log-this"));
+}

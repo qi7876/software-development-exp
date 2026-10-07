@@ -104,7 +104,11 @@ mod tests {
 
     #[tokio::test]
     async fn api_requires_a_single_correct_bearer_key() {
-        for path in ["/api/status", "/api/unknown"] {
+        for path in [
+            "/api/status",
+            "/api/unknown",
+            "/api/status?secret_key=test-secret",
+        ] {
             for authorization in [
                 None,
                 Some("Bearer wrong"),
@@ -128,6 +132,13 @@ mod tests {
             .uri("/api/status")
             .header(header::AUTHORIZATION, "Bearer test-secret")
             .header(header::AUTHORIZATION, "Bearer wrong")
+            .body(Body::empty())
+            .expect("valid request");
+        let response = app().oneshot(request).await.expect("router must respond");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/status")
             .body(Body::empty())
             .expect("valid request");
         let response = app().oneshot(request).await.expect("router must respond");
