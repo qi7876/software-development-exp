@@ -21,8 +21,9 @@ C1、C2 当前描述待实现的目标设计。最小闭环已确认：单个本
 ## 文档与示例
 
 - [项目架构入口](docs/architecture/README.md)：C1、C2 和当前设计讨论。
+- [HTTP API 契约草案](docs/http-api.md)：异步运行查询、中止、备份与恢复请求及错误规则，尚未实现。
 - [课程报告资料](docs/report/README.md)：上一阶段的需求与设计快照，包含 20 个用例；其中实现状态不代表当前代码。
-- [示例工作目录](working-directory-example/config.json)：保留拟定的 `listen`、`secret_key` 配置样例，当前程序尚不读取它。示例 key 为公开本地测试值。
+- [示例工作目录](working-directory-example/config.json)：拟定的监听地址、API key 和控制台下载配置；下载链接为占位值，示例 key 为公开本地测试值，当前程序尚不读取它。
 
 示例目录仅将 `config.json` 纳入 Git，其他测试数据和运行产物均忽略；其他目录的自用 `config.json` 默认忽略。本地 `docs/report/report.docx` 及模板继续保留，不纳入 Git。报告工具的使用见报告目录说明。
 
@@ -41,7 +42,7 @@ uv run scripts/check.py
 
 ## 后续小步骤
 
-接下来确认最小 HTTP API 与配置边界。之后由项目作者逐步实现版本和帮助参数、工作目录与配置读取、最小 HTTP 服务、API 认证与控制台，再进入本地备份和恢复。每步明确输入、输出和失败行为，验证后再继续下一步。
+备份与恢复的异步返回方式、运行途中可发起中止已确认，接下来评审 HTTP API 和控制台下载配置草案。之后由项目作者逐步实现版本和帮助参数、工作目录与配置读取、最小 HTTP 服务、API 认证与控制台，再进入本地备份和恢复。每步明确输入、输出和失败行为，验证后再继续下一步。
 
 ## License
 
