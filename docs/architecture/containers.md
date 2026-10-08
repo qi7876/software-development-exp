@@ -1,21 +1,26 @@
 # C2 容器
 
-当前 workspace 有两个可运行程序和两个共享库。CLI 与 daemon 现在只提供版本信息和 JSON 框架自检；本地 IPC、调度服务、SQLite、备份存储和桌面 GUI 尚未实现。
+产品只发布一个 `data-backup` 二进制。唯一的产品服务进程加载配置并运行 Axum/Tokio HTTP 服务器；Web 控制台的 HTML 与 JavaScript 编译进二进制，没有独立前端服务、CLI、daemon 可执行文件或共享协议 crate。
 
 ```mermaid
 flowchart LR
-    CLI[CLI · Rust 可执行程序] --> Core[备份核心 · Rust 库]
-    Daemon[后台进程 · Rust 可执行程序] --> Core
-    CLI --> Protocol[协议类型 · Rust 库]
-    Daemon --> Protocol
-    Core --> Protocol
+    Browser[浏览器 · 内置 Web 控制台] -->|HTTP · HTML / JavaScript| Server[data-backup · Rust / Axum / Tokio]
+    Browser -->|HTTP JSON · Bearer key| Server
+    Curl[curl / 自动化客户端] -->|HTTP JSON · Bearer key| Server
+    Config[JSON 配置文件] -->|启动时读取| Server
+    Server -.->|后续：读取| Source[源文件系统]
+    Server -.->|后续：快照与恢复| Repository[本地或已挂载存储]
+    Server -.->|后续：任务与运行记录| Metadata[SQLite 元数据]
 ```
 
-| 单元 | 当前职责 | 后续边界 |
+| 运行单元 | 当前职责 | 后续能力 |
 |---|---|---|
-| `data-backup-cli` | 解析命令并输出自检结果。 | 管理任务、触发备份与恢复；与 daemon 的通信方式待定。 |
-| `data-backup-daemon` | 提供后台进程入口与自检结果。 | 承担调度和长时间运行的任务，GUI 退出后继续执行。 |
-| `data-backup-core` | 定义领域标识、错误、协议版本检查及模块边界。 | 实现扫描、筛选、快照、校验与恢复，共供 CLI 和 daemon 使用。 |
-| `data-backup-protocol` | 定义版本化、传输无关的共享状态类型。 | 承载进程间接口契约；具体 IPC 形式尚未选择。 |
+| `data-backup` | 读取 `listen` 与 `secret_key` 配置；提供控制台、认证 API、JSON 状态和错误；响应 SIGINT/SIGTERM。 | 在同一进程内实现备份、恢复、调度、元数据与仓库存储。 |
+| 浏览器 | 加载内置控制台；在页面内存中持有用户输入的 key；通过 API 查看服务器状态。 | 通过同一 API 管理任务、运行、快照和恢复。 |
+| curl / 自动化客户端 | 使用 Authorization Bearer header 调用状态 API。 | 通过与控制台相同的接口执行备份管理。 |
 
-桌面 GUI 计划采用 Svelte + TypeScript；它尚未加入仓库。SQLite、本地仓库与外部存储的连接关系会在实现时补充。备份核心若形成需要独立说明的复杂接口，再增加 C3 文档。
+`GET /` 返回不含 key 的控制台；所有 `/api/` 请求经过同一认证中间件。当前 `GET /api/status` 只报告服务器状态、package 版本及 `backup_available: false`；未知 API 返回明确错误。响应不缓存，key 不写入 URL、日志或响应。
+
+配置仅启动时读取，文件名固定为工作目录下的 `config.json`；默认工作目录是启动时的当前目录，`--working-directory` / `-d` 会切换进程目录。`--help` / `-h` 输出帮助和配置手册，`--version` / `-v` 输出版本，两者直接退出，不读取配置或启动服务。原 `DATA_BACKUP_CONFIG` 不再使用；目录错误、端口冲突及无效配置使启动失败。默认示例监听 loopback，HTTP 服务无内置 TLS，远程访问通过 HTTPS 反向代理提供传输加密。当前只提供共享 secret key 认证，无多用户权限模型。
+
+同一进程中的业务调用使用普通 Rust 调用，无跨进程兼容检查。未来的 API 类型与业务代码仍放在同一 package 中，接口稳定后再按实际需要决定版本策略。

@@ -40,15 +40,14 @@ RIGHT_SIDE_ACTORS: Final[dict[str, frozenset[str]]] = {
 }
 
 ACTOR_ANCHORS: Final[dict[str, dict[str, str]]] = {
-    "overview": {"USR": "UC-03", "OS": "UC-02", "SRC": "UC-01", "TGT": "UC-06"},
+    "overview": {"CLIENT": "UC-03", "SRC": "UC-01", "TGT": "UC-06"},
     "configuration-execution": {
-        "USR": "UC-01",
-        "OS": "UC-02",
+        "CLIENT": "UC-01",
         "SRC": "UC-12",
         "TGT": "UC-13",
     },
     "restore-maintenance": {
-        "USR": "UC-06",
+        "CLIENT": "UC-06",
         "TGT": "UC-14",
         "LOCAL": "UC-14L",
         "REMOTE": "UC-14R",

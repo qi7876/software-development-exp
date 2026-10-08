@@ -18,7 +18,6 @@ def main(*, report: bool = False) -> None:
         [
             "cargo",
             "clippy",
-            "--workspace",
             "--all-targets",
             "--all-features",
             "--",
@@ -26,8 +25,8 @@ def main(*, report: bool = False) -> None:
             "warnings",
         ]
     )
-    _run(["cargo", "test", "--workspace", "--all-targets"])
-    _run(["cargo", "build", "--workspace", "--all-targets"])
+    _run(["cargo", "test", "--all-targets"])
+    _run(["cargo", "build", "--all-targets"])
     _run(["uv", "run", "ruff", "check", "."])
     _run(["uv", "run", "basedpyright"])
     if report:
