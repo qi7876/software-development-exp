@@ -4,15 +4,16 @@
 
 计划只发布一个 `bak` 二进制，运行一个 Rust 服务器进程。Web 控制台的 HTML 与 JavaScript 随二进制分发，在浏览器中执行；控制台与 curl 都通过 HTTP API 访问同一个服务器。备份、恢复及后续调度在服务器进程内完成。
 
-```mermaid
-flowchart LR
-    Browser[浏览器中的 Web 控制台] -->|HTTP 获取 HTML / JavaScript| Server["bak 服务器<br/>Rust / Axum / Tokio"]
-    Browser -->|HTTP JSON / Bearer secret key| Server
-    Curl[curl / 自动化客户端] -->|HTTP JSON / Bearer secret key| Server
-    Config[工作目录 / config.json] -->|启动时读取| Server
-    Source[源文件系统] -->|文件内容与元数据| Server
-    Server -->|写入备份 / 读取备份| Repository[本地备份仓库]
-    Server -->|校验后放置文件| Restore[指定恢复目录]
+```text
+浏览器 <--> bak 服务器：HTTP 获取 HTML / JavaScript
+浏览器 <--> bak 服务器：HTTP JSON + Bearer secret key
+curl   <--> bak 服务器：HTTP JSON + Bearer secret key
+
+bak 服务器（单一进程）
+  |-- 启动时读取：工作目录 / config.json
+  |-- 备份时读取：源文件系统
+  |-- 写入 / 读取：本地备份仓库
+  `-- 校验后放置：指定恢复目录
 ```
 
 所有连接表示待实现的交互。Axum 与 Tokio 沿用前一阶段的技术方向，在写 HTTP 服务时再引入依赖；图中的文件和目录是数据存储，不代表额外服务进程。
