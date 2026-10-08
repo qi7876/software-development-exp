@@ -1,6 +1,6 @@
-# HTTP API 契约草案
+# HTTP API 契约
 
-本页供配对开发评审，描述待实现的最小闭环；当前空程序不提供这些接口。备份和恢复的异步返回方式、运行途中可发起中止已确认，其余路由、字段及行为是本轮草案。运行与配置边界见 [C2](architecture/containers.md)。
+本页记录已确认的最小闭环 API 契约；当前空程序不提供这些接口。备份和恢复异步执行，运行途中可发起中止。运行与配置边界见 [C2](architecture/containers.md)。
 
 所有 `/api` 请求使用 `Authorization: Bearer <secret_key>`；有 JSON 请求体时使用 `Content-Type: application/json`。页面和静态资源不需要 key。API 路由和错误不回退为控制台 HTML，响应不包含访问凭据。
 
