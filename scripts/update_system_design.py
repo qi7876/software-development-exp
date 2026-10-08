@@ -159,17 +159,18 @@ def _component_source(diagram: ComponentDiagram) -> str:
         lines.append(f'package "{package}" {{')
         for element in elements:
             stereotype = f" <<{element['stereotype']}>>" if element["stereotype"] else ""
+            display_name = element["name"].replace("\n", "\\n")
             lines.append(
-                f'  {declarations[element["type"]]} "{element["name"]}" as '
-                f"{element['id']}{stereotype}"
+                f'  {declarations[element["type"]]} "{display_name}" as {element["id"]}{stereotype}'
             )
         lines.append("}")
     for element in diagram["elements"]:
         if element["package"]:
             continue
         stereotype = f" <<{element['stereotype']}>>" if element["stereotype"] else ""
+        display_name = element["name"].replace("\n", "\\n")
         lines.append(
-            f'{declarations[element["type"]]} "{element["name"]}" as {element["id"]}{stereotype}'
+            f'{declarations[element["type"]]} "{display_name}" as {element["id"]}{stereotype}'
         )
     for chain in diagram.get("layout_chains", []):
         for index in range(len(chain) - 1):

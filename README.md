@@ -57,7 +57,7 @@ uv run scripts/update_report.py
 
 ## 开发环境
 
-当前在 macOS Apple Silicon 上开发，使用 zsh、Apple Command Line Tools 和 LLDB；Intel Mac 在发布阶段补充验证。`rust-toolchain.toml` 固定 Rust 1.98.0、Clippy 和 rustfmt，`Cargo.lock` 固定依赖解析。Rust 2024 edition 用于产品代码；Python 3.12 与 uv 只用于需求、UML 和 Word 报告生成，不进入产品运行时。
+当前在 macOS Apple Silicon 上开发，使用 zsh、Apple Command Line Tools 和 LLDB；Intel Mac 在发布阶段补充验证。`rust-toolchain.toml` 固定 Rust 1.98.0、Clippy 和 rustfmt，`Cargo.lock` 固定依赖解析。Rust 2024 edition 用于产品代码；Python 3.13 与 uv 只用于需求、UML 和 Word 报告生成，不进入产品运行时。
 
 项目只有一个 Cargo package `data-backup` 和一个同名二进制。常用命令：
 
@@ -194,7 +194,7 @@ flowchart LR
 - [x] 实现配置启动、内置 Web 控制台与 secret key 认证的状态 API
 - [ ] 实现 Web 控制台与 API 的备份管理闭环
 
-需求和 20 个用例已结构化，可生成 Markdown、UML 和课程报告；当前单一 Rust 二进制已能按配置启动 HTTP 服务，Web 控制台与 curl 共用认证 API。报告素材保留早期预设设计，不代表当前实现边界。下一步完成高风险技术探针，并实现筛选与本地备份的最小可运行闭环。
+需求和 20 个用例已结构化，可生成 UML 和课程报告；当前单一 Rust 二进制已能按配置启动 HTTP 服务，Web 控制台与 curl 共用认证 API。报告已同步当前架构，并区分已实现接口与待实现备份业务。下一步完成高风险技术探针，并实现筛选与本地备份的最小可运行闭环。
 
 ## 协作与验证
 

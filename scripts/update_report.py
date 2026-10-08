@@ -32,7 +32,7 @@ TABLE_FONT_SIZE_PT = 10.5
 FUNCTIONAL_REQUIREMENTS = (
     ("FR-01", "管理备份任务", "创建、编辑、启停和删除任务；删除任务不默认删除备份数据。"),
     ("FR-02", "配置源与目标", "支持多个本地源；拒绝危险嵌套或不可写目标。"),
-    ("FR-03", "计划执行", "支持手动、每日和每周计划；GUI 关闭后仍可执行。"),
+    ("FR-03", "计划执行", "同一服务器进程支持手动、每日和每周计划；浏览器关闭后仍可执行。"),
     ("FR-04", "生成快照", "成功运行产生唯一、不可变且原子提交的快照。"),
     ("FR-05", "增量存储", "只写入新增或变化内容，未变化内容复用。"),
     ("FR-06", "进度与取消", "展示阶段、文件数和字节数；取消结果明确。"),
@@ -41,8 +41,8 @@ FUNCTIONAL_REQUIREMENTS = (
     ("FR-09", "历史与日志", "记录运行时间、结果、统计和脱敏错误摘要。"),
     ("FR-10", "保留策略", "保留最近 N 个快照，安全清理无引用内容。"),
     ("FR-11", "通知", "成功、失败或需要操作时发送可配置通知。"),
-    ("FR-12", "CLI", "以稳定退出码和 JSON 输出完成核心管理。"),
-    ("FR-13", "远程目标", "以适配器接入 WebDAV 和 S3 兼容存储。"),
+    ("FR-12", "HTTP API", "Web 控制台与 curl 共用 Bearer secret key 认证的 API，返回统一 JSON。"),
+    ("FR-13", "远程目标", "本地闭环稳定后，按实际需要接入 WebDAV 或 S3 兼容存储。"),
     (
         "FR-14",
         "加密与解密",
@@ -389,7 +389,7 @@ def _draw_roadmap(path: Path) -> None:
     font = ImageFont.truetype(str(font_path), 25)
     canvas = Image.new("RGB", (1800, 520), "white")
     draw = ImageDraw.Draw(canvas)
-    labels = ("架构探针", "筛选与备份", "压缩加密恢复", "增量保留", "桌面闭环", "macOS 发布")
+    labels = ("架构探针", "筛选与备份", "压缩加密恢复", "增量保留", "Web 管理闭环", "macOS 发布")
     for index, label in enumerate(labels):
         x = 40 + index * 292
         draw.rounded_rectangle(
@@ -421,8 +421,16 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        "产品由 Rust 备份核心、后台守护进程、CLI 和 Svelte GUI 构成。"
-        "GUI 与 CLI 使用相同核心；本地备份闭环稳定后扩展 WebDAV 和 S3 兼容目标。",
+        "产品只发布一个 Rust 可执行文件 data-backup，启动后根据工作目录中的 config.json "
+        "运行 Web 服务器。内置 Web 控制台与 curl 等自动化客户端使用相同的 HTTP API，"
+        "通过 secret key 认证。服务器、接口类型与后续备份和调度逻辑位于同一 package 和进程。",
+    )
+    _paragraph(
+        document,
+        anchor,
+        "当前已经实现启动参数、配置验证、HTTP 服务、内置控制台、API 认证和状态查询。"
+        "备份、恢复、计划调度、持久化、压缩与加密均未实现；下列功能及详细用例描述目标需求，"
+        "不表示已经具备相应业务能力。WebDAV 和 S3 是本地闭环稳定后的候选扩展。",
     )
     for text in (
         "管理多个备份任务及计划。",
@@ -441,7 +449,8 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
             ("平台", "Apple Silicon 或 Intel Mac；首发 macOS"),
             ("内存", "建议 8 GiB；使用流式 I/O"),
             ("存储", "本地磁盘或已挂载外部存储"),
-            ("网络", "远程目标需要稳定连接"),
+            ("管理入口", "浏览器访问内置控制台；curl 等客户端调用 HTTP API"),
+            ("网络", "本地默认绑定 loopback；候选远程目标需要网络连接"),
         ),
         (2.8, 11.2),
     )
@@ -459,7 +468,8 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "模型采用一张系统总览和两张专题细图。include 箭头指向被包含用例，"
-        "extend 箭头指向基础用例，空心三角箭头表示泛化。",
+        "extend 箭头指向基础用例，空心三角箭头表示泛化。Web 控制台用户与自动化客户端"
+        "共享“管理操作方”角色，均通过已认证 HTTP API 完成相同操作。",
     )
     figure_widths = {
         "overview": 11.2,
@@ -489,15 +499,84 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        "GUI 包含概览、任务向导、任务详情、运行历史、快照浏览、恢复向导和设置。"
-        "危险操作二次确认；CLI 与 GUI 行为一致并提供 JSON 输出。",
+        "当前 Web 控制台支持输入 secret key 并查询服务器状态。后续扩展概览、任务向导、"
+        "任务详情、运行历史、快照浏览、恢复向导和设置；危险操作需要确认。"
+        "控制台与 curl 调用相同 API，服务器返回 JSON；不提供独立业务 CLI。",
     )
     _heading(document, anchor, "3.2 软件与硬件接口", 2)
     _paragraph(
         document,
         anchor,
-        "系统通过 macOS 文件接口访问本地存储，通过版本化本地 API 连接 GUI、CLI 和"
-        "守护进程，并以目标适配器接入 WebDAV/S3。",
+        "当前 HTTP 服务使用 Axum 与 Tokio。GET / 返回内嵌 HTML 与 JavaScript；所有 /api/ "
+        "请求使用 Authorization: Bearer <secret_key>。未来业务通过普通 Rust 调用在同进程内协作，"
+        "通过文件系统访问源与本地仓库；无进程间 IPC。",
+    )
+    _table(
+        document,
+        anchor,
+        ("当前接口", "行为"),
+        (
+            ("GET /", "公开获取 Web 控制台；页面内存保存 key，刷新、关闭或 Disconnect 后清除。"),
+            (
+                "GET /api/status",
+                '{"status":"ok","package_version":"0.1.0","backup_available":false}；必须认证。',
+            ),
+            (
+                "认证与错误",
+                "缺失、错误或重复 Authorization header 返回 401；已认证的未知 API 返回 JSON 404。",
+            ),
+        ),
+        (3.3, 10.7),
+    )
+    _heading(document, anchor, "3.3 启动参数与配置手册", 2)
+    _table(
+        document,
+        anchor,
+        ("启动 flag", "用途"),
+        (
+            ("--version / -v", "显示软件版本后退出，不读取配置或启动服务器。"),
+            ("--help / -h", "显示帮助、配置手册及示例后退出，不读取配置或启动服务器。"),
+            ("--working-directory / -d <PATH>", "设置进程工作目录，自动读取目录下的 config.json。"),
+        ),
+        (5.4, 8.6),
+    )
+    _paragraph(
+        document,
+        anchor,
+        "默认使用启动时的当前目录；相对 -d 路径以启动目录解析，之后的相对路径以新工作目录解析。"
+        "支持 --working-directory=<PATH>，含空格的路径需加引号。程序没有业务子命令。"
+        "未知参数或缺少目录参数以退出码 2 报错；工作目录或配置无效、端口占用时以非零状态退出。",
+    )
+    _table(
+        document,
+        anchor,
+        ("config.json 字段", "要求"),
+        (
+            ("listen", "必需；IP:port，例如 127.0.0.1:8080 或 [::1]:8080。"),
+            ("secret_key", "必需；非空、无空格的可见 ASCII 字符，正式使用时随机生成。"),
+        ),
+        (3.3, 10.7),
+    )
+    _paragraph(
+        document,
+        anchor,
+        '示例配置：{"listen":"127.0.0.1:8080","secret_key":"example-local-test-key"}。'
+        "配置仅在启动时读取，修改后需重启；拒绝缺失字段和未知字段，诊断不输出 key。"
+        "原 DATA_BACKUP_CONFIG 不再使用，旧 data-backup.json 改为工作目录中的 config.json。"
+        "Ctrl-C 或 SIGTERM 停止接收连接并等待当前 HTTP 请求结束。",
+    )
+    _paragraph(
+        document,
+        anchor,
+        "仓库提供 working-directory-example/config.json，可运行 cargo run -- -d "
+        "working-directory-example。示例 key 为公开本地测试值；该目录仅跟踪 config.json，"
+        "其他测试文件与运行产物由 .gitignore 忽略，自用 config.json 也默认忽略。",
+    )
+    _paragraph(
+        document,
+        anchor,
+        "API 调用示例：curl --fail-with-body -H 'Authorization: Bearer example-local-test-key' "
+        "http://127.0.0.1:8080/api/status。正式配置应更换为随机 key。",
     )
     _heading(document, anchor, "4. 其它非功能性需求")
     _heading(document, anchor, "4.1 性能与可靠性", 2)
@@ -511,8 +590,10 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        "仓库使用随机主密钥、内存困难 KDF 和认证加密。错误口令、篡改或截断不得产生"
-        "最终明文，日志和诊断包不得包含密钥。",
+        "当前 API 以 secret key 控制访问，key 不进入 URL、响应或诊断；HTTP 无内置 TLS，"
+        "远程访问应使用 HTTPS 反向代理。API secret key 不用于备份加密。"
+        "目标仓库设计使用随机主密钥、内存困难 KDF 和认证加密；错误口令、篡改或截断不得产生"
+        "最终文件，日志和诊断包不得包含口令、主密钥或可复用认证材料。仓库加密待实现。",
     )
     _heading(document, anchor, "5. 项目规划")
     _paragraph(
@@ -602,7 +683,8 @@ def _populate_system_design(
         document,
         anchor,
         "本章在需求模型基础上说明开发环境、系统构件边界、静态类关系和关键动态交互。"
-        "Rust 多 crate 框架已经建立；业务类和接口仍是后续实现约束，IPC 技术尚未确定。",
+        "当前为单一 Rust package 与服务器二进制，已实现配置启动、Web 控制台、认证与状态 API。"
+        "容器与模块图对应当前架构；领域概念及备份业务时序描述待实现目标，不要求预建抽象框架。",
     )
     _heading(document, anchor, "1. 开发环境和工具")
     _table(
@@ -610,12 +692,19 @@ def _populate_system_design(
         anchor,
         ("类别", "选择与用途"),
         (
-            ("开发平台", "macOS 27.0、Apple Silicon arm64、zsh 与 Apple Command Line Tools。"),
-            ("编程语言", "Rust 1.98.0、2024 edition；Python 3.12 仅用于文档生成。"),
-            ("构建工具", "Cargo 1.98.0 workspace、Cargo.lock；uv 管理 Python 文档工具。"),
-            ("调试工具", "LLDB 2103、RUST_BACKTRACE 与 tracing 结构化诊断。"),
-            ("第三方库", "clap、serde、serde_json、thiserror、tracing、tracing-subscriber。"),
-            ("版本控制", "Git 2.54、GitHub、gh 2.101；短期分支、PR、审查和 Squash Merge。"),
+            ("开发平台", "macOS、Apple Silicon arm64、zsh 与 Apple Command Line Tools。"),
+            ("编程语言", "Rust 1.98.0、2024 edition；Python 3.13 仅用于文档生成。"),
+            ("构建工具", "Cargo 单一 package、Cargo.lock；uv 管理 Python 文档工具。"),
+            ("调试工具", "LLDB、RUST_BACKTRACE 与 tracing 结构化诊断。"),
+            (
+                "第三方库",
+                "Axum 0.8.9、Tokio 1.53.2、serde、serde_json、thiserror、"
+                "tracing、tracing-subscriber。",
+            ),
+            (
+                "版本控制",
+                "jj 与 Git colocated、GitHub 和 gh；短期 bookmark、PR、审查和 Squash Merge。",
+            ),
             (
                 "性能分析",
                 "samply、cargo-flamegraph、Xcode Instruments、/usr/bin/time；"
@@ -625,7 +714,7 @@ def _populate_system_design(
                 "集成与部署",
                 "scripts/check.py 本地 CI；cargo build --release 后人工验收，暂不配置 CD。",
             ),
-            ("前端扩展", "Svelte 与 TypeScript 留待后续阶段，当前不纳入统一开发环境。"),
+            ("Web 控制台", "HTML 与 JavaScript 通过 include_str! 内嵌，无独立前端服务或桌面壳。"),
         ),
         (3.2, 10.8),
     )
@@ -689,9 +778,11 @@ def _populate_system_design(
         )
     _heading(document, anchor, "5. 设计边界")
     for boundary in (
-        "当前模型不决定桌面应用壳、本地 IPC 形式及具体 Rust 类型布局。",
-        "压缩、加密、打包和仓库访问通过策略或端口替换，读取端按版本化元数据选择实现。",
+        "部署只发布 data-backup；控制台、HTTP API、后续备份与调度位于同一服务器进程。",
+        "业务类图仅表达概念与约束，按实际行为增加模块，多个调用方共享稳定模式后再引入抽象。",
+        "压缩、加密、打包、仓库格式与持久化尚需技术验证；读取端应明确处理格式和算法版本。",
         "文本密钥文件只保存认证加密后的主密钥及 KDF 参数，不保存口令或明文主密钥。",
+        "当前仅有认证状态 API；全部备份业务待实现，WebDAV 与 S3 属于候选扩展。",
     ):
         _paragraph(document, anchor, boundary, bullet=True)
 
