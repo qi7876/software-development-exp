@@ -1,17 +1,17 @@
 # C1 系统上下文
 
-Data Backup 面向 macOS 个人用户，负责把本地文件保存为可验证、可恢复的备份，并在用户需要时恢复到指定位置。个人用户通过浏览器中的 Web 控制台操作；自动化脚本通过 curl 等 HTTP 客户端操作。两者使用同一系统和相同的访问凭据。
+bak 是一个面向个人用户、跨平台的文件备份管理软件，负责把本地文件保存为可验证、可恢复的备份，并在用户需要时恢复到指定位置。个人用户通过浏览器中的 Web 控制台操作；自动化脚本通过 curl 等 HTTP 客户端操作。两者使用同一系统和相同的访问凭据。
 
 ```mermaid
 flowchart LR
-    User[个人用户] -->|通过 Web 控制台管理备份与恢复| Backup[Data Backup]
+    User[个人用户] -->|通过 Web 控制台管理备份与恢复| Backup[bak]
     Automation[自动化脚本 / curl] -->|通过带 secret key 的 HTTP API 操作| Backup
     Source[源文件系统] -->|文件内容与元数据| Backup
     Backup -->|写入备份 / 读取备份| Repository[本地或已挂载的备份存储]
     Backup -->|恢复用户选中的内容| Restore[用户指定的恢复位置]
 ```
 
-| 外部角色或系统 | 与 Data Backup 的关系 |
+| 外部角色或系统 | 与 bak 的关系 |
 |---|---|
 | 个人用户 | 配置备份来源与目标，发起备份，查看结果，选择要恢复的内容及位置。 |
 | 自动化脚本 / curl | 使用 secret key 调用 HTTP API，获得与 Web 控制台一致的结果和错误。 |

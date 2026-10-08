@@ -2,11 +2,11 @@
 
 状态：待共同评审的目标设计，产品当前仅有空入口。
 
-计划只发布一个 `data-backup` 二进制，运行一个 Rust 服务器进程。Web 控制台的 HTML 与 JavaScript 随二进制分发，在浏览器中执行；控制台与 curl 都通过 HTTP API 访问同一个服务器。备份、恢复及后续调度在服务器进程内完成。
+计划只发布一个 `bak` 二进制，运行一个 Rust 服务器进程。Web 控制台的 HTML 与 JavaScript 随二进制分发，在浏览器中执行；控制台与 curl 都通过 HTTP API 访问同一个服务器。备份、恢复及后续调度在服务器进程内完成。
 
 ```mermaid
 flowchart LR
-    Browser[浏览器中的 Web 控制台] -->|HTTP 获取 HTML / JavaScript| Server["data-backup 服务器<br/>Rust / Axum / Tokio"]
+    Browser[浏览器中的 Web 控制台] -->|HTTP 获取 HTML / JavaScript| Server["bak 服务器<br/>Rust / Axum / Tokio"]
     Browser -->|HTTP JSON / Bearer secret key| Server
     Curl[curl / 自动化客户端] -->|HTTP JSON / Bearer secret key| Server
     Config[工作目录 / config.json] -->|启动时读取| Server
@@ -19,7 +19,7 @@ flowchart LR
 
 | 运行单元 | 目标职责 |
 |---|---|
-| `data-backup` 服务器 | 处理启动参数与配置，提供控制台和认证 API，在同一进程内执行备份与恢复并返回明确结果。 |
+| `bak` 服务器 | 处理启动参数与配置，提供控制台和认证 API，在同一进程内执行备份与恢复并返回明确结果。 |
 | 浏览器中的 Web 控制台 | 接收用户输入，通过统一 API 管理操作并展示结果；不直接访问服务器文件系统。 |
 | curl / 自动化客户端 | 携带 secret key 调用同一 API，以 JSON 处理结果与错误。 |
 
