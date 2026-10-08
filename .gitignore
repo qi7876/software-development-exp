@@ -312,3 +312,7 @@ tmbootpicker.efi
 # Local server configuration contains the API secret
 /data-backup.json
 config.json
+
+# Track the example config; ignore local test data in its working directory
+/working-directory-example/*
+!/working-directory-example/config.json

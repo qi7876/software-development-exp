@@ -71,7 +71,21 @@ uv run scripts/check.py
 
 ## 启动与使用
 
-创建配置并设置随机 secret key（只需一次；已有文件不会被覆盖）：
+仓库提供可直接启动的本地测试工作目录 [working-directory-example](working-directory-example/config.json)：
+
+```shell
+cargo run -- -d working-directory-example
+```
+
+打开 <http://127.0.0.1:8080/>，使用测试 key `example-local-test-key`。也可以直接调用 API：
+
+```shell
+curl --fail-with-body \
+  -H 'Authorization: Bearer example-local-test-key' \
+  http://127.0.0.1:8080/api/status
+```
+
+示例目录仅将 `config.json` 纳入版本控制，其他测试文件、子目录和运行产物均由 `.gitignore` 忽略。示例 key 是公开的本地测试值；使用自己的工作目录时，创建配置并设置随机 secret key（只需一次；已有文件不会被覆盖）：
 
 ```shell
 umask 077
