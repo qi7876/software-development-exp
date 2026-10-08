@@ -1,0 +1,71 @@
+# Generated from docs/report/model.yaml; do not edit directly.
+direction: down
+**.style.font-size: 32
+(** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+diagram: "Run and Commit a Backup in the Same Process (Planned)" {
+  style.font-size: 44
+  style.fill: white
+  style.stroke: transparent
+  shape: sequence_diagram
+  Client: "Web console / curl" {shape: person}
+  API: "<<boundary>>\nHTTP API" {shape: rectangle}
+  Scheduler: "<<control>>\nInternal scheduler" {shape: rectangle}
+  Backup: "<<control>>\nBackup run" {shape: rectangle}
+  Source: "<<entity>>\nSource file system" {shape: rectangle}
+  Pipeline: "<<control>>\nChunking / compression\n/ encryption" {shape: rectangle}
+  Repo: "<<entity>>\nRepository and run\nrecords" {shape: rectangle}
+  API.note_0: "over API, Repo\nSame data-backup process; sources and\nrepository use file storage"
+  fragment_1: alt {
+    branch_1: "[Manual trigger]" {
+      Client -> API: "Run backup / Bearer key"
+      fragment_3: alt {
+        branch_3: "[Missing, invalid, or duplicate Bearer\nkey]" {
+          API -> Client: "401 JSON error" {style.stroke-dash: 5}
+        }
+        branch_5: "[Authentication succeeds]" {
+          API -> Backup: "Start task"
+          Backup -> API: "Run ID or mutual exclusion error" {style.stroke-dash: 5}
+          API -> Client: "Run JSON" {style.stroke-dash: 5}
+        }
+      }
+    }
+    branch_10: "[Schedule is due]" {
+      Scheduler -> Backup: "Start the same task internally (no HTTP\nrequired)"
+    }
+  }
+  fragment_13: "opt [Task lock acquired]" {
+    Backup -> Repo: "Record run and check repository"
+    Backup -> Source: "Scan and filter"
+    fragment_16: "loop [Each readable file]" {
+      Source -> Backup: "Streamed content / metadata" {style.stroke-dash: 5}
+      Backup -> Pipeline: "Chunk, compress, and optionally encrypt\nwith authentication"
+      Pipeline -> Repo: "Reuse or write temporary pack"
+      Repo -> Backup: "Written chunk references" {style.stroke-dash: 5}
+    }
+    fragment_22: "opt [Cancellation requested]" {
+      Client -> API: "Cancel run / Bearer key"
+      API -> API: "Validate Bearer key"
+      fragment_25: alt {
+        branch_25: "[Authentication succeeds]" {
+          API -> Backup: "Set cancellation flag"
+          Backup -> Backup: "Stop new work at a safe boundary"
+        }
+        branch_28: "[Authentication fails]" {
+          API -> Client: "401 JSON" {style.stroke-dash: 5}
+        }
+      }
+    }
+    fragment_32: alt {
+      branch_32: "[Not cancelled and all references\nwritten]" {
+        Backup -> Repo: "Atomically commit immutable manifest"
+        Repo -> Backup: "Commit complete" {style.stroke-dash: 5}
+        Backup -> Repo: "Record success / release task lock"
+      }
+      branch_36: "[Cancelled or failed]" {
+        Backup -> Repo: "Register cleanup / record cancellation\nor failure / release lock"
+      }
+    }
+  }
+}

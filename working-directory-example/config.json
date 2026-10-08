@@ -1,8 +1,13 @@
 {
   "listen": "127.0.0.1:8080",
   "secret_key": "example-local-test-key",
-  "web_console": {
-    "archive_url": "https://example.com/bak-console.zip",
-    "directory": "web-console"
+  "web_ui": {
+    "enabled": false,
+    "archive_url": "https://example.com/bak-ui.zip",
+    "directory": "web-ui"
+  },
+  "logging": {
+    "enabled": false,
+    "file": "jobs.jsonl"
   }
 }

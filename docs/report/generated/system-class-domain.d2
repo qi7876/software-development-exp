@@ -1,0 +1,116 @@
+# Generated from docs/report/model.yaml; do not edit directly.
+direction: down
+**.style.font-size: 32
+(** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+diagram: "Backup Domain: Conceptual Classes (Planned)" {
+  style.font-size: 44
+  style.fill: white
+  style.stroke: transparent
+  package_0: "Backup domain (planned)" {
+    style.font-size: 36
+    style.fill: white
+    BackupTask: "<<aggregate root>>\nBackup task" {
+      shape: class
+      "+ taskId": "TaskId"
+      "+ enabled": "Boolean"
+      "+ schedule": "ScheduleConfig"
+      "+ protection": "ProtectionConfig"
+      "+ retention": "RetentionPolicy"
+      "+ repository": "RepositoryConfig"
+      "+ validate()": "ValidationResult"
+    }
+    SourceSpec: "<<value object>>\nData source" {
+      shape: class
+      "+ rootPath": "Path"
+      "+ symlinkPolicy": "SymlinkPolicy"
+    }
+    FilterRule: "<<configuration>>\nFilter rule" {
+      shape: class
+      "+ mode": "IncludeOrExclude"
+      "+ order": "NonNegativeInt"
+      "+ condition": "FilterCondition"
+    }
+    BackupRun: "<<entity>>\nBackup run" {
+      shape: class
+      "+ runId": "RunId"
+      "+ status": "RunStatus"
+      "+ cancel()": "CancelResult"
+    }
+    Snapshot: "<<aggregate root>>\nSnapshot" {
+      shape: class
+      "+ snapshotId": "SnapshotId"
+      "+ manifestHash": "Digest"
+      "+ commit()": "Void"
+    }
+    FileEntry: "<<entity>>\nFile entry" {
+      shape: class
+      "+ relativePath": "Path"
+      "+ size": "UInt64"
+    }
+    ChunkRef: "<<value object>>\nChunk reference" {
+      shape: class
+      "+ digest": "Digest"
+      "+ packId": "PackId"
+      "+ range": "OffsetAndLength"
+      "+ codec / cipher": "AlgorithmId"
+    }
+    RestoreRequest: "<<entity>>\nRestore request" {
+      shape: class
+      "+ snapshotId": "SnapshotId"
+      "+ selectedPaths": "Path[]"
+      "+ targetRoot": "Path"
+      "+ conflictPolicy": "ConflictPolicy"
+    }
+    RestoreResult: "<<value object>>\nRestore result" {
+      shape: class
+      "+ status": "RestoreStatus"
+      "+ restored": "UInt64"
+      "+ skipped": "UInt64"
+      "+ failed": "UInt64"
+    }
+  }
+  package_0.BackupTask <- package_0.SourceSpec: "Defines sources" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "1..*"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
+  }
+  package_0.BackupTask <- package_0.BackupRun: "Creates runs" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "0..*"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: false
+  }
+  package_0.BackupRun -- package_0.Snapshot: "Creates on success" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "0..1"
+  }
+  package_0.Snapshot <- package_0.FileEntry: "Manifest" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "0..*"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
+  }
+  package_0.FileEntry <- package_0.ChunkRef: "Content references" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "0..*"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
+  }
+  package_0.RestoreRequest -- package_0.Snapshot: "Selects" {
+    source-arrowhead.label: "0..*"
+    target-arrowhead.label: "1"
+  }
+  package_0.RestoreRequest -- package_0.RestoreResult: "Produces" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "0..1"
+  }
+  package_0.BackupTask <- package_0.FilterRule: "Ordered filter rules" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "0..*"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
+  }
+}

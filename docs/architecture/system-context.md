@@ -1,34 +1,9 @@
-# C1 系统上下文
+# C1 System Context
 
-bak 是一个面向个人用户、跨平台的文件备份管理软件，负责把本地文件保存为可验证、可恢复的备份，并在用户需要时恢复到指定位置。个人用户通过浏览器中的 Web 控制台操作；自动化脚本通过 curl 等 HTTP 客户端操作。两者使用同一系统和相同的访问凭据。
+`bak` is a cross-platform file backup management software for individual users, providing functions such as file backup and restore.
 
-```text
-个人用户 -- Web 控制台 --> bak
-自动化脚本 / curl -- HTTP API + secret key --> bak
+After startup, `bak` provides an HTTP API. Individual users and automation scripts operate it through HTTP clients such as `curl`, authenticating with a Bearer secret key.
 
-源文件系统 -- 文件内容与元数据 --> bak
-bak -- 写入 / 读取备份 --> 本地或已挂载的备份存储
-bak -- 恢复选中的内容 --> 用户指定的恢复位置
-```
+`bak` reads regular file contents and directory structure from source file system, stores backup contents in a local repository, and stores manifest information required for identification, verification, and restore.
 
-| 外部角色或系统 | 与 bak 的关系 |
-|---|---|
-| 个人用户 | 配置备份来源与目标，发起备份，查看结果，选择要恢复的内容及位置。 |
-| 自动化脚本 / curl | 使用 secret key 调用 HTTP API，获得与 Web 控制台一致的结果和错误。 |
-| 源文件系统 | 提供文件及元数据；备份操作不修改源文件。 |
-| 本地或已挂载的备份存储 | 保存备份内容与识别、校验和恢复所需的信息。 |
-| 用户指定的恢复位置 | 接收恢复文件，可能与源位置相同；覆盖已有文件必须明确确认。 |
-
-系统负责执行与记录操作；浏览器仅用于管理，关闭浏览器不应中止服务器中的运行。访问控制使用共享 secret key，目标为个人使用，不包含多用户权限管理。
-
-## 第一条业务闭环（已确认）
-
-先完成单个本地源到单个本地目标的手动备份，再将备份恢复到另一个目录并比较内容。成功结果必须可验证；失败或中断必须报告明确原因，并保持原文件和已有成功备份可用。
-
-第一阶段保证普通文件内容和目录结构，包括空目录。文件权限、修改时间、符号链接及其他高级恢复能力后续逐项加入。
-
-第一阶段采用全量备份，每次备份独立保存，普通文件内容使用 Zstd 压缩，并保存识别、校验和恢复所需的清单信息。
-
-计划任务、增量、保留策略、文件筛选和仓库加密随后逐项讨论。WebDAV / S3 属于本地闭环稳定后的候选扩展；移动端、实时同步和多人协作不纳入当前方向。API secret key 用于访问控制，与未来的备份加密口令独立。
-
-上述最小闭环作为当前实现范围。进程与存储的具体划分、备份清单和成功条件见 [C2](containers.md)。
+Users / Automation Scripts <---> bak <---> file system

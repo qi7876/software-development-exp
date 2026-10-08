@@ -1,0 +1,74 @@
+# Generated from docs/report/model.yaml; do not edit directly.
+direction: down
+**.style.font-size: 32
+(** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+diagram: "Single-server Containers: Current Architecture and\nExtension Boundaries" {
+  style.font-size: 44
+  style.fill: white
+  style.stroke: transparent
+  package_0: "External clients" {
+    style.font-size: 36
+    style.fill: white
+    Browser: "<<client>>\nBrowser / web console" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Curl: "<<client>>\ncurl / automation scripts" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+  }
+  package_1: "Application runtime" {
+    style.font-size: 36
+    style.fill: white
+    Server: "<<single server process>>\ndata-backup\nAxum + Tokio\nConsole / API / planned\nbackup and scheduling" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+  }
+  package_2: "Server working directory" {
+    style.font-size: 36
+    style.fill: white
+    Config: "<<startup configuration>>\nconfig.json" {
+      shape: stored_data
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Meta: "<<planned>>\nSQLite metadata" {
+      shape: cylinder
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+  }
+  package_3: "Backup storage (planned)" {
+    style.font-size: 36
+    style.fill: white
+    Source: "<<planned>>\nSource file system" {
+      shape: stored_data
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Local: "<<planned>>\nLocal backup repository" {
+      shape: stored_data
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Remote: "<<candidate extension>>\nWebDAV / S3" {
+      shape: cloud
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+  }
+  package_0.Browser -> package_1.Server: "GET / console; /api/ + Bearer key"
+  package_0.Curl -> package_1.Server: "HTTP API + Bearer key / JSON"
+  package_1.Server -> package_2.Config: "Read listen / secret_key at startup"
+  package_1.Server -> package_2.Meta: "Tasks / runs / indexes" {style.stroke-dash: 5}
+  package_1.Server -> package_3.Source: "Stream source data" {style.stroke-dash: 5}
+  package_1.Server -> package_3.Local: "Snapshots / verification / restoration" {style.stroke-dash: 5}
+  package_1.Server -> package_3.Remote: "Planned remote repository access" {style.stroke-dash: 5}
+}

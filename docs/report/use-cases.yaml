@@ -2,20 +2,20 @@
   "version": "0.3",
   "updated": "2026-10-08",
   "author": "项目开发者",
-  "system": "Data Backup 数据备份系统",
+  "system": "Data Backup System",
   "actors": [
-    {"id": "CLIENT", "name": "管理操作方", "stereotype": "person"},
-    {"id": "USR", "name": "个人用户（Web 控制台）", "stereotype": "person", "parent": "CLIENT"},
-    {"id": "AUT", "name": "自动化客户端（curl）", "stereotype": "system", "parent": "CLIENT"},
-    {"id": "SRC", "name": "源文件系统", "stereotype": "system"},
-    {"id": "TGT", "name": "备份存储", "stereotype": "system"},
-    {"id": "LOCAL", "name": "本地存储", "stereotype": "system", "parent": "TGT"},
-    {"id": "REMOTE", "name": "WebDAV/S3（候选扩展）", "stereotype": "system", "parent": "TGT"}
+    {"id": "CLIENT", "name": "Operator", "stereotype": "person"},
+    {"id": "USR", "name": "Individual user (web console)", "stereotype": "person", "parent": "CLIENT"},
+    {"id": "AUT", "name": "Automation client (curl)", "stereotype": "system", "parent": "CLIENT"},
+    {"id": "SRC", "name": "Source file system", "stereotype": "system"},
+    {"id": "TGT", "name": "Backup storage", "stereotype": "system"},
+    {"id": "LOCAL", "name": "Local storage", "stereotype": "system", "parent": "TGT"},
+    {"id": "REMOTE", "name": "WebDAV / S3 (candidate extension)", "stereotype": "system", "parent": "TGT"}
   ],
   "diagrams": [
     {
       "id": "overview",
-      "title": "数据备份系统用例总览",
+      "title": "Data Backup System: Use-case Overview",
       "actors": ["CLIENT", "USR", "AUT", "SRC", "TGT"],
       "use_cases": ["UC-01", "UC-02", "UC-03", "UC-04", "UC-05", "UC-06", "UC-07", "UC-08"],
       "associations": [
@@ -38,7 +38,7 @@
     },
     {
       "id": "configuration-execution",
-      "title": "备份任务配置与执行用例",
+      "title": "Backup Task Configuration and Execution",
       "actors": ["CLIENT", "USR", "AUT", "SRC", "TGT"],
       "use_cases": ["UC-01", "UC-02", "UC-09", "UC-10", "UC-11", "UC-12", "UC-13", "UC-16"],
       "associations": [
@@ -51,7 +51,7 @@
     },
     {
       "id": "restore-maintenance",
-      "title": "备份浏览恢复与维护用例",
+      "title": "Backup Browsing, Restoration, and Maintenance",
       "actors": ["CLIENT", "USR", "AUT", "TGT", "LOCAL", "REMOTE"],
       "use_cases": ["UC-04", "UC-05", "UC-06", "UC-07", "UC-14", "UC-14L", "UC-14R", "UC-15", "UC-17", "UC-18"],
       "associations": [
@@ -68,7 +68,7 @@
   "use_cases": [
     {
       "id": "UC-01",
-      "name": "管理备份任务",
+      "name": "Manage backup tasks",
       "kind": "main",
       "priority": "Must",
       "goal": "用户创建或修改可由系统执行的备份任务，并安全地启停或删除任务。",
@@ -104,7 +104,7 @@
     },
     {
       "id": "UC-02",
-      "name": "执行备份",
+      "name": "Run backup",
       "kind": "main",
       "priority": "Must",
       "goal": "根据任务配置生成可验证、可恢复且原子提交的增量快照。",
@@ -115,7 +115,7 @@
       "success": "新快照完整提交，运行历史和统计记录成功结果。",
       "failure": "不产生成功快照，已提交快照保持可读取。",
       "includes": ["UC-12", "UC-13"],
-      "extension_points": ["备份运行中"],
+      "extension_points": ["Backup is running"],
       "extends": null,
       "parent": null,
       "requirements": ["FR-03", "FR-04", "FR-05", "FR-06", "FR-13", "FR-14", "FR-15", "FR-16", "FR-12"],
@@ -141,7 +141,7 @@
     },
     {
       "id": "UC-03",
-      "name": "查看状态与历史",
+      "name": "View status and history",
       "kind": "main",
       "priority": "Must",
       "goal": "用户了解当前保护状态、运行进度和历史结果。",
@@ -175,7 +175,7 @@
     },
     {
       "id": "UC-04",
-      "name": "校验备份",
+      "name": "Verify backups",
       "kind": "main",
       "priority": "Must",
       "goal": "确认快照引用和内容对象未缺失、未损坏或被篡改。",
@@ -210,7 +210,7 @@
     },
     {
       "id": "UC-05",
-      "name": "浏览快照",
+      "name": "Browse snapshots",
       "kind": "main",
       "priority": "Must",
       "goal": "用户按时间点浏览和搜索已备份的目录及文件版本。",
@@ -245,7 +245,7 @@
     },
     {
       "id": "UC-06",
-      "name": "恢复数据",
+      "name": "Restore data",
       "kind": "main",
       "priority": "Must",
       "goal": "将指定快照中的文件或目录安全恢复到原位置或自定义位置。",
@@ -256,7 +256,7 @@
       "success": "成功项内容与快照一致，生成可追溯恢复报告。",
       "failure": "失败项保持原目标文件不变，临时明文被清理并记录原因。",
       "includes": ["UC-14", "UC-18"],
-      "extension_points": ["恢复目标存在冲突"],
+      "extension_points": ["Restore target has conflicts"],
       "extends": null,
       "parent": null,
       "requirements": ["FR-08", "FR-12", "FR-14", "FR-15"],
@@ -282,7 +282,7 @@
     },
     {
       "id": "UC-07",
-      "name": "管理保留策略",
+      "name": "Manage retention policies",
       "kind": "main",
       "priority": "Should",
       "goal": "按照策略删除过期快照并安全回收无引用内容。",
@@ -317,7 +317,7 @@
     },
     {
       "id": "UC-08",
-      "name": "导出诊断信息",
+      "name": "Export diagnostics",
       "kind": "main",
       "priority": "Should",
       "goal": "生成不包含用户文件内容和密钥的脱敏诊断包。",
@@ -352,7 +352,7 @@
     },
     {
       "id": "UC-09",
-      "name": "配置数据保护",
+      "name": "Configure data protection",
       "kind": "supporting",
       "priority": "Must",
       "goal": "为任务选择加密、解锁、压缩和打包预设。",
@@ -390,7 +390,7 @@
     },
     {
       "id": "UC-10",
-      "name": "配置并预览文件筛选",
+      "name": "Configure and preview file filters",
       "kind": "supporting",
       "priority": "Must",
       "goal": "建立可解释的有序筛选规则，并在保存前预览实际匹配范围。",
@@ -425,7 +425,7 @@
     },
     {
       "id": "UC-11",
-      "name": "验证任务配置",
+      "name": "Validate task configuration",
       "kind": "included",
       "priority": "Must",
       "goal": "在启用任务前确认配置完整、路径安全且目标能力满足要求。",
@@ -458,7 +458,7 @@
     },
     {
       "id": "UC-12",
-      "name": "扫描并筛选源文件",
+      "name": "Scan and filter source files",
       "kind": "included",
       "priority": "Must",
       "goal": "得到符合规则、元数据一致且可供快照构建的文件集合。",
@@ -492,7 +492,7 @@
     },
     {
       "id": "UC-13",
-      "name": "构建并提交快照",
+      "name": "Build and commit snapshot",
       "kind": "included",
       "priority": "Must",
       "goal": "把变化内容安全转换为对象和清单，并以原子方式提交快照。",
@@ -526,7 +526,7 @@
     },
     {
       "id": "UC-14",
-      "name": "访问备份仓库",
+      "name": "Access backup repository",
       "kind": "included",
       "priority": "Must",
       "goal": "通过统一接口安全访问本地或远程备份仓库。",
@@ -537,7 +537,7 @@
       "success": "返回通过版本和能力检查的仓库会话。",
       "failure": "拒绝访问未知格式、错误目标或不可用仓库。",
       "includes": [],
-      "extension_points": ["仓库已加密"],
+      "extension_points": ["Repository is encrypted"],
       "extends": null,
       "parent": null,
       "requirements": ["FR-07", "FR-08", "FR-10", "FR-13", "FR-14"],
@@ -560,7 +560,7 @@
     },
     {
       "id": "UC-14L",
-      "name": "访问本地仓库",
+      "name": "Access local repository",
       "kind": "specialization",
       "priority": "Must",
       "goal": "通过本地文件系统语义访问备份仓库。",
@@ -592,7 +592,7 @@
     },
     {
       "id": "UC-14R",
-      "name": "访问远程仓库",
+      "name": "Access remote repository",
       "kind": "specialization",
       "priority": "Should",
       "goal": "通过 WebDAV 或 S3 适配器访问远程备份仓库。",
@@ -625,7 +625,7 @@
     },
     {
       "id": "UC-15",
-      "name": "使用文本密钥文件解锁加密仓库",
+      "name": "Unlock encrypted repository with text key file",
       "kind": "extending",
       "priority": "Must",
       "goal": "读取口令保护的文本密钥文件，验证口令并获得仓库主密钥。",
@@ -637,7 +637,7 @@
       "failure": "不建立解密会话，不输出任何未经认证的数据。",
       "includes": [],
       "extension_points": [],
-      "extends": {"base": "UC-14", "point": "仓库已加密", "condition": "仓库已加密"},
+      "extends": {"base": "UC-14", "point": "Repository is encrypted", "condition": "Repository is encrypted"},
       "parent": null,
       "requirements": ["FR-14", "FR-12"],
       "nfr": ["NFR-03", "NFR-11", "NFR-12"],
@@ -662,7 +662,7 @@
     },
     {
       "id": "UC-16",
-      "name": "取消备份",
+      "name": "Cancel backup",
       "kind": "extending",
       "priority": "Must",
       "goal": "用户安全终止正在运行的备份而不损坏仓库。",
@@ -674,7 +674,7 @@
       "failure": "若无法立即取消，系统明确显示正在完成不可中断的原子步骤。",
       "includes": [],
       "extension_points": [],
-      "extends": {"base": "UC-02", "point": "备份运行中", "condition": "备份运行中"},
+      "extends": {"base": "UC-02", "point": "Backup is running", "condition": "Backup is running"},
       "parent": null,
       "requirements": ["FR-06", "FR-12"],
       "nfr": ["NFR-01", "NFR-05", "NFR-08"],
@@ -695,7 +695,7 @@
     },
     {
       "id": "UC-17",
-      "name": "处理恢复冲突",
+      "name": "Resolve restore conflicts",
       "kind": "extending",
       "priority": "Must",
       "goal": "在目标已存在文件时按用户选择安全处理冲突。",
@@ -707,7 +707,7 @@
       "failure": "没有确认策略的文件不会覆盖目标。",
       "includes": [],
       "extension_points": [],
-      "extends": {"base": "UC-06", "point": "恢复目标存在冲突", "condition": "恢复目标存在冲突"},
+      "extends": {"base": "UC-06", "point": "Restore target has conflicts", "condition": "Restore target has conflicts"},
       "parent": null,
       "requirements": ["FR-08", "FR-12"],
       "nfr": ["NFR-01", "NFR-05", "NFR-06"],
@@ -729,7 +729,7 @@
     },
     {
       "id": "UC-18",
-      "name": "校验恢复结果",
+      "name": "Verify restored data",
       "kind": "included",
       "priority": "Must",
       "goal": "在最终放置前确认恢复内容与快照清单一致。",

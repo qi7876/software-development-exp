@@ -378,27 +378,28 @@ def _add_use_case(
 
 
 def _draw_roadmap(path: Path) -> None:
-    font_path = next(
-        path
-        for path in (
-            Path("/System/Library/Fonts/PingFang.ttc"),
-            Path("/System/Library/Fonts/STHeiti Medium.ttc"),
-        )
-        if path.exists()
-    )
-    font = ImageFont.truetype(str(font_path), 25)
+    font = ImageFont.load_default(size=25)
     canvas = Image.new("RGB", (1800, 520), "white")
     draw = ImageDraw.Draw(canvas)
-    labels = ("架构探针", "筛选与备份", "压缩加密恢复", "增量保留", "Web 管理闭环", "macOS 发布")
+    labels = (
+        "Architecture\nprobe",
+        "Filtering and\nbackup",
+        "Compression,\nencryption, restore",
+        "Incremental backup\nand retention",
+        "Web management\nworkflow",
+        "macOS release",
+    )
     for index, label in enumerate(labels):
         x = 40 + index * 292
         draw.rounded_rectangle(
             (x, 180, x + 245, 300), radius=18, outline="#2563EB", width=4, fill="#EAF2FF"
         )
-        draw.text((x + 30, 220), label, font=font, fill="#172033")
+        draw.multiline_text(
+            (x + 122, 240), label, font=font, fill="#172033", anchor="mm", align="center"
+        )
         if index:
             draw.line((x - 47, 240, x, 240), fill="#61708A", width=5)
-    draw.text((1050, 390), "候选扩展：WebDAV / S3", font=font, fill="#6D28D9")
+    draw.text((1050, 390), "Candidate extensions: WebDAV / S3", font=font, fill="#6D28D9")
     canvas.save(path)
 
 
@@ -472,9 +473,9 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "共享“管理操作方”角色，均通过已认证 HTTP API 完成相同操作。",
     )
     figure_widths = {
-        "overview": 11.2,
+        "overview": GENERATED_CONTENT_WIDTH_CM,
         "configuration-execution": GENERATED_CONTENT_WIDTH_CM,
-        "restore-maintenance": 12.6,
+        "restore-maintenance": GENERATED_CONTENT_WIDTH_CM,
     }
     for figure, diagram in enumerate(model["diagrams"], 1):
         _picture(
@@ -755,7 +756,7 @@ def _populate_system_design(
         diagrams["class-services"],
         section_number="3.2",
         figure_number=8,
-        width=11.4,
+        width=GENERATED_CONTENT_WIDTH_CM,
         page_break=True,
     )
     _heading(document, anchor, "4. 动态建模", page_break=True)
@@ -818,7 +819,7 @@ def synchronize_report(report_path: Path = REPORT_PATH) -> None:
 
 
 def main() -> None:
-    """Synchronize UML, Markdown, and the existing report through one entry point."""
+    """Synchronize D2 diagrams and the existing report through one entry point."""
     synchronize_report()
 
 

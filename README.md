@@ -1,49 +1,61 @@
 # bak
 
-面向个人用户的跨平台文件备份管理软件，目标是提供可靠、可验证、可恢复的本地备份。产品计划只发布一个 Rust 可执行文件 `bak`，通过 Web 控制台与带 secret key 的 HTTP API 管理备份。
+`bak` is a cross-platform file backup manager for individual users, designed to provide reliable, verifiable local backups that can be restored.
+A single binary runs an HTTP service. Users interact with it through curl using a Bearer secret key; a web console is planned for later.
 
-项目重新从设计开始，以配对编程的方式逐步实现：项目作者编写产品代码，助手提供问题分析、提示、评审，并在需要时修改具体代码。每次只推进一个可理解、可验证的小步骤。
-
-## 当前状态与里程碑
-
-上一阶段的服务器、配置解析、领域代码、Web 页面及其测试已移除。当前只保留单一 Cargo package、空的 `src/main.rs`、工具链和文档工具，没有产品功能，也没有第三方 Rust 依赖。执行程序会直接退出。
-
-当前里程碑是共同评审 [C1 系统上下文](docs/architecture/system-context.md)与 [C2 容器设计](docs/architecture/containers.md)。完成标准：
-
-- 明确用户、自动化客户端、源文件、备份仓库和恢复位置之间的关系。
-- 明确单一服务器进程、浏览器、HTTP API、工作目录和配置的职责。
-- 确认第一条备份—恢复闭环的范围，记录暂缓的功能及尚未决定的存储问题。
-
-C1、C2 当前描述待实现的目标设计。最小闭环已确认：单个本地源、单个本地备份目标、手动备份、恢复到另一个目录并比较内容。每次全量备份独立存放，使用 JSON 清单和按文件 Zstd 压缩；校验解压后的原始内容，完成后才发布为正式备份。失败或中断应明确报告原因，保护原文件和已有成功备份。增量、筛选、加密、计划任务和远程目标逐步讨论，不预建对应模块或接口。
-
-第一阶段保证普通文件内容和目录结构，包括空目录；权限、修改时间、符号链接及其他高级恢复能力后续加入。
-
-## 文档与示例
-
-- [项目架构入口](docs/architecture/README.md)：C1、C2 和当前设计讨论。
-- [HTTP API 契约草案](docs/http-api.md)：异步运行查询、中止、备份与恢复请求及错误规则，尚未实现。
-- [课程报告资料](docs/report/README.md)：上一阶段的需求与设计快照，包含 20 个用例；其中实现状态不代表当前代码。
-- [示例工作目录](working-directory-example/config.json)：拟定的监听地址、API key 和控制台下载配置；下载链接为占位值，示例 key 为公开本地测试值，当前程序尚不读取它。
-
-示例目录仅将 `config.json` 纳入 Git，其他测试数据和运行产物均忽略；其他目录的自用 `config.json` 默认忽略。本地 `docs/report/report.docx` 及模板继续保留，不纳入 Git。报告工具的使用见报告目录说明。
-
-## 开发与验证
-
-`rust-toolchain.toml` 固定 Rust 1.98.0、Clippy 与 rustfmt，产品采用 Rust 2024 edition。Python 3.13 与 uv 只用于文档工具，不进入产品运行时。Rust 依赖在实现具体行为时再添加。
+## Development and usage
 
 ```shell
-cargo run
+cargo run -- -d working-directory-example
+curl -H 'Authorization: Bearer example-local-test-key' http://127.0.0.1:8080/api/status
 uv run scripts/check.py
 ```
 
-`cargo run` 当前仅执行空入口。统一检查包括 Rust 格式、Clippy、测试、构建以及 Python lint 和类型检查；当前没有产品测试。以后按外部行为和重要不变量增加适当测试，优先用小样例和实际运行获得反馈。
+Specify a working directory containing `config.json`.
+Supported command-line options are `--help` / `-h`, `--version` / `-v`, and `--working-directory` / `-d`.
 
-日常版本控制使用与 Git colocated 的 jj，从 `main@origin` 创建单一用途的 change，通过短期 `refactor/...` bookmark 和 draft PR 评审。合入以 squash merge 为默认方式，发布单独人工执行。
+## Project structure
 
-## 后续小步骤
+```text
+src/
+  main.rs     Startup sequence and error reporting on exit
+  args.rs     Command-line arguments
+  config.rs   Configuration loading and validation
+  api.rs      HTTP server, routing, authentication, and requests / responses
+  jobs.rs     Synchronous operations, in-memory job results, and job logs
+  backup.rs   Backup execution and listing
+  restore.rs  Restore execution
+```
 
-备份与恢复的异步返回方式、运行途中可发起中止已确认，接下来评审 HTTP API 和控制台下载配置草案。之后由项目作者逐步实现版本和帮助参数、工作目录与配置读取、最小 HTTP 服务、API 认证与控制台，再进入本地备份和恢复。每步明确输入、输出和失败行为，验证后再继续下一步。
+## Current status and acceptance criteria
+
+Command-line parsing, configuration, HTTP routing, authentication, JSON error responses, completed job queries, and optional JSON Lines job logs are implemented. Backup, restore, and listing file operations are not yet implemented and return HTTP 501. Backup and restore responses include the completed job with `state: "failed"` and `error.code: 501`. The manifest model and its read/write operations are implemented but have not yet been integrated with file operations. There is currently no web console or progress reporting.
+
+The HTTP server uses one request worker. Backup and restore run synchronously within their requests: a response contains the final job result, with HTTP 200 on success or the operation's error status on failure, plus a `Location` header for querying the completed job. Other requests, including status and job queries, wait until the current request finishes. There are no background job threads, concurrent operations, or cancellation endpoint. `GET /api/status` returns the version only.
+
+`logging.enabled` controls job logging and defaults to `false`. `logging.file` specifies the log file and defaults to `jobs.jsonl`; relative paths are resolved against the working directory. Logs append a `running` record before each operation and a `succeeded` or `failed` record afterward, including the request, result, and error. A start-log failure prevents execution; a completion-log failure returns HTTP 500 while retaining the completed result in memory. Restarting clears in-memory jobs, so queries for previous `job_id` values return HTTP 404. When logging is enabled, logs remain available for troubleshooting. Backup metadata is stored separately in manifests.
+
+The current milestone is a minimal end-to-end workflow for local full backups and restores, with the following acceptance criteria:
+
+- Preserve regular file contents, directory structure, and empty directories; compress each file with Zstd, save a manifest, and verify content integrity.
+- Execute backup and restore requests synchronously, return the completed result and job ID, and support later result queries.
+- Run one operation at a time. Store the information needed for restoration in manifests, keep completed job records available for queries within the process, and optionally write start and completion records to logs.
+- Restore a backup into a separate empty directory and compare relative paths, entry types, and contents. Report clear reasons for failures or interruptions while preserving source files and existing successful backups.
+
+File operations, path validation, and consistency checks after abnormal exits are not yet implemented. Following the pair-programming agreement, the next steps are to implement backup and restore file operations incrementally and integrate manifest writing. Path validation must still reject overlapping source, repository, and restore destination paths within an operation. Each step should define its inputs, outputs, and failure behavior and be verified before proceeding.
+
+## Documentation
+
+- [C1 System Context](docs/architecture/system-context.md)
+- [C2 Containers](docs/architecture/containers.md)
+
+## TODOs
+
+- Service restart: design this later; no corresponding endpoint or control flow is currently retained.
+- Web console: implement after the core backup and restore workflow is complete, controlled by `web_ui.enabled`.
+- Permissions, modification times, symbolic links, and other advanced restore capabilities.
+- Scheduled jobs, incremental backups, retention policies, file filtering, and repository encryption. Consider WebDAV / S3 after the local workflow is stable. Mobile clients, real-time synchronization, and multi-user collaboration are outside the current scope.
 
 ## License
 
-见 [LICENSE](LICENSE)。
+[LICENSE](LICENSE).

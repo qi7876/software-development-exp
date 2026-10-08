@@ -1,104 +1,29 @@
-# C2 容器设计
+# C2 Containers
 
-计划只发布一个 `bak` 二进制，运行一个进程。
+`bak` runs as a single binary with an HTTP service and uses the local file system for configuration, backup repositories, restore destinations, and optional job logs.
 
-通过在 config 中指定 Web 控制台压缩包链接以及本地路径，软件会自动下载并解压到本地，然后使用 HTTP 服务器提供页面与静态资源；控制台与 curl 都通过 HTTP API 访问同一个服务器。备份、恢复及后续调度在服务器进程内完成。
+The HTTP service uses Rouille with one request worker. It processes requests sequentially, and backup and restore execute directly within the request. Status and job queries wait while an operation runs. Rouille manages its networking threads internally; there are no application job threads or concurrent operations.
 
-```text
-浏览器 <--> bak 服务器：HTTP 获取 HTML / JavaScript
-浏览器 <--> bak 服务器：HTTP JSON + Bearer secret key
-curl   <--> bak 服务器：HTTP JSON + Bearer secret key
+The binary contains these modules:
 
-bak 服务器（单一进程）
-  |-- 启动时读取：工作目录 / config.json
-  |-- 备份时读取：源文件系统
-  |-- 写入 / 读取：本地备份仓库
-  `-- 校验后放置：指定恢复目录
-```
+- `args`: parse command-line arguments.
+- `config`: load and validate configuration.
+- `api`: handle routing, authentication, input validation, and responses.
+- `jobs`: execute operations synchronously, retain completed results, and append optional logs.
+- `backup`: execute and list backups; currently file-operation stubs plus manifest support.
+- `restore`: restore backups; currently a file-operation stub.
 
-所有连接表示待实现的交互。Axum 与 Tokio 沿用前一阶段的技术方向，在写 HTTP 服务时再引入依赖；图中的文件和目录是数据存储，不代表额外服务进程。
-
-| 运行单元 | 目标职责 |
-|---|---|
-| `bak` 服务器 | 处理启动参数与配置，提供控制台和认证 API，在同一进程内执行备份与恢复并返回明确结果。 |
-| 浏览器中的 Web 控制台 | 接收用户输入，通过统一 API 管理操作并展示结果；不直接访问服务器文件系统。 |
-| curl / 自动化客户端 | 携带 secret key 调用同一 API，以 JSON 处理结果与错误。 |
-
-## 启动与配置边界
-
-| 参数 | 目标行为 |
-|---|---|
-| `--version` / `-v` | 显示版本后退出。 |
-| `--help` / `-h` | 显示帮助与配置手册后退出。 |
-| `--working-directory <PATH>` / `-d <PATH>` | 设置工作目录，读取其中的 `config.json`。 |
-
-不指定目录时提示错误并退出，打印帮助；帮助和版本不读取配置、不启动服务器。配置在启动时读取，也可以通过 HTTP API 重新读取。目录、配置或监听端口不可用时，启动应以非零状态失败，并说明原因。
-
-### 配置字段草案
-
-`config.json` 使用以下字段，不放入备份来源、仓库或运行记录：
-
-| 字段 | 类型与含义 |
-|---|---|
-| `listen` | 字符串，服务器监听地址，例如 `127.0.0.1:8080`。 |
-| `secret_key` | 非空字符串，HTTP API 的共享访问凭据。 |
-| `web_console.archive_url` | 字符串，控制台 ZIP 压缩包的 HTTP / HTTPS 下载地址。 |
-| `web_console.directory` | 非空路径字符串，控制台解压后的专用目录；相对路径以工作目录为基准，也允许绝对路径。 |
-
-第一版要求全部字段显式提供。ZIP 内根目录必须包含 `index.html`，其他资源按原相对路径解压。`web_console.directory` 仅存放控制台资源，不能使用工作目录本身或包含 `config.json`、备份仓库的目录；服务器仅从控制台目录提供静态文件。
-
-草案采用启动时下载的方式：先下载、解压到临时目录，拒绝越出解压目录的条目，检查入口文件后才发布为控制台目录。下载、解压或发布失败则启动失败；已有控制台文件不应被未完成的下载替换。控制台 ZIP 与备份文件的 Zstd 压缩是两种不同用途。
-
-重载也先完整读取和校验工作目录下的 `config.json`，再准备新控制台资源。`listen` 改变时拒绝本次重载，并提示需要重启；`secret_key` 与控制台配置可在准备成功后一起生效。重载失败继续使用原配置与原控制台。成功更换 key 后，新请求必须使用新 key，响应不返回 key。
-
-[示例工作目录](../../working-directory-example/config.json)提供字段样例；其中 `example.com` 链接是占位值，应替换为实际控制台 ZIP 地址。当前空程序不读取配置或下载资源。压缩包格式、启动下载方式和重载范围仍是本轮待评审的草案。
-
-## 通信与数据边界
-
-控制台页面可公开获取，业务 API 必须使用 `Authorization: Bearer <secret_key>` 认证；key 不放在 URL、日志或响应中。控制台的 key 保存在页面内存以及浏览器数据。默认监听本地 loopback，HTTP 服务不提供内置 TLS，远程访问由 HTTPS 反向代理提供传输加密。
-
-所有文件路径指向服务器可访问的文件系统，而非浏览器所在设备。源文件用于读取；备份仓库保存可独立恢复的内容与必要信息；恢复目录接收校验成功的文件。任务和运行记录的持久化方式尚未决定，不预先增加数据库容器。
-
-服务器内使用普通 Rust 调用；API 类型、路由和业务代码属于同一 Cargo package。按真实职责增加模块，多个调用方出现稳定共用模式后再考虑抽象。后续计划任务由同进程调度，服务器退出后不再执行。
-
-## HTTP API 草案
-
-已确认备份和恢复异步执行：HTTP 请求接收后返回运行 ID，控制台与 curl 查询进度和最终结果，断开请求连接或关闭浏览器不取消运行。`job_id` 标识一次运行，`backup_id` 标识成功发布的备份，两者用途不同。
-
-已确认运行途中可以发起中止。中止由服务器协作执行，状态从 `running` 经 `cancelling` 到 `cancelled`，实际停止前仍占用运行位置；关闭浏览器与主动中止是不同操作。中止备份不发布半成品，中止恢复保留已经校验并放置的文件，中止重载不应用尚未提交的新配置。
-
-草案统一使用 `/api` 前缀和 JSON，包含服务器状态、创建备份、列出成功备份、创建恢复、查询运行、中止运行、重载配置七个接口。请求与响应示例、错误规则和运行状态见 [HTTP API 契约草案](../http-api.md)。备份来源、仓库和恢复目录直接随请求传入，第一阶段无需先建立任务配置或仓库注册表。
-
-为简化共享文件的处理，草案在服务器内一次只接受一个备份、恢复或重载运行，忙时返回冲突错误；运行查询仍可使用。运行状态先保存在进程内存，重启后不保留查询记录、不自动续跑。已成功发布的备份仍可从仓库列出；持久化运行记录后续再讨论。
-
-## 已确认的恢复范围
-
-第一阶段恢复普通文件内容和目录结构，包括空目录。验收时比较恢复后的相对路径、条目类型和普通文件内容，确认与备份时的内容和结构一致。
-
-文件权限、修改时间、符号链接及其他高级恢复能力后续逐项加入。
-
-## 已确认的备份仓库方案
-
-第一阶段每次执行全量备份，生成一个可独立恢复的目录，包含 JSON 清单与按文件压缩的内容。普通文件使用 Zstd 流式压缩与解压，不需要将整个文件读入内存。按文件存储便于单独校验和恢复；暂不引入增量、去重或共享压缩字典。[Zstd 官方手册](https://facebook.github.io/zstd/doc/api_manual_v1.5.7.html)提供流式接口说明。
+`main` loads configuration, opens the optional log, and passes ownership of the job manager to the HTTP service. The job manager owns an ordinary map and log file. A single mutex at the HTTP handler boundary satisfies Rouille's `Send + Sync` handler requirement; job execution and logging need no shared ownership or locks.
 
 ```text
-repository/
-  <backup-id>/
-    manifest.json
-    files/
-      按原相对路径保存的文件与目录
-      （普通文件的内容为 Zstd 压缩数据）
+Users / automation scripts
+          |
+          | HTTP + Bearer authentication
+          v
+         api --> jobs --> backup / restore
+                   |             |
+                   v             v
+               Job logs     Local file system
 ```
 
-`files/` 保留原相对路径和文件名，不追加 `.zst` 后缀，避免改名后与原目录名冲突；压缩方式由清单标识。清单记录备份标识、创建时间、格式版本、压缩方式，以及各条目的相对路径和类型。普通文件还记录未压缩内容的字节数和校验值；目录条目包括空目录，不产生压缩内容。所有恢复路径均相对于选定的恢复目录。
-
-备份先写入仓库内的临时目录。所有文件的压缩流必须正常结束，再读回并解压，核对原始内容的大小和校验值；完整清单写入成功后，才将临时备份发布为正式备份。恢复仅使用正式备份，临时或失败的备份不作为成功结果展示。失败或中断不替换已有成功备份，不修改源文件。
-
-恢复时按清单创建目录，将普通文件解压到恢复位置中的临时文件，校验未压缩内容的大小和校验值，通过后才放置到最终路径。首个闭环使用另一个空目录；解压、校验或写入失败时报告错误，不将未通过校验的文件作为已恢复文件。恢复整体成功要求所有条目完成，部分完成不能报告为成功。
-
-具体校验算法、压缩级别、JSON 字段和目录发布方式在实现时确定，并验证中断后的行为。这些规则是待实现的要求，当前空程序尚不执行压缩、备份或恢复。
-
-## 接下来共同决定
-
-- 评审本轮 API 与配置草案，确认 ZIP 格式、启动下载方式及配置重载范围。
-- 确认第一步实现的输入、输出和失败行为，再由项目作者开始写代码。
+Backup and restore responses contain the final result and a job ID. Successful operations return HTTP 200; failed operations return their error status. Completed results remain queryable until process exit. Cancellation and active-job tracking are removed. Start and completion logs retain evidence of attempts interrupted by process exit.

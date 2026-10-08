@@ -1,0 +1,59 @@
+# Generated from docs/report/model.yaml; do not edit directly.
+direction: down
+**.style.font-size: 32
+(** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+diagram: "Configure and Save a Task over HTTP (Planned)" {
+  style.font-size: 44
+  style.fill: white
+  style.stroke: transparent
+  shape: sequence_diagram
+  Client: "Web console / curl" {shape: person}
+  API: "<<boundary>>\nHTTP API" {shape: rectangle}
+  Task: "<<control>>\nTask configuration" {shape: rectangle}
+  Preview: "<<control>>\nFilter preview" {shape: rectangle}
+  KeyFile: "<<control>>\nKey file" {shape: rectangle}
+  Store: "<<entity>>\nSources / repository /\nmetadata" {shape: rectangle}
+  API.note_0: "over API, Store\nSame data-backup process; planned\nbusiness calls"
+  Client -> API: "Preview draft / Bearer key"
+  fragment_2: alt {
+    branch_2: "[Missing, invalid, or duplicate Bearer\nkey]" {
+      API -> Client: "401 JSON error" {style.stroke-dash: 5}
+    }
+    branch_4: "[Authentication succeeds]" {
+      API -> Preview: "Compile rules and run bounded preview"
+      Preview -> Store: "Read source file metadata"
+      Store -> Preview: "Candidate files" {style.stroke-dash: 5}
+      Preview -> API: "Matched / excluded counts or field\nerrors" {style.stroke-dash: 5}
+      API -> Client: "Preview JSON" {style.stroke-dash: 5}
+    }
+  }
+  Client -> API: "Submit configuration / Bearer key"
+  fragment_12: alt {
+    branch_12: "[Missing, invalid, or duplicate Bearer\nkey]" {
+      API -> Client: "401 JSON error" {style.stroke-dash: 5}
+    }
+    branch_14: "[Authentication succeeds]" {
+      API -> Task: "Validate paths, schedule, retention, and\nprotection"
+      fragment_16: "opt [Repository encryption enabled]" {
+        Task -> KeyFile: "Create password-protected, versioned\nJSON key file"
+        KeyFile -> KeyFile: "Random master key / Argon2id derivation\n/ authenticated wrapping"
+        KeyFile -> Task: "Key ID and location (master key is not\nreturned)" {style.stroke-dash: 5}
+      }
+      Task -> Store: "Check source-target relationships and\nrepository capabilities"
+      fragment_22: alt {
+        branch_22: "[All validation succeeds]" {
+          Task -> Store: "Persist task"
+          Task -> Task: "Update scheduling state in the same\nprocess"
+          Task -> API: "Task ID and warnings" {style.stroke-dash: 5}
+          API -> Client: "Save-success JSON" {style.stroke-dash: 5}
+        }
+        branch_27: "[Validation or write fails]" {
+          Task -> API: "Keep original task and return contextual\nerror" {style.stroke-dash: 5}
+          API -> Client: "Error JSON" {style.stroke-dash: 5}
+        }
+      }
+    }
+  }
+}

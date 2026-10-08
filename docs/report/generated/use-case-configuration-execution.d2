@@ -1,0 +1,94 @@
+# Generated from docs/report/use-cases.yaml; do not edit directly.
+direction: right
+**.style.font-size: 32
+(** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+diagram: "Backup Task Configuration and Execution" {
+  style.font-size: 44
+  style.fill: white
+  style.stroke: transparent
+  CLIENT: "Operator" {
+    shape: person
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  USR: "Individual user (web\nconsole)" {
+    shape: person
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  AUT: "<<system>>\nAutomation client (curl)" {
+    shape: rectangle
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  SRC: "<<system>>\nSource file system" {
+    shape: rectangle
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  TGT: "<<system>>\nBackup storage" {
+    shape: rectangle
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  system: "Data Backup System" {
+    style.font-size: 36
+    style.stroke: "#64748B"
+    style.fill: white
+    UC_01: "UC-01\nManage backup tasks" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_02: "UC-02\nRun backup" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_09: "UC-09\nConfigure data protection" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_10: "UC-10\nConfigure and preview file\nfilters" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_11: "UC-11\nValidate task configuration" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_12: "UC-12\nScan and filter source files" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_13: "UC-13\nBuild and commit snapshot" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_16: "UC-16\nCancel backup" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+  }
+  CLIENT -- system.UC_01
+  CLIENT -- system.UC_02
+  CLIENT -- system.UC_16
+  system.UC_12 -- SRC
+  system.UC_13 -- TGT
+  USR -> CLIENT: {target-arrowhead.style.filled: false}
+  AUT -> CLIENT: {target-arrowhead.style.filled: false}
+  system.UC_01 -> system.UC_09: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_01 -> system.UC_10: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_01 -> system.UC_11: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_02 -> system.UC_12: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_02 -> system.UC_13: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_16 -> system.UC_02: "<<extend>>\n[Backup is running]" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+}
