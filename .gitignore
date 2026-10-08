@@ -311,3 +311,4 @@ tmbootpicker.efi
 
 # Local server configuration contains the API secret
 /data-backup.json
+config.json

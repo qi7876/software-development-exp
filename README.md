@@ -79,19 +79,32 @@ python3 - <<'PYCONFIG'
 import json
 import secrets
 
-with open("data-backup.json", "x") as config:
+with open("config.json", "x") as config:
     json.dump({"listen": "127.0.0.1:8080", "secret_key": secrets.token_hex(32)}, config, indent=2)
 PYCONFIG
 cargo run
 ```
 
-也可复制 `data-backup.example.json` 并填写 `secret_key`。示例中的空 key 会被拒绝。Python 仅用于上述一次性配置生成，服务器运行只需 Rust 二进制与配置文件。`data-backup.json` 已加入 `.gitignore`。
+也可将 `data-backup.example.json` 复制为工作目录下的 `config.json`，并填写 `secret_key`。示例中的空 key 会被拒绝。Python 仅用于上述一次性配置生成，服务器运行只需 Rust 二进制与配置文件。`config.json` 已加入 `.gitignore`。
 
-程序不接受子命令或参数。默认读取当前目录的 `data-backup.json`；自定义路径使用 `DATA_BACKUP_CONFIG`：
+程序支持三个启动 flag，不提供业务子命令：
+
+| 参数 | 用途 |
+|---|---|
+| `--version` / `-v` | 输出软件版本并退出。 |
+| `--help` / `-h` | 输出使用帮助、配置字段说明和示例后退出。 |
+| `--working-directory <PATH>` / `-d <PATH>` | 设置进程工作目录，并读取该目录下的 `config.json`。 |
+
+默认工作目录为启动时的当前目录；相对目录参数以启动时的目录为基准解析，后续相对路径以设置后的工作目录为基准。支持 `--working-directory=<PATH>`；路径含空格时使用引号。
 
 ```shell
-DATA_BACKUP_CONFIG=/path/to/config.json ./target/debug/data-backup
+./target/debug/data-backup --version
+./target/debug/data-backup --help
+./target/debug/data-backup -d /path/to/backups
+cargo run -- --working-directory "/path/with spaces"
 ```
+
+`--help` 和 `--version` 不读取配置或启动服务器。未知参数和缺失的目录参数以退出码 2 报错；目录不存在、目录参数指向普通文件或配置加载失败时，以非零状态退出。原 `DATA_BACKUP_CONFIG` 环境变量不再使用，旧 `data-backup.json` 应改名为工作目录下的 `config.json`。
 
 配置只在启动时读取；修改后需重启。`listen` 必须是 IP:port（IPv6 使用 `[::1]:8080`），`secret_key` 必须非空且只包含不带空格的可见 ASCII 字符；建议用随机生成的 key。未知字段、缺失字段、配置读取失败或端口占用都会使程序以非零状态退出；诊断不会输出 secret key。Ctrl-C 或 SIGTERM 会停止接收连接并等待当前 HTTP 请求结束。
 

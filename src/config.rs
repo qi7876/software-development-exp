@@ -35,9 +35,7 @@ pub(crate) enum ConfigError {
 }
 
 impl Config {
-    pub(crate) fn load() -> Result<Self, ConfigError> {
-        let path = std::env::var_os("DATA_BACKUP_CONFIG")
-            .map_or_else(|| PathBuf::from("data-backup.json"), PathBuf::from);
+    pub(crate) fn load(path: PathBuf) -> Result<Self, ConfigError> {
         let bytes = std::fs::read(&path).map_err(|source| ConfigError::Read {
             path: path.clone(),
             source,

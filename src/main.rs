@@ -1,20 +1,42 @@
 //! The single Data Backup process: HTTP API, web console, and backup services.
 
+mod arguments;
 mod config;
 pub mod domain;
 mod server;
 
-use std::{error::Error, process::ExitCode};
+use std::{error::Error, path::PathBuf, process::ExitCode};
+
+use arguments::Arguments;
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    let working_directory = match Arguments::parse(std::env::args_os().skip(1)) {
+        Ok(Arguments::Help) => {
+            println!(
+                "data-backup {}\n\n{}",
+                env!("CARGO_PKG_VERSION"),
+                arguments::HELP
+            );
+            return ExitCode::SUCCESS;
+        }
+        Ok(Arguments::Version) => {
+            println!("data-backup {}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
+        }
+        Ok(Arguments::Serve { working_directory }) => working_directory,
+        Err(error) => {
+            eprintln!("error: {error}\nTry 'data-backup --help' for usage.");
+            return ExitCode::from(2);
+        }
+    };
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_target(false)
         .with_ansi(false)
         .init();
 
-    match run().await {
+    match run(working_directory).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!(%error, "server failed");
@@ -23,13 +45,17 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run() -> Result<(), Box<dyn Error>> {
-    if std::env::args_os().len() != 1 {
-        return Err(
-            "data-backup accepts no arguments; configure it using DATA_BACKUP_CONFIG".into(),
-        );
-    }
-    let config = config::Config::load()?;
+async fn run(working_directory: PathBuf) -> Result<(), Box<dyn Error>> {
+    std::env::set_current_dir(&working_directory).map_err(|error| {
+        std::io::Error::new(
+            error.kind(),
+            format!(
+                "cannot use working directory {}: {error}",
+                working_directory.display()
+            ),
+        )
+    })?;
+    let config = config::Config::load(std::env::current_dir()?.join("config.json"))?;
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await
         .map_err(|error| {
