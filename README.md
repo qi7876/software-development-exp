@@ -99,7 +99,7 @@ PYCONFIG
 cargo run
 ```
 
-也可将 `data-backup.example.json` 复制为工作目录下的 `config.json`，并填写 `secret_key`。示例中的空 key 会被拒绝。Python 仅用于上述一次性配置生成，服务器运行只需 Rust 二进制与配置文件。`config.json` 已加入 `.gitignore`。
+也可将 `working-directory-example/config.json` 复制到自己的工作目录中，并将 `secret_key` 替换为随机生成的值。Python 仅用于上述一次性配置生成，服务器运行只需 Rust 二进制与配置文件。自用 `config.json` 默认由 `.gitignore` 忽略。
 
 程序支持三个启动 flag，不提供业务子命令：
 
