@@ -9,24 +9,6 @@ pub(crate) struct Config {
     pub(crate) listen: SocketAddr,
     pub(crate) secret_key: String,
     pub(crate) web_ui: WebUIConfig,
-    #[serde(default)]
-    pub(crate) logging: LoggingConfig,
-}
-
-#[derive(serde::Deserialize, Debug)]
-#[serde(default)]
-pub(crate) struct LoggingConfig {
-    pub(crate) enabled: bool,
-    pub(crate) file: PathBuf,
-}
-
-impl Default for LoggingConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            file: PathBuf::from("jobs.jsonl"),
-        }
-    }
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -42,7 +24,12 @@ impl Config {
         let config_path = working_directory.join("config.json");
         let config_data = std::fs::read(&config_path)
             .map_err(|error| format!("cannot read config {}: {error}", config_path.display()))?;
-        let mut config = serde_json::from_slice::<Config>(&config_data)
+        let value: serde_json::Value = serde_json::from_slice(&config_data)
+            .map_err(|error| format!("cannot parse config {}: {error}", config_path.display()))?;
+        if value.get("logging").is_some() {
+            return Err(format!("config {} contains obsolete logging settings; remove logging: job history is now stored in jobs.sqlite3", config_path.display()).into());
+        }
+        let mut config = serde_json::from_value::<Config>(value)
             .map_err(|error| format!("cannot parse config {}: {error}", config_path.display()))?;
 
         if config.secret_key.is_empty() {
@@ -63,13 +50,35 @@ impl Config {
             config.web_ui.directory = working_directory.join(&config.web_ui.directory);
         }
 
-        if config.logging.enabled && config.logging.file.as_os_str().is_empty() {
-            return Err("logging.file must not be empty when logging is enabled".into());
-        }
-        if config.logging.file.is_relative() {
-            config.logging.file = working_directory.join(&config.logging.file);
-        }
-
         Ok(config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::TestDirectory;
+
+    #[test]
+    fn configuration_rejects_obsolete_logging_settings() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let mut config: serde_json::Value =
+            serde_json::from_str(include_str!("../working-directory-example/config.json"))?;
+        std::fs::write(
+            directory.path().join("config.json"),
+            serde_json::to_vec(&config)?,
+        )?;
+        Config::load(directory.path())?;
+        config["logging"] = serde_json::json!({"enabled": false});
+        std::fs::write(
+            directory.path().join("config.json"),
+            serde_json::to_vec(&config)?,
+        )?;
+        let error = Config::load(directory.path())
+            .err()
+            .ok_or("accepted obsolete logging settings")?;
+        assert!(error.to_string().contains("remove logging"));
+        assert!(error.to_string().contains("jobs.sqlite3"));
+        Ok(())
     }
 }

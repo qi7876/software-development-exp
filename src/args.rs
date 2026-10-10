@@ -19,7 +19,7 @@ pub(crate) fn parse() -> Result<PathBuf, Box<dyn Error>> {
                 .required(true)
                 .value_parser(value_parser!(PathBuf)),
         )
-        .after_help("Configuration: docs/configuration.md");
+        .after_help("Configuration: README.md");
 
     let directory = command
         .get_matches()

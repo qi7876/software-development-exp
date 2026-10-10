@@ -6,9 +6,13 @@ mod backup;
 mod config;
 mod jobs;
 mod restore;
+mod storage;
+#[cfg(test)]
+mod test_support;
 
-fn main() -> ExitCode {
-    match run() {
+#[tokio::main]
+async fn main() -> ExitCode {
+    match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{error}");
@@ -17,7 +21,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<(), Box<dyn Error>> {
+async fn run() -> Result<(), Box<dyn Error>> {
     let directory = args::parse()?;
     let working_directory = std::fs::canonicalize(&directory).map_err(|error| {
         format!(
@@ -26,25 +30,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         )
     })?;
     println!("working_directory: {}", working_directory.display());
-
     let config = config::Config::load(&working_directory)?;
-    let log_file = if config.logging.enabled {
-        Some(
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&config.logging.file)
-                .map_err(|error| {
-                    format!(
-                        "cannot open task log {}: {error}",
-                        config.logging.file.display()
-                    )
-                })?,
-        )
-    } else {
-        None
-    };
-    let jobs = jobs::JobManager::new(working_directory, log_file);
-
-    api::serve(config, jobs)
+    let jobs = jobs::JobManager::open(working_directory).await?;
+    api::serve(config, jobs).await
 }

@@ -1,131 +1,186 @@
-use http::StatusCode;
-use rouille::{Request, Response, Server};
+use axum::{
+    Json, Router,
+    extract::{DefaultBodyLimit, FromRequest, Request, State, rejection::JsonRejection},
+    http::{StatusCode, header},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::{get, post},
+};
 use serde::{Deserialize, de::DeserializeOwned};
-use serde_json::{Value, json};
-use std::{error::Error, io::Read, path::PathBuf, sync::Mutex};
+use serde_json::json;
+use std::{error::Error, future::IntoFuture, path::PathBuf};
+use tokio::sync::watch;
 
 use crate::{
     config::Config,
-    jobs::{JobError, JobInfo, JobManager, JobState},
+    jobs::{JobError, JobManager, JobRequest},
 };
 
-pub(crate) fn serve(config: Config, jobs: JobManager) -> Result<(), Box<dyn Error>> {
-    // Rouille requires a Send + Sync handler even with one request worker.
-    let jobs = Mutex::new(jobs);
-    let server = Server::new(config.listen, move |request| match jobs.lock() {
-        Ok(mut jobs) => handle(request, &mut jobs, &config.secret_key),
-        Err(error) => Response::from(JobError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("cannot access job manager: {error}"),
-        )),
-    })
-    .map_err(|error| format!("cannot listen on {}: {error}", config.listen))?
-    .pool_size(1);
-    println!("Listening on {}", server.server_addr());
-    server.run();
-    Err("HTTP server stopped unexpectedly".into())
+#[derive(Clone)]
+struct AppState {
+    jobs: JobManager,
+    secret_key: String,
 }
 
-fn handle(request: &Request, jobs: &mut JobManager, secret_key: &str) -> Response {
-    let path = request.raw_url().split('?').next().unwrap_or("");
+pub(crate) fn router(jobs: JobManager, secret_key: String) -> Router {
+    let state = AppState { jobs, secret_key };
+    Router::new()
+        .route("/", get(|| async { "bak is running" }))
+        .route(
+            "/api/status",
+            get(|| async { Json(json!({"version": env!("CARGO_PKG_VERSION")})) }),
+        )
+        .route("/api/backups", get(list_backups).post(start_backup))
+        .route("/api/restores", post(start_restore))
+        .route("/api/jobs/{job_id}", get(get_job))
+        .fallback(|| async { JobError::new(StatusCode::NOT_FOUND, "route not found") })
+        .method_not_allowed_fallback(|| async {
+            JobError::new(StatusCode::METHOD_NOT_ALLOWED, "method not allowed")
+        })
+        .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
+        .layer(middleware::from_fn_with_state(state.clone(), authorize))
+        .with_state(state)
+}
+
+pub(crate) async fn serve(config: Config, jobs: JobManager) -> Result<(), Box<dyn Error>> {
+    let listener = tokio::net::TcpListener::bind(config.listen)
+        .await
+        .map_err(|error| format!("cannot listen on {}: {error}", config.listen))?;
+    println!("Listening on {}", listener.local_addr()?);
+    let (stop, mut server_stop) = watch::channel(false);
+    let worker_jobs = jobs.clone();
+    let worker_stop = stop.subscribe();
+    let mut worker = tokio::spawn(async move { worker_jobs.run_worker(worker_stop).await });
+    let server = axum::serve(listener, router(jobs.clone(), config.secret_key))
+        .with_graceful_shutdown(async move {
+            // Sender closure also means the owner has stopped the service.
+            while !*server_stop.borrow() {
+                if server_stop.changed().await.is_err() {
+                    break;
+                }
+            }
+        })
+        .into_future();
+    tokio::pin!(server);
+    let mut worker_finished = false;
+    let mut server_finished = false;
+    let outcome: Result<(), Box<dyn Error>> = tokio::select! {
+        result = shutdown_signal() => result.map_err(Into::into),
+        result = &mut server => {
+            server_finished = true;
+            match result {
+                Ok(()) => Err("HTTP server stopped unexpectedly".into()),
+                Err(error) => Err(format!("HTTP server failed: {error}").into()),
+            }
+        }
+        result = &mut worker => {
+            worker_finished = true;
+            match result {
+                Ok(Ok(())) => Err("job worker stopped unexpectedly".into()),
+                Ok(Err(error)) => Err(error.into()),
+                Err(error) => Err(format!("job worker task failed: {error}").into()),
+            }
+        }
+    };
+    stop.send_replace(true);
+    let (worker_outcome, server_outcome) = tokio::join!(
+        async {
+            if worker_finished {
+                return Ok(());
+            }
+            match worker.await {
+                Ok(result) => result.map_err(|error| -> Box<dyn Error> { error.into() }),
+                Err(error) => {
+                    Err(format!("job worker task failed during shutdown: {error}").into())
+                }
+            }
+        },
+        async {
+            if server_finished {
+                return Ok(());
+            }
+            server.await.map_err(|error| -> Box<dyn Error> {
+                format!("HTTP server failed during shutdown: {error}").into()
+            })
+        }
+    );
+    jobs.close().await;
+    // Report secondary shutdown failures as well as the original cause.
+    if outcome.is_err() {
+        if let Err(error) = &worker_outcome {
+            eprintln!("{error}");
+        }
+        if let Err(error) = &server_outcome {
+            eprintln!("{error}");
+        }
+    }
+    outcome?;
+    worker_outcome?;
+    server_outcome
+}
+
+async fn shutdown_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await
+}
+
+async fn authorize(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let path = request.uri().path();
     if path == "/api" || (path.starts_with("/api/") && path != "/api/") {
         let authorized = request
-            .header("Authorization")
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
             .and_then(|value| value.split_once(' '))
             .is_some_and(|(scheme, key)| {
-                scheme.eq_ignore_ascii_case("Bearer") && key == secret_key
+                scheme.eq_ignore_ascii_case("Bearer") && key == state.secret_key
             });
         if !authorized {
-            return Response::from(JobError::new(
-                StatusCode::UNAUTHORIZED,
-                "missing or invalid API key",
-            ))
-            .with_additional_header("WWW-Authenticate", "Bearer");
+            let mut response =
+                JobError::new(StatusCode::UNAUTHORIZED, "missing or invalid API key")
+                    .into_response();
+            response.headers_mut().insert(
+                header::WWW_AUTHENTICATE,
+                axum::http::HeaderValue::from_static("Bearer"),
+            );
+            return response;
         }
     }
-    route(request, path, jobs).unwrap_or_else(Response::from)
+    next.run(request).await
 }
 
-fn route(request: &Request, path: &str, jobs: &mut JobManager) -> Result<Response, JobError> {
-    let segments: Vec<_> = path.split('/').collect();
-    match (request.method(), segments.as_slice()) {
-        ("GET" | "HEAD", ["", ""]) => Ok(Response::text("bak is running")),
-        ("GET" | "HEAD", ["", "api", "status"]) => Ok(status()),
-        ("GET" | "HEAD", ["", "api", "backups"]) => list_backups(request, jobs),
-        ("POST", ["", "api", "backups"]) => start_backup(request, jobs),
-        ("POST", ["", "api", "restores"]) => start_restore(request, jobs),
-        ("GET" | "HEAD", ["", "api", "jobs", job_id]) if !job_id.is_empty() => {
-            get_job(&decode_job_id(job_id)?, jobs)
-        }
-        (_, ["", ""] | ["", "api", "status" | "backups" | "restores"]) => Err(JobError::new(
-            StatusCode::METHOD_NOT_ALLOWED,
-            "method not allowed",
-        )),
-        (_, ["", "api", "jobs", job_id]) if !job_id.is_empty() => Err(JobError::new(
-            StatusCode::METHOD_NOT_ALLOWED,
-            "method not allowed",
-        )),
-        _ => Err(JobError::new(StatusCode::NOT_FOUND, "route not found")),
-    }
-}
-
-impl From<JobError> for Response {
-    fn from(error: JobError) -> Self {
-        Response::json(&json!({"error": error_json(&error)})).with_status_code(error.code.as_u16())
-    }
-}
-
-fn decode_job_id(encoded: &str) -> Result<String, JobError> {
-    percent_encoding::percent_decode_str(encoded)
-        .decode_utf8()
-        .map(|value| value.into_owned())
-        .map_err(|error| JobError::new(StatusCode::BAD_REQUEST, format!("invalid job_id: {error}")))
-}
-
-fn read_json<T: DeserializeOwned>(request: &Request) -> Result<T, JobError> {
-    // Keep the previous HTTP body's 2 MiB limit.
-    const MAX_BODY_BYTES: u64 = 2 * 1024 * 1024;
-    let content_type = request
-        .header("Content-Type")
-        .and_then(|value| value.split(';').next())
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
-    if content_type != "application/json"
-        && !(content_type.starts_with("application/") && content_type.ends_with("+json"))
-    {
-        return Err(JobError::new(
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "Content-Type must be application/json or application/*+json",
-        ));
-    }
-    let body = request.data().ok_or_else(|| {
-        JobError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "request body has already been read",
+impl IntoResponse for JobError {
+    fn into_response(self) -> Response {
+        (
+            self.code,
+            Json(json!({"error": {"code": self.code.as_u16(), "message": self.message}})),
         )
-    })?;
-    let mut bytes = Vec::new();
-    body.take(MAX_BODY_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| {
-            JobError::new(
-                StatusCode::BAD_REQUEST,
-                format!("cannot read request body: {error}"),
-            )
-        })?;
-    if bytes.len() as u64 > MAX_BODY_BYTES {
-        return Err(JobError::new(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "request body exceeds 2 MiB",
-        ));
+            .into_response()
     }
-    serde_json::from_slice(&bytes).map_err(|error| {
-        JobError::new(
-            StatusCode::BAD_REQUEST,
-            format!("cannot parse request JSON: {error}"),
-        )
-    })
+}
+
+async fn read_json<T: DeserializeOwned>(request: Request) -> Result<T, JobError> {
+    Json::<T>::from_request(request, &())
+        .await
+        .map(|Json(value)| value)
+        .map_err(|error: JsonRejection| {
+            // axum distinguishes JSON shape failures as 422; bak's contract uses 400.
+            let status = if error.status() == StatusCode::UNPROCESSABLE_ENTITY {
+                StatusCode::BAD_REQUEST
+            } else {
+                error.status()
+            };
+            JobError::new(status, error.body_text())
+        })
 }
 
 #[derive(Deserialize)]
@@ -133,16 +188,11 @@ struct BackupRequest {
     source: PathBuf,
     repository: PathBuf,
 }
-
 #[derive(Deserialize)]
 struct RestoreRequest {
     repository: PathBuf,
     backup_id: String,
     destination: PathBuf,
-}
-
-fn error_json(error: &JobError) -> Value {
-    json!({"code": error.code.as_u16(), "message": error.message})
 }
 
 fn validate_path(path: &std::path::Path, field: &str) -> Result<(), JobError> {
@@ -165,64 +215,60 @@ fn validate_backup_id(id: &str) -> Result<(), JobError> {
     Ok(())
 }
 
-fn job_json(job: &JobInfo) -> Result<Value, JobError> {
-    job.to_json()
+async fn accepted_job(jobs: &JobManager, request: JobRequest) -> Result<Response, JobError> {
+    let job = jobs.submit(request).await?;
+    let location = format!("/api/jobs/{}", job.job_id);
+    Ok((
+        StatusCode::ACCEPTED,
+        [(header::LOCATION, location)],
+        Json(job.to_json()?),
+    )
+        .into_response())
 }
 
-fn completed_job(job: JobInfo) -> Result<Response, JobError> {
-    let status = match &job.state {
-        JobState::Succeeded(_) => StatusCode::OK,
-        JobState::Failed(error) => error.code,
-        JobState::Running => {
-            return Err(JobError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "synchronous job returned before completion",
-            ));
-        }
-    };
-    let mut location = url::Url::parse("http://localhost/api/jobs/").map_err(|error| {
-        JobError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("cannot build job location: {error}"),
-        )
-    })?;
-    location
-        .path_segments_mut()
-        .map_err(|()| {
-            JobError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "cannot build job location path",
-            )
-        })?
-        .pop_if_empty()
-        .push(&job.job_id);
-    Ok(Response::json(&job_json(&job)?)
-        .with_status_code(status.as_u16())
-        .with_additional_header("Location", location.path().to_owned()))
-}
-
-fn status() -> Response {
-    Response::json(&json!({"version": env!("CARGO_PKG_VERSION")}))
-}
-
-fn start_backup(request: &Request, jobs: &mut JobManager) -> Result<Response, JobError> {
-    let request: BackupRequest = read_json(request)?;
+async fn start_backup(
+    State(state): State<AppState>,
+    request: Request,
+) -> Result<Response, JobError> {
+    let request: BackupRequest = read_json(request).await?;
     validate_path(&request.source, "source")?;
     validate_path(&request.repository, "repository")?;
-    completed_job(jobs.start_backup(request.source, request.repository)?)
+    accepted_job(
+        &state.jobs,
+        JobRequest::Backup {
+            source: request.source,
+            repository: request.repository,
+        },
+    )
+    .await
 }
 
-fn start_restore(request: &Request, jobs: &mut JobManager) -> Result<Response, JobError> {
-    let request: RestoreRequest = read_json(request)?;
+async fn start_restore(
+    State(state): State<AppState>,
+    request: Request,
+) -> Result<Response, JobError> {
+    let request: RestoreRequest = read_json(request).await?;
     validate_path(&request.repository, "repository")?;
     validate_path(&request.destination, "destination")?;
     validate_backup_id(&request.backup_id)?;
-    completed_job(jobs.start_restore(request.repository, request.backup_id, request.destination)?)
+    accepted_job(
+        &state.jobs,
+        JobRequest::Restore {
+            repository: request.repository,
+            backup_id: request.backup_id,
+            destination: request.destination,
+        },
+    )
+    .await
 }
 
-fn list_backups(request: &Request, jobs: &JobManager) -> Result<Response, JobError> {
+async fn list_backups(
+    State(state): State<AppState>,
+    request: Request,
+) -> Result<Response, JobError> {
     let mut repository = None;
-    for (key, value) in url::form_urlencoded::parse(request.raw_query_string().as_bytes()) {
+    for (key, value) in url::form_urlencoded::parse(request.uri().query().unwrap_or("").as_bytes())
+    {
         if key == "repository"
             && repository
                 .replace(PathBuf::from(value.into_owned()))
@@ -237,27 +283,67 @@ fn list_backups(request: &Request, jobs: &JobManager) -> Result<Response, JobErr
     let repository = repository
         .ok_or_else(|| JobError::new(StatusCode::BAD_REQUEST, "missing repository parameter"))?;
     validate_path(&repository, "repository")?;
-    Ok(Response::json(
-        &json!({"backups": jobs.list_backups(&repository)?}),
-    ))
+    Ok(Json(json!({"backups": state.jobs.list_backups(&repository).await?})).into_response())
 }
 
-fn get_job(job_id: &str, jobs: &JobManager) -> Result<Response, JobError> {
-    let job = jobs
-        .get_job(job_id)
+async fn get_job(State(state): State<AppState>, request: Request) -> Result<Response, JobError> {
+    let encoded = request
+        .uri()
+        .path()
+        .strip_prefix("/api/jobs/")
+        .ok_or_else(|| JobError::internal("job route has no job_id"))?;
+    let job_id = percent_encoding::percent_decode_str(encoded)
+        .decode_utf8()
+        .map_err(|error| {
+            JobError::new(StatusCode::BAD_REQUEST, format!("invalid job_id: {error}"))
+        })?;
+    let job = state
+        .jobs
+        .get_job(&job_id)
+        .await?
         .ok_or_else(|| JobError::new(StatusCode::NOT_FOUND, "job not found"))?;
-    Ok(Response::json(&job_json(job)?))
+    Ok(Json(job.to_json()?).into_response())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::jobs::{JobRequest, JobResult};
-    use std::error::Error;
+    use crate::{
+        jobs::{JobInfo, JobResult, JobState},
+        test_support::TestDirectory,
+    };
+    use axum::body::{Body, to_bytes};
+    use serde_json::Value;
+    use std::time::Duration;
+    use tower::ServiceExt;
 
-    #[test]
-    fn routing_auth_and_input_errors_follow_the_public_contract() -> Result<(), Box<dyn Error>> {
-        let mut jobs = JobManager::new(PathBuf::new(), None);
+    fn request(
+        method: &str,
+        path: &str,
+        auth: &str,
+        content_type: &str,
+        body: Vec<u8>,
+    ) -> Result<Request, axum::http::Error> {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::AUTHORIZATION, auth)
+            .header(header::CONTENT_TYPE, content_type)
+            .body(Body::from(body))
+    }
+
+    async fn json_body(response: Response) -> Result<Value, Box<dyn Error>> {
+        Ok(serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX).await?,
+        )?)
+    }
+
+    #[tokio::test]
+    async fn routing_auth_and_input_errors_follow_the_public_contract() -> Result<(), Box<dyn Error>>
+    {
+        let directory = TestDirectory::new()?;
+        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let app = router(jobs.clone(), "test-key".into());
         let cases = [
             ("GET", "/api/status", "", "", "", 401),
             ("GET", "/api", "", "", "", 401),
@@ -350,60 +436,82 @@ mod tests {
             ),
         ];
         for (method, path, auth, content_type, body, expected) in cases {
-            let request = Request::fake_http(
-                method,
-                path,
-                vec![
-                    ("Authorization".to_owned(), auth.to_owned()),
-                    ("Content-Type".to_owned(), content_type.to_owned()),
-                ],
-                body.as_bytes().to_vec(),
-            );
-            let response = handle(&request, &mut jobs, "test-key");
-            assert_eq!(response.status_code, expected, "{method} {path}");
+            let response = app
+                .clone()
+                .oneshot(request(
+                    method,
+                    path,
+                    auth,
+                    content_type,
+                    body.as_bytes().to_vec(),
+                )?)
+                .await?;
+            assert_eq!(response.status().as_u16(), expected, "{method} {path}");
             if expected == 401 {
-                assert!(response.headers.iter().any(|(name, value)| {
-                    name.eq_ignore_ascii_case("WWW-Authenticate") && value == "Bearer"
-                }));
+                assert_eq!(
+                    response
+                        .headers()
+                        .get(header::WWW_AUTHENTICATE)
+                        .and_then(|v| v.to_str().ok()),
+                    Some("Bearer")
+                );
             }
-            let body: Value = serde_json::from_reader(response.data.into_reader_and_size().0)?;
-            assert_eq!(body["error"]["code"], expected);
+            let body = json_body(response).await?;
+            assert_eq!(body["error"]["code"], expected, "{method} {path}");
             assert!(body["error"]["message"].is_string());
         }
-        let request = Request::fake_http(
-            "GET",
-            "/api/status",
-            vec![("Authorization".to_owned(), "bEaReR test-key".to_owned())],
-            vec![],
+        let response = app
+            .oneshot(request(
+                "GET",
+                "/api/status",
+                "bEaReR test-key",
+                "",
+                vec![],
+            )?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            json_body(response).await?,
+            json!({"version": env!("CARGO_PKG_VERSION")})
         );
-        let response = handle(&request, &mut jobs, "test-key");
-        assert_eq!(response.status_code, 200);
-        let body: Value = serde_json::from_reader(response.data.into_reader_and_size().0)?;
-        assert_eq!(body, json!({"version": env!("CARGO_PKG_VERSION")}));
+        jobs.close().await;
         Ok(())
     }
 
-    #[test]
-    fn oversized_json_returns_413() -> Result<(), Box<dyn Error>> {
-        let mut jobs = JobManager::new(PathBuf::new(), None);
-        let request = Request::fake_http(
-            "POST",
-            "/api/backups",
-            vec![
-                ("Authorization".to_owned(), "Bearer test-key".to_owned()),
-                ("Content-Type".to_owned(), "application/json".to_owned()),
-            ],
-            vec![b' '; 2 * 1024 * 1024 + 1],
-        );
-        let response = handle(&request, &mut jobs, "test-key");
-        assert_eq!(response.status_code, 413);
-        let body: Value = serde_json::from_reader(response.data.into_reader_and_size().0)?;
-        assert_eq!(body["error"]["code"], 413);
+    #[tokio::test]
+    async fn oversized_json_and_head_requests() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let app = router(jobs.clone(), "test-key".into());
+        let response = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/api/backups",
+                "Bearer test-key",
+                "application/json",
+                vec![b' '; 2 * 1024 * 1024 + 1],
+            )?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(json_body(response).await?["error"]["code"], 413);
+        let response = app
+            .oneshot(request(
+                "HEAD",
+                "/api/status",
+                "Bearer test-key",
+                "",
+                vec![],
+            )?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(to_bytes(response.into_body(), usize::MAX).await?.is_empty());
+        jobs.close().await;
         Ok(())
     }
 
-    #[test]
-    fn request_errors_return_status_and_json() -> Result<(), Box<dyn Error>> {
+    #[tokio::test]
+    async fn request_errors_return_status_and_json() -> Result<(), Box<dyn Error>> {
         for status in [
             StatusCode::BAD_REQUEST,
             StatusCode::UNAUTHORIZED,
@@ -415,72 +523,21 @@ mod tests {
             StatusCode::INTERNAL_SERVER_ERROR,
             StatusCode::NOT_IMPLEMENTED,
         ] {
-            let response = Response::from(JobError::new(status, "request failed"));
-            assert_eq!(response.status_code, status.as_u16());
-            let mut body = Vec::new();
-            response
-                .data
-                .into_reader_and_size()
-                .0
-                .read_to_end(&mut body)?;
+            let response = JobError::new(status, "request failed").into_response();
+            assert_eq!(response.status(), status);
             assert_eq!(
-                serde_json::from_slice::<Value>(&body)?,
+                json_body(response).await?,
                 json!({"error": {"code": status.as_u16(), "message": "request failed"}})
             );
         }
         Ok(())
     }
 
-    fn backup_job(state: JobState) -> JobInfo {
-        JobInfo {
-            job_id: "job-001".to_owned(),
-            request: JobRequest::Backup {
-                source: PathBuf::from("source"),
-                repository: PathBuf::from("repository"),
-            },
-            state,
-        }
-    }
-
-    #[test]
-    fn completed_jobs_return_outcome_status_and_location() -> Result<(), Box<dyn Error>> {
-        for (state, expected_status) in [
-            (
-                JobState::Succeeded(JobResult::Backup {
-                    backup_id: "backup-001".into(),
-                }),
-                200,
-            ),
-            (
-                JobState::Failed(JobError::new(
-                    StatusCode::NOT_IMPLEMENTED,
-                    "not implemented",
-                )),
-                501,
-            ),
-        ] {
-            let job = backup_job(state);
-            let expected = job.to_json().map_err(|error| error.message)?;
-            let response = completed_job(job).map_err(|error| error.message)?;
-            assert_eq!(response.status_code, expected_status);
-            assert_eq!(
-                response
-                    .headers
-                    .iter()
-                    .find(|(name, _)| name.eq_ignore_ascii_case("Location"))
-                    .map(|(_, value)| value.as_ref()),
-                Some("/api/jobs/job-001")
-            );
-            let body: Value = serde_json::from_reader(response.data.into_reader_and_size().0)?;
-            assert_eq!(body, expected);
-        }
-        assert!(completed_job(backup_job(JobState::Running)).is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn operation_requests_return_completed_queryable_jobs() -> Result<(), Box<dyn Error>> {
-        let mut jobs = JobManager::new(PathBuf::new(), None);
+    #[tokio::test]
+    async fn operation_requests_return_accepted_queryable_jobs() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let app = router(jobs.clone(), "test-key".into());
         for (path, payload, kind) in [
             (
                 "/api/backups",
@@ -493,92 +550,139 @@ mod tests {
                 "restore",
             ),
         ] {
-            let request = Request::fake_http(
-                "POST",
-                path,
-                vec![
-                    ("Authorization".into(), "Bearer test-key".into()),
-                    ("Content-Type".into(), "application/json".into()),
-                ],
-                serde_json::to_vec(&payload)?,
-            );
-            let response = handle(&request, &mut jobs, "test-key");
-            assert_eq!(response.status_code, 501);
+            let response = app
+                .clone()
+                .oneshot(request(
+                    "POST",
+                    path,
+                    "Bearer test-key",
+                    "application/json",
+                    serde_json::to_vec(&payload)?,
+                )?)
+                .await?;
+            assert_eq!(response.status(), StatusCode::ACCEPTED);
             let location = response
-                .headers
-                .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case("Location"))
-                .ok_or("missing job location")?
-                .1
-                .to_string();
-            let completed: Value = serde_json::from_reader(response.data.into_reader_and_size().0)?;
-            assert_eq!(completed["kind"], kind);
-            assert_eq!(completed["state"], "failed");
-            assert_eq!(completed["error"]["code"], 501);
-            let request = Request::fake_http(
-                "GET",
-                &location,
-                vec![("Authorization".into(), "Bearer test-key".into())],
-                vec![],
-            );
-            let response = handle(&request, &mut jobs, "test-key");
-            assert_eq!(response.status_code, 200);
-            let stored: Value = serde_json::from_reader(response.data.into_reader_and_size().0)?;
-            assert_eq!(stored, completed);
-            let request = Request::fake_http(
-                "POST",
-                format!("{location}/cancel"),
-                vec![("Authorization".into(), "Bearer test-key".into())],
-                vec![],
-            );
-            assert_eq!(handle(&request, &mut jobs, "test-key").status_code, 404);
+                .headers()
+                .get(header::LOCATION)
+                .ok_or("missing location")?
+                .to_str()?
+                .to_owned();
+            let accepted = json_body(response).await?;
+            assert_eq!(accepted["kind"], kind);
+            assert_eq!(accepted["state"], "queued");
+            assert!(accepted["result"].is_null());
+            assert!(accepted["error"].is_null());
+            let response = app
+                .clone()
+                .oneshot(request("GET", &location, "Bearer test-key", "", vec![])?)
+                .await?;
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(json_body(response).await?, accepted);
+            let (stop, receiver) = watch::channel(false);
+            let worker_jobs = jobs.clone();
+            let worker = tokio::spawn(async move { worker_jobs.run_worker(receiver).await });
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let response = app
+                        .clone()
+                        .oneshot(request("GET", &location, "Bearer test-key", "", vec![])?)
+                        .await?;
+                    assert_eq!(response.status(), StatusCode::OK);
+                    let body = json_body(response).await?;
+                    if body["state"] == "failed" {
+                        assert_eq!(body["error"]["code"], 501);
+                        assert_eq!(body["job_id"], accepted["job_id"]);
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+                Ok::<_, Box<dyn Error>>(())
+            })
+            .await??;
+            stop.send(true)?;
+            worker.await??;
+            let response = app
+                .clone()
+                .oneshot(request(
+                    "POST",
+                    &format!("{location}/cancel"),
+                    "Bearer test-key",
+                    "",
+                    vec![],
+                )?)
+                .await?;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
         }
+        jobs.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn database_admission_failure_returns_json_500() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        jobs.close().await;
+        let app = router(jobs, "test-key".into());
+        let response = app
+            .oneshot(request(
+                "POST",
+                "/api/backups",
+                "Bearer test-key",
+                "application/json",
+                br#"{"source":"source","repository":"repo"}"#.to_vec(),
+            )?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(json_body(response).await?["error"]["code"], 500);
         Ok(())
     }
 
     #[test]
     fn job_results_and_errors_follow_the_public_contract() -> Result<(), Box<dyn Error>> {
-        let succeeded = job_json(&backup_job(JobState::Succeeded(JobResult::Backup {
-            backup_id: "backup-001".to_owned(),
-        })))
-        .map_err(|error| error.message)?;
-        assert_eq!(succeeded["state"], "succeeded");
-        assert_eq!(
-            succeeded["result"],
-            serde_json::json!({"backup_id": "backup-001"})
-        );
-        assert!(succeeded["error"].is_null());
-
-        let failed = job_json(&backup_job(JobState::Failed(JobError {
-            code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "cannot read source".to_owned(),
-        })))
-        .map_err(|error| error.message)?;
-        assert!(failed["result"].is_null());
-        assert_eq!(failed["error"]["code"], 500);
-        assert_eq!(failed["error"]["message"], "cannot read source");
-
-        let mut restored = JobInfo::new(
-            "job-002".to_owned(),
-            JobRequest::Restore {
-                repository: PathBuf::from("repository"),
-                backup_id: "backup-001".to_owned(),
-                destination: PathBuf::from("restored"),
-            },
-        );
-        restored.state = JobState::Succeeded(JobResult::Restore {
-            destination: PathBuf::from("restored"),
-        });
-        let restored = job_json(&restored).map_err(|error| error.message)?;
-        assert_eq!(restored["kind"], "restore");
-        assert_eq!(
-            restored["result"],
-            serde_json::json!({"destination": "restored"})
-        );
-
-        for job in [succeeded, failed, restored] {
-            assert!(job.get("progress").is_none());
+        for (state, expected_state, result, error) in [
+            (JobState::Queued, "queued", Value::Null, Value::Null),
+            (JobState::Running, "running", Value::Null, Value::Null),
+            (
+                JobState::Succeeded(JobResult::Backup {
+                    backup_id: "backup-001".into(),
+                }),
+                "succeeded",
+                json!({"backup_id": "backup-001"}),
+                Value::Null,
+            ),
+            (
+                JobState::Failed(JobError::internal("cannot read source")),
+                "failed",
+                Value::Null,
+                json!({"code": 500, "message": "cannot read source"}),
+            ),
+        ] {
+            let job = JobInfo {
+                job_id: "job-001".into(),
+                request: JobRequest::Backup {
+                    source: "source".into(),
+                    repository: "repository".into(),
+                },
+                state,
+            };
+            assert_eq!(
+                job.to_json()?,
+                json!({"job_id": "job-001", "kind": "backup", "state": expected_state, "result": result, "error": error})
+            );
         }
+        let job = JobInfo {
+            job_id: "job-002".into(),
+            request: JobRequest::Restore {
+                repository: "repository".into(),
+                backup_id: "backup-001".into(),
+                destination: "restored".into(),
+            },
+            state: JobState::Succeeded(JobResult::Restore {
+                destination: "restored".into(),
+            }),
+        };
+        assert_eq!(job.to_json()?["result"], json!({"destination": "restored"}));
+        assert_eq!(job.to_json()?["kind"], "restore");
         Ok(())
     }
 }

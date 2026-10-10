@@ -1,9 +1,19 @@
 # C1 System Context
 
-`bak` is a cross-platform file backup management software for individual users, providing functions such as file backup and restore.
+`bak` is a cross-platform file backup manager for individual users, intended to create reliable local backups and restore them into a separate directory.
 
-After startup, `bak` provides an HTTP API. Individual users and automation scripts operate it through HTTP clients such as `curl`, authenticating with a Bearer secret key.
+Individual users and automation scripts access its HTTP API through clients such as curl, authenticated by a Bearer secret key. Users submit backup and restore requests, receive a durable job ID immediately, and query outcomes while background execution proceeds. A web console is planned.
 
-`bak` reads regular file contents and directory structure from source file system, stores backup contents in a local repository, and stores manifest information required for identification, verification, and restore.
+The service reads local configuration and persists its job queue and history in a SQLite database in the working directory. Repository metadata support stores the information needed for identification, verification, and restoration in a SQLite database at each local repository root. File contents remain in the filesystem. Backup, listing, and restore file operations are not yet implemented.
 
-Users / Automation Scripts <---> bak <---> file system
+```text
+Users / automation scripts <-- HTTP --> bak <---> local configuration
+                                         |
+                                         +----> SQLite job queue and history
+                                         |
+                                         +----> local repositories and restore destinations
+                                                (file operations planned;
+                                                 SQLite metadata support implemented)
+```
+
+SQLite transactions preserve job admission and metadata records; they do not make external filesystem changes transactional. Deployment currently assumes one service instance per working directory and local filesystems for its SQLite databases.

@@ -5,9 +5,5 @@
     "enabled": false,
     "archive_url": "https://example.com/bak-ui.zip",
     "directory": "web-ui"
-  },
-  "logging": {
-    "enabled": false,
-    "file": "jobs.jsonl"
   }
 }
