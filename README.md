@@ -1,207 +1,97 @@
-# Data Backup
+# bak
 
-一款以 macOS 为首发平台、面向个人桌面用户的数据备份软件。产品只发布一个 Rust 可执行文件 `data-backup`，启动后按配置运行 Web 服务器。用户通过内置 Web 控制台管理备份，自动化通过 HTTP API 与 secret key 完成。
+`bak` is a cross-platform file backup manager for individual users, designed to provide reliable, verifiable local backups that can be restored. A single binary runs an axum HTTP service on Tokio. Users interact with it through curl using a Bearer secret key; a web console is planned for later.
 
-> 项目当前处于代码框架阶段。实际架构见[项目架构](docs/architecture/README.md)；课程报告的需求与设计素材见[报告目录](docs/report/README.md)。
+## Development and usage
 
-## 产品目标
-
-- 让用户可以用少量配置创建可靠、可验证、可恢复的本地数据备份。
-- 即使浏览器关闭，计划任务也由同一服务器进程继续执行（计划能力待实现）。
-- Web 控制台与 curl 等 API 客户端调用相同的 HTTP 接口，保证行为一致。
-
-## MVP 范围
-
-首个版本支持：
-
-- 选择本地文件或目录作为备份源。
-- 备份至另一个本地目录或已挂载的外部存储。
-- 手动或按每日、每周计划执行备份。
-- 增量快照、完整性校验、历史版本浏览与恢复。
-- 可预览的文件筛选规则，以及压缩、打包和认证加密。
-- 任务状态、运行历史、日志和桌面通知。
-- Web 控制台与 HTTP API 管理相同的备份任务。
-
-核心闭环稳定后，候选扩展将支持 WebDAV 和 S3 兼容对象存储。移动端、文件实时同步和多用户协作暂不纳入当前版本。
-
-课程报告采用内容定义分块、块级 Zstandard 压缩、可选 XChaCha20-Poly1305 认证加密及不可变 pack 的设计方案。实际实现以代码和技术验证结果为准。
-
-## 技术方向
-
-- Rust：单一 package 与二进制，包含服务器、API 类型及备份业务逻辑。
-- [Axum](https://docs.rs/axum/0.8.9/axum/) + [Tokio](https://docs.rs/tokio/latest/tokio/)：HTTP 路由、异步网络及信号处理。
-- HTML + JavaScript：当前 Web 控制台通过 `include_str!` 编译进二进制；无需独立前端服务或桌面壳。
-- SQLite（计划中）：任务元数据、快照索引和运行历史。
-- Mermaid：项目架构中的简明视图；PlantUML 1.2026.8：课程报告所需的 UML 图。
-
-服务器、接口类型与后续备份逻辑位于同一进程，无本地 IPC。快照存储格式将在技术验证后决定。
-
-## 文档
-
-- [项目架构 C1/C2](docs/architecture/README.md)
-- [课程报告资料](docs/report/README.md)
-- 实验报告：本地 `docs/report/report.docx`（不纳入 Git）
-
-实验报告以当前 `docs/report/report.docx` 为直接排版基准；`docs/report/report.template.docx` 只保留为课程样式参考。
-报告素材更新后，运行：
-
-```shell
-uv run scripts/update_report.py
-```
-
-报告用例模型以 `docs/report/use-cases.yaml` 为来源，报告逻辑设计以
-`docs/report/model.yaml` 为来源。上述命令会同步生成报告使用的 PNG，
-以及 Word 中的需求与系统设计章节。可分别运行
-`uv run scripts/update_use_cases.py --check` 和
-`uv run scripts/update_system_design.py --check` 检查生成内容是否漂移。完整报告资料检查使用 `uv run scripts/check.py --report`。
-
-## 开发环境
-
-当前在 macOS Apple Silicon 上开发，使用 zsh、Apple Command Line Tools 和 LLDB；Intel Mac 在发布阶段补充验证。`rust-toolchain.toml` 固定 Rust 1.98.0、Clippy 和 rustfmt，`Cargo.lock` 固定依赖解析。Rust 2024 edition 用于产品代码；Python 3.13 与 uv 只用于需求、UML 和 Word 报告生成，不进入产品运行时。
-
-项目只有一个 Cargo package `data-backup` 和一个同名二进制。常用命令：
-
-```shell
-cargo build --all-targets
-cargo test --all-targets
-uv run scripts/check.py
-```
-
-当前使用 `serde`/`serde_json` 解析配置和输出 API JSON，`thiserror` 表达配置错误，`tracing`/`tracing-subscriber` 向标准错误输出诊断。备份、恢复、调度、持久化、压缩、加密和远程存储尚未实现。按需增加有实际行为的模块，不预先建立空的分层目录或独立共享库。
-
-## 启动与使用
-
-仓库提供可直接启动的本地测试工作目录 [working-directory-example](working-directory-example/config.json)：
+Install the Rust toolchain specified in `rust-toolchain.toml`. Install uv to run the complete local checks.
 
 ```shell
 cargo run -- -d working-directory-example
+curl -H 'Authorization: Bearer example-local-test-key' http://127.0.0.1:8080/api/status
+uv run scripts/check.py
 ```
 
-打开 <http://127.0.0.1:8080/>，使用测试 key `example-local-test-key`。也可以直接调用 API：
+Specify an existing working directory containing `config.json`. Supported command-line options are `--help` / `-h`, `--version` / `-v`, and `--working-directory` / `-d`.
+
+Configuration contains `listen`, a nonempty `secret_key`, and `web_ui` settings; see [the example](working-directory-example/config.json). Keep `web_ui.enabled` false while the console is unimplemented. Relative request paths and the web UI directory resolve against the working directory. The former `logging` section must be removed: supplying it prevents startup with an explanation. SQLite job history replaces optional JSONL logs.
+
+## HTTP API
+
+API routes require `Authorization: Bearer <secret_key>`. `GET /` returns a public service message; `GET /api/status` returns the version. GET routes also support HEAD.
+
+| Request | Behavior |
+| --- | --- |
+| `POST /api/backups` | Accept JSON with `source` and `repository`; return HTTP 202 after durably queuing a job. |
+| `POST /api/restores` | Accept JSON with `repository`, `backup_id`, and `destination`; return HTTP 202 after durably queuing a job. |
+| `GET /api/jobs/{job_id}` | Return HTTP 200 with the stored job, or HTTP 404 if it does not exist. |
+| `GET /api/backups?repository=PATH` | Backup listing remains unimplemented and returns HTTP 501. |
 
 ```shell
-curl --fail-with-body \
-  -H 'Authorization: Bearer example-local-test-key' \
-  http://127.0.0.1:8080/api/status
+curl -i -H 'Authorization: Bearer example-local-test-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"source","repository":"repository"}' \
+  http://127.0.0.1:8080/api/backups
+# Poll the Location header returned above:
+curl -H 'Authorization: Bearer example-local-test-key' \
+  http://127.0.0.1:8080/api/jobs/JOB_ID
 ```
 
-示例目录仅将 `config.json` 纳入版本控制，其他测试文件、子目录和运行产物均由 `.gitignore` 忽略。示例 key 是公开的本地测试值；使用自己的工作目录时，创建配置并设置随机 secret key（只需一次；已有文件不会被覆盖）：
+Accepted responses include `Location: /api/jobs/{job_id}` and a job with fields `job_id`, `kind`, `state`, `result`, and `error`. States are `queued`, `running`, `succeeded`, and `failed`. Pending jobs have null result/error; completed jobs contain either a result or an error. POST no longer waits for execution. A failed job query still returns HTTP 200: its `error.code` describes the operation failure. Backup and restore currently finish as failed jobs with error code 501.
 
-```shell
-umask 077
-python3 - <<'PYCONFIG'
-import json
-import secrets
+Request errors use `{"error":{"code":400,"message":"..."}}` with the corresponding HTTP status. JSON bodies are limited to 2 MiB; `application/json` and `application/*+json` are accepted. Invalid or missing fields return 400, oversized bodies 413, unsupported media types 415, and missing or invalid authentication 401 with `WWW-Authenticate: Bearer`. There is no cancellation endpoint.
 
-with open("config.json", "x") as config:
-    json.dump({"listen": "127.0.0.1:8080", "secret_key": secrets.token_hex(32)}, config, indent=2)
-PYCONFIG
-cargo run
+## Persistence and operation lifecycle
+
+The service creates `jobs.sqlite3` in the working directory. One worker executes committed jobs in FIFO insertion order while HTTP status and job queries remain responsive. Completed results and queued jobs survive restart. Client disconnection does not cancel a committed job; retrying a POST creates another job.
+
+At startup, jobs left `running` by an earlier service exit become failed with code 500 and an interruption message. They are never automatically retried because execution may have affected external files. Previously queued jobs then continue in order. On Ctrl-C or Unix SIGTERM, the service stops accepting requests and claiming jobs, waits for its active operation to finish and persist its outcome, and leaves queued jobs for the next start. A worker or outcome-persistence failure stops the service with a failure exit status rather than continuing to accept jobs with a broken worker.
+
+Run only one service instance per working directory. Both the working directory database and repository databases require local filesystems. SQLite uses WAL, `synchronous=FULL`, foreign keys, and a five-second busy timeout; pools allow at most four connections. Schema installation and versioning are transactional; unsupported versions prevent use.
+
+Repository metadata read/write support stores backup headers and ordered file/directory entries in `repository.sqlite3` at each repository root. A complete metadata record is committed atomically and an existing backup ID cannot be overwritten. The model retains format version 1, Zstd compression, and SHA-256 checksums. It is not yet connected to backup or restore execution. JSON `manifest.json` files and old JSONL logs are left untouched, and are not read or migrated.
+
+ACID guarantees cover individual database transactions. Job history and repository metadata use separate databases; they do not share a transaction. File contents remain outside SQLite, so future file operations must coordinate durable file writes with metadata publication. WAL databases may have `-wal` and `-shm` sidecars; do not copy a live database file alone as a database backup.
+
+## Project structure
+
+```text
+src/
+  main.rs          Startup and exit reporting
+  args.rs          Command-line arguments
+  config.rs        Configuration loading and validation
+  api.rs           axum routing, authentication, JSON responses, and shutdown supervision
+  jobs.rs          Durable FIFO job lifecycle and the background worker
+  storage.rs       SQLite connection settings and schema initialization
+  backup.rs        Backup/listing stubs and transactional repository metadata
+  restore.rs       Restore execution stub
+  test_support.rs  Temporary directories for tests
 ```
 
-也可将 `working-directory-example/config.json` 复制到自己的工作目录中，并将 `secret_key` 替换为随机生成的值。Python 仅用于上述一次性配置生成，服务器运行只需 Rust 二进制与配置文件。自用 `config.json` 默认由 `.gitignore` 忽略。
+## Current status and acceptance criteria
 
-程序支持三个启动 flag，不提供业务子命令：
+Command-line parsing, configuration, authenticated HTTP routing, JSON error responses, durable background jobs, restart recovery, and repository metadata storage are implemented. Backup, restore, and listing file operations remain unimplemented. There is no web console, progress reporting, or cancellation.
 
-| 参数 | 用途 |
-|---|---|
-| `--version` / `-v` | 输出软件版本并退出。 |
-| `--help` / `-h` | 输出使用帮助、配置字段说明和示例后退出。 |
-| `--working-directory <PATH>` / `-d <PATH>` | 设置进程工作目录，并读取该目录下的 `config.json`。 |
+The current milestone is a minimal end-to-end workflow for local full backups and restores, with these acceptance criteria:
 
-默认工作目录为启动时的当前目录；相对目录参数以启动时的目录为基准解析，后续相对路径以设置后的工作目录为基准。支持 `--working-directory=<PATH>`；路径含空格时使用引号。
+- Preserve regular file contents, directory structure, and empty directories; compress each file with Zstd and verify its SHA-256 integrity.
+- Return a durable job ID immediately, execute one operation at a time, and retain queryable outcomes across restart.
+- Publish complete repository metadata transactionally after the referenced file contents are durable.
+- Restore into a separate empty directory and compare relative paths, entry types, and contents. Report clear failures and interruptions while preserving source files and existing successful backups.
 
-```shell
-./target/debug/data-backup --version
-./target/debug/data-backup --help
-./target/debug/data-backup -d /path/to/backups
-cargo run -- --working-directory "/path/with spaces"
-```
+The next step is incremental implementation of file operations, including rejection of overlapping source, repository, and restore destination paths. File consistency and cleanup after abnormal exits remain to be implemented. Verify each step before continuing.
 
-`--help` 和 `--version` 不读取配置或启动服务器。未知参数和缺失的目录参数以退出码 2 报错；目录不存在、目录参数指向普通文件或配置加载失败时，以非零状态退出。原 `DATA_BACKUP_CONFIG` 环境变量不再使用，旧 `data-backup.json` 应改名为工作目录下的 `config.json`。
+## Documentation
 
-配置只在启动时读取；修改后需重启。`listen` 必须是 IP:port（IPv6 使用 `[::1]:8080`），`secret_key` 必须非空且只包含不带空格的可见 ASCII 字符；建议用随机生成的 key。未知字段、缺失字段、配置读取失败或端口占用都会使程序以非零状态退出；诊断不会输出 secret key。Ctrl-C 或 SIGTERM 会停止接收连接并等待当前 HTTP 请求结束。
+- [C1 System Context](docs/architecture/system-context.md)
+- [C2 Containers](docs/architecture/containers.md)
 
-打开 <http://127.0.0.1:8080/>，输入配置中的 secret key，再点击 Connect / refresh 查看服务器状态。页面只在内存保存 key，刷新、关闭或 Disconnect 后清除。控制台 HTML 可公开获取，但所有 `/api/` 请求必须携带 `Authorization: Bearer <secret_key>`；key 不放在 URL 或响应中。
+## TODOs
 
-curl 使用相同接口，将 `YOUR_SECRET_KEY` 换为配置中的 key：
-
-```shell
-curl --fail-with-body \
-  -H 'Authorization: Bearer YOUR_SECRET_KEY' \
-  http://127.0.0.1:8080/api/status
-```
-
-当前 API：
-
-| 请求 | 结果 |
-|---|---|
-| `GET /` | 内置 Web 控制台。 |
-| `GET /api/status` | 已认证时返回 `{"status":"ok","package_version":"0.1.0","backup_available":false}`。 |
-| 缺失、错误或重复的 Authorization header | `401` JSON 错误与 `WWW-Authenticate: Bearer`。 |
-| 已认证但不存在的 `/api/` 路径 | `404` JSON 错误。 |
-
-当前只实现服务器框架与状态查询，尚不能实际备份或恢复；后续管理功能直接扩展同一 API 和控制台。HTTP 服务无内置 TLS，默认配置绑定 loopback；远程访问应由 HTTPS 反向代理提供传输加密。secret key 控制 API 访问，不是备份数据的加密口令。
-
-调试 Rust 二进制使用 LLDB，未捕获 panic 可用 `RUST_BACKTRACE=1` 查看调用栈；业务错误通过 `Result` 返回。性能分析先用 `/usr/bin/time -l` 建立基线，再按需要用 samply、cargo-flamegraph 或 Xcode Instruments 定位 CPU、内存和 I/O 热点。`profiling` profile 继承 release 优化并保留调试符号：
-
-```shell
-cargo build --profile profiling
-samply record ./target/profiling/data-backup
-cargo flamegraph --profile profiling --bin data-backup
-```
-
-采样工具可通过 `cargo install --locked samply --version 0.13.1` 和 `cargo install --locked flamegraph --version 0.6.13` 安装。发布构建使用 `cargo build --release` 并人工验收，只发布 `target/release/data-backup`。安装、自启动和签名将在发布阶段补充。
-
-## 开发计划
-
-项目按单人、小批量迭代推进，不设置固定日历期限。同一时间只保留一个主要目标；先明确验收标准，再交付可运行增量。恢复正确性、格式兼容和删除安全优先于功能数量。
-
-```mermaid
-flowchart LR
-    I0[需求基线与架构探针] --> I1[筛选与本地备份]
-    I1 --> I2[压缩加密与恢复]
-    I2 --> I3[增量与保留策略]
-    I3 --> I4[Web 控制台 / HTTP API / 调度]
-    I4 --> I5[macOS 发布质量]
-    I3 -.核心稳定后.-> IX[候选扩展<br/>WebDAV / S3]
-```
-
-| 迭代 | 可交付增量 | 完成定义 |
-|---|---|---|
-| 0 架构风险 | 仓库格式、分块与加密管线、故障探针 | 随机恢复、元数据保密、认证失败、原子提交和崩溃清理得到验证 |
-| 1 本地备份 | 扫描、筛选预览、对象写入、快照清单和基础 HTTP API | 结果可解释，重复执行不重复存储内容 |
-| 2 恢复 | 压缩、认证加密、校验、浏览和恢复 | 完成备份—破坏源—恢复—哈希核对；错误口令不输出文件 |
-| 3 长期使用 | 增量、保留和垃圾回收 | 清理后保留快照仍可校验和恢复 |
-| 4 管理闭环 | 同进程调度、HTTP API、Web 控制台和通知 | 浏览器关闭时计划仍执行，核心用例可从 Web 控制台或 curl 完成 |
-| 5 发布质量 | 安装、升级、自启动、诊断和性能验证 | macOS 发布验收通过 |
-| 候选远程目标 | WebDAV 或 S3 适配器 | 网络中断可恢复，未完成上传不产生有效快照 |
-
-当前迭代聚焦本地备份需求、macOS 文件元数据恢复预期、仓库格式、数据管线与筛选规则技术探针，并用大小文件数据集验证中断安全。完成条件是关键选择有可复现证据，仓库探针能写入、提交、发现并清理未完成快照，下一迭代的验收标准明确。
-
-业务闭环稳定后，优先以纯逻辑单元或属性测试检查规则、清单和保留不变量，以临时文件系统集成测试覆盖备份、校验和恢复。故障注入覆盖读取失败、空间不足、目标断开与进程中断；端到端测试只覆盖关键路径。快照格式进入可用版本后，变更需兼容读取或迁移方案；删除、垃圾回收和覆盖恢复在发布前安排独立评审。
-
-## 状态
-
-- [x] 建立 MVP 需求基线
-- [x] 建立用例模型与界面低保真原型
-- [x] 建立初步架构与项目计划
-- [x] 建立 C1、C2 项目架构视图；课程报告图表独立存放
-- [ ] 评审并冻结其余需求基线
-- [x] 确认 macOS 为首发平台
-- [ ] 完成仓库格式等关键技术探针
-- [x] 合并为单一 Rust package 与服务器二进制，移除 CLI
-- [x] 实现配置启动、内置 Web 控制台与 secret key 认证的状态 API
-- [ ] 实现 Web 控制台与 API 的备份管理闭环
-
-需求和 20 个用例已结构化，可生成 UML 和课程报告；当前单一 Rust 二进制已能按配置启动 HTTP 服务，Web 控制台与 curl 共用认证 API。报告已同步当前架构，并区分已实现接口与待实现备份业务。下一步完成高风险技术探针，并实现筛选与本地备份的最小可运行闭环。
-
-## 协作与验证
-
-从最新 `main` 创建短期分支，通过 PR 审查并以 squash merge 合入。当前验证配置错误、认证边界、状态 API、实际 HTTP 启动与信号退出，报告生成单独检查；业务闭环稳定后，再围绕备份、校验、恢复等外部行为和关键不变量逐步补充测试。明确的 bug 可先写回归测试，探索性工作不强制 TDD。
-
-远端仓库为 `qi7876/software-development-exp`，目前没有 GitHub Actions 工作流，因此只维护本地 CI，不配置 CD。课程报告以 `docs/report/report.docx` 为直接排版基准，生成器只修改需求分析和系统设计目标区域。
+- Web console, controlled by `web_ui.enabled`, after the core local workflow is complete.
+- Permissions, modification times, symbolic links, and other advanced restore capabilities.
+- Scheduled jobs, incremental backups, retention policies, file filtering, and repository encryption. Consider WebDAV / S3 after the local workflow is stable. Mobile clients, real-time synchronization, and multi-user collaboration are outside the current scope.
 
 ## License
 
-见 [LICENSE](LICENSE)。
+[LICENSE](LICENSE).

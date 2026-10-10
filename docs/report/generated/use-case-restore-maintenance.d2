@@ -1,0 +1,116 @@
+# Generated from docs/report/use-cases.yaml; do not edit directly.
+direction: right
+**.style.font-size: 32
+(** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+diagram: "Backup Browsing, Restoration, and Maintenance" {
+  style.font-size: 44
+  style.fill: white
+  style.stroke: transparent
+  CLIENT: "Operator" {
+    shape: person
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  USR: "Individual user (web\nconsole)" {
+    shape: person
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  AUT: "<<system>>\nAutomation client (curl)" {
+    shape: rectangle
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  TGT: "<<system>>\nBackup storage" {
+    shape: rectangle
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  LOCAL: "<<system>>\nLocal storage" {
+    shape: rectangle
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  REMOTE: "<<system>>\nWebDAV / S3 (candidate\nextension)" {
+    shape: rectangle
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  system: "Data Backup System" {
+    style.font-size: 36
+    style.stroke: "#64748B"
+    style.fill: white
+    UC_04: "UC-04\nVerify backups" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_05: "UC-05\nBrowse snapshots" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_06: "UC-06\nRestore data" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_07: "UC-07\nManage retention policies" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_14: "UC-14\nAccess backup repository" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_14L: "UC-14L\nAccess local repository" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_14R: "UC-14R\nAccess remote repository" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_15: "UC-15\nUnlock encrypted repository\nwith text key file" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_17: "UC-17\nResolve restore conflicts" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_18: "UC-18\nVerify restored data" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+  }
+  CLIENT -- system.UC_04
+  CLIENT -- system.UC_05
+  CLIENT -- system.UC_06
+  CLIENT -- system.UC_07
+  system.UC_14 -- TGT
+  system.UC_14L -- LOCAL
+  system.UC_14R -- REMOTE
+  USR -> CLIENT: {target-arrowhead.style.filled: false}
+  AUT -> CLIENT: {target-arrowhead.style.filled: false}
+  LOCAL -> TGT: {target-arrowhead.style.filled: false}
+  REMOTE -> TGT: {target-arrowhead.style.filled: false}
+  system.UC_04 -> system.UC_14: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_05 -> system.UC_14: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_06 -> system.UC_14: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_06 -> system.UC_18: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_07 -> system.UC_14: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_14L -> system.UC_14: {target-arrowhead.style.filled: false}
+  system.UC_14R -> system.UC_14: {target-arrowhead.style.filled: false}
+  system.UC_15 -> system.UC_14: "<<extend>>\n[Repository is encrypted]" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_17 -> system.UC_06: "<<extend>>\n[Restore target has\nconflicts]" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+}

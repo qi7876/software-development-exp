@@ -316,3 +316,11 @@ config.json
 # Track the example config; ignore local test data in its working directory
 /working-directory-example/*
 !/working-directory-example/config.json
+
+# Runtime job history and repository metadata
+jobs.sqlite3
+jobs.sqlite3-wal
+jobs.sqlite3-shm
+repository.sqlite3
+repository.sqlite3-wal
+repository.sqlite3-shm

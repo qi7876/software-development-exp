@@ -1,0 +1,81 @@
+# Generated from docs/report/model.yaml; do not edit directly.
+direction: down
+**.style.font-size: 32
+(** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+diagram: "Startup and HTTP Interface: Logical Classes\n(Implemented)" {
+  style.font-size: 44
+  style.fill: white
+  style.stroke: transparent
+  package_0: "Startup" {
+    style.font-size: 36
+    style.fill: white
+    Arguments: "<<enum>>\nArguments" {
+      shape: class
+      "Help"
+      "Version"
+      "Serve { working_directory: PathBuf }"
+      "parse(args)": "Result<Arguments, String>"
+    }
+    Config: "<<struct>>\nConfig" {
+      shape: class
+      "listen": "SocketAddr"
+      "secret_key": "String"
+      "load(path)": "Result<Config, ConfigError>"
+      "validate()": "Result<(), ConfigError>"
+    }
+    ConfigError: "<<enum>>\nConfigError" {
+      shape: class
+      "Read { path, source }"
+      "Parse { path, line, column }"
+      "SecretKey"
+    }
+    Startup: "<<module>>\nmain.rs" {
+      shape: class
+      "main()": "ExitCode"
+      "run(working_directory)": "Result<(), Error>"
+    }
+  }
+  package_1: "HTTP service" {
+    style.font-size: 36
+    style.fill: white
+    HTTP: "<<module>>\nserver.rs" {
+      shape: class
+      "router(config)": "Router"
+      "authenticate(request, next)": "Response"
+      "console()": "Html"
+      "status()": "Json<Status>"
+    }
+    Status: "<<struct>>\nStatus" {
+      shape: class
+      "status": "str = ok"
+      "package_version": "str"
+      "backup_available": "bool = false"
+    }
+  }
+  package_0.Startup -> package_0.Arguments: "Parse" {
+    target-arrowhead.shape: arrow
+    style.stroke-dash: 5
+  }
+  package_0.Startup -> package_0.Config: "Read" {
+    target-arrowhead.shape: arrow
+    style.stroke-dash: 5
+  }
+  package_0.Config -> package_0.ConfigError: "Return on failure" {
+    target-arrowhead.shape: arrow
+    style.stroke-dash: 5
+  }
+  package_0.Startup -> package_1.HTTP: "Build router and run" {
+    target-arrowhead.shape: arrow
+    style.stroke-dash: 5
+  }
+  package_1.HTTP -> package_0.Config: "Get authentication key" {
+    target-arrowhead.shape: arrow
+    style.stroke-dash: 5
+  }
+  package_1.HTTP -> package_1.Status: "Serialize JSON" {
+    target-arrowhead.shape: arrow
+    style.stroke-dash: 5
+  }
+}

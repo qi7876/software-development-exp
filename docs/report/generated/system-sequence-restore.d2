@@ -1,0 +1,85 @@
+# Generated from docs/report/model.yaml; do not edit directly.
+direction: down
+**.style.font-size: 32
+(** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+diagram: "Browse and Restore Data over HTTP (Planned)" {
+  style.font-size: 44
+  style.fill: white
+  style.stroke: transparent
+  shape: sequence_diagram
+  Client: "Web console / curl" {shape: person}
+  API: "<<boundary>>\nHTTP API" {shape: rectangle}
+  Restore: "<<control>>\nBrowsing and\nrestoration" {shape: rectangle}
+  Repo: "<<entity>>\nBackup repository" {shape: rectangle}
+  KeyFile: "<<control>>\nKey file" {shape: rectangle}
+  Decode: "<<control>>\nDecoding and\nverification" {shape: rectangle}
+  Target: "<<entity>>\nRestore target" {shape: rectangle}
+  API.note_0: "over API, Decode\nSame data-backup process; internal\nfunction calls"
+  Client -> API: "Access snapshot / Bearer key / required\nunlock material"
+  fragment_2: alt {
+    branch_2: "[Missing, invalid, or duplicate Bearer\nkey]" {
+      API -> Client: "401 JSON error" {style.stroke-dash: 5}
+    }
+    branch_4: "[Authentication succeeds]" {
+      API -> Restore: "Access selected repository"
+      Restore -> Repo: "Read repository header"
+      fragment_7: alt {
+        branch_7: "[Repository is encrypted]" {
+          Restore -> KeyFile: "Read server-accessible key file and\nunlock with password"
+          fragment_9: alt {
+            branch_9: "[File authentication and key ID are\nvalid]" {
+              KeyFile -> Restore: "Master-key handle in controlled memory" {style.stroke-dash: 5}
+            }
+            branch_11: "[Wrong password or invalid material]" {
+              KeyFile -> Restore: "Clear temporary material / reject unlock" {style.stroke-dash: 5}
+            }
+          }
+        }
+        branch_14: "[Repository is unencrypted]" {
+          Restore.note_15: "over Restore, KeyFile\nSkip unlock"
+        }
+      }
+      fragment_17: "opt [Repository session is valid]" {
+        Restore -> Repo: "Read and authenticate snapshot manifest"
+        Repo -> Restore: "File tree" {style.stroke-dash: 5}
+        Restore -> API: "Browsing results" {style.stroke-dash: 5}
+        API -> Client: "File-tree JSON" {style.stroke-dash: 5}
+      }
+    }
+  }
+  Client -> API: "Restore selection / target / conflict\npolicy / Bearer key"
+  fragment_25: alt {
+    branch_25: "[Missing, invalid, or duplicate Bearer\nkey]" {
+      API -> Client: "401 JSON error" {style.stroke-dash: 5}
+    }
+    branch_27: "[Authentication succeeds]" {
+      API -> Restore: "Validate or reopen repository session,\nthen restore"
+      fragment_29: "opt [Repository session is valid]" {
+        fragment_30: "loop [Each selected file]" {
+          Restore -> Target: "Check space / permissions / path\nconflicts"
+          fragment_32: "opt [Target exists]" {
+            Restore -> Restore: "Apply confirmed policy; skip by default"
+          }
+          fragment_35: "opt [Writing is allowed]" {
+            Restore -> Repo: "Read required pack ranges"
+            Repo -> Decode: "Chunks and manifest" {style.stroke-dash: 5}
+            Decode -> Target: "Authenticate and decrypt / decompress\ninto temporary file"
+            Decode -> Decode: "Verify full file hash / length /\nmetadata"
+            fragment_40: alt {
+              branch_40: "[Authentication and final verification\nsucceed]" {
+                Decode -> Target: "Atomically place file"
+              }
+              branch_42: "[Failure]" {
+                Decode -> Target: "Delete temporary plaintext / preserve\noriginal file"
+              }
+            }
+          }
+        }
+        Restore -> API: "Restored / skipped / failed counts" {style.stroke-dash: 5}
+        API -> Client: "Restore-result JSON" {style.stroke-dash: 5}
+      }
+    }
+  }
+}

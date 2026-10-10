@@ -1,0 +1,73 @@
+# Generated from docs/report/model.yaml; do not edit directly.
+direction: down
+**.style.font-size: 32
+(** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+diagram: "Components within a Single Package" {
+  style.font-size: 44
+  style.fill: white
+  style.stroke: transparent
+  package_0: "Current code (same data-backup\nprocess)" {
+    style.font-size: 36
+    style.fill: white
+    Main: "<<implemented>>\nmain.rs\nStartup / shutdown on signal" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Args: "<<implemented>>\narguments.rs\nThree startup flags" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Config: "<<implemented>>\nconfig.rs\nRead and validate\nconfig.json" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    HTTP: "<<implemented>>\nserver.rs\nRouting / Bearer\nauthentication / status JSON" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Web: "<<implemented>>\nweb/index.html\nEmbedded console" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Domain: "<<implemented>>\ndomain.rs\nTaskId / RepositoryId\nvalidation" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+  }
+  package_1: "Backup logic added as needed\n(planned)" {
+    style.font-size: 36
+    style.fill: white
+    Tasks: "<<planned>>\nTasks / scheduling /\nprogress / cancellation /\nhistory" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Backup: "<<planned>>\nScanning and filtering /\nchunking, compression,\nencryption / snapshot\nwriting" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Restore: "<<planned>>\nRepository access /\nverification and restoration\n/ retention cleanup" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+  }
+  package_0.Main -> package_0.Args: "Parse arguments"
+  package_0.Main -> package_0.Config: "Read after setting working directory"
+  package_0.Main -> package_0.HTTP: "Listen and run server"
+  package_0.HTTP -> package_0.Web: "include_str! / GET /"
+  package_0.HTTP -> package_1.Tasks: "Call after authentication" {style.stroke-dash: 5}
+  package_0.HTTP -> package_1.Restore: "Call after authentication" {style.stroke-dash: 5}
+  package_1.Tasks -> package_0.Domain: "Validate identifiers" {style.stroke-dash: 5}
+  package_1.Tasks -> package_1.Backup: "Manual or internal scheduled trigger" {style.stroke-dash: 5}
+  package_1.Backup -> package_1.Restore: "Repository and integrity rules" {style.stroke-dash: 5}
+}

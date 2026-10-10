@@ -1,0 +1,98 @@
+# Generated from docs/report/use-cases.yaml; do not edit directly.
+direction: right
+**.style.font-size: 32
+(** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+diagram: "Data Backup System: Use-case Overview" {
+  style.font-size: 44
+  style.fill: white
+  style.stroke: transparent
+  CLIENT: "Operator" {
+    shape: person
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  USR: "Individual user (web\nconsole)" {
+    shape: person
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  AUT: "<<system>>\nAutomation client (curl)" {
+    shape: rectangle
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  SRC: "<<system>>\nSource file system" {
+    shape: rectangle
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  TGT: "<<system>>\nBackup storage" {
+    shape: rectangle
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  system: "Data Backup System" {
+    style.font-size: 36
+    style.stroke: "#64748B"
+    style.fill: white
+    UC_01: "UC-01\nManage backup tasks" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_02: "UC-02\nRun backup" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_03: "UC-03\nView status and history" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_04: "UC-04\nVerify backups" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_05: "UC-05\nBrowse snapshots" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_06: "UC-06\nRestore data" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_07: "UC-07\nManage retention policies" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_08: "UC-08\nExport diagnostics" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+  }
+  CLIENT -- system.UC_01
+  CLIENT -- system.UC_02
+  CLIENT -- system.UC_03
+  CLIENT -- system.UC_04
+  CLIENT -- system.UC_05
+  CLIENT -- system.UC_06
+  CLIENT -- system.UC_07
+  CLIENT -- system.UC_08
+  system.UC_01 -- SRC
+  system.UC_02 -- SRC
+  system.UC_02 -- TGT
+  system.UC_04 -- TGT
+  system.UC_05 -- TGT
+  system.UC_06 -- TGT
+  system.UC_07 -- TGT
+  USR -> CLIENT: {target-arrowhead.style.filled: false}
+  AUT -> CLIENT: {target-arrowhead.style.filled: false}
+}

@@ -1,26 +1,33 @@
-# C2 容器
+# C2 Containers
 
-产品只发布一个 `data-backup` 二进制。唯一的产品服务进程加载配置并运行 Axum/Tokio HTTP 服务器；Web 控制台的 HTML 与 JavaScript 编译进二进制，没有独立前端服务、CLI、daemon 可执行文件或共享协议 crate。
+`bak` runs as a single Rust binary. axum serves HTTP on Tokio; a supervised background worker executes one backup or restore at a time. SQLx provides async SQLite access. Blocking operation code runs through Tokio's blocking task pool, allowing the HTTP service to answer status and job queries during execution.
 
-```mermaid
-flowchart LR
-    Browser[浏览器 · 内置 Web 控制台] -->|HTTP · HTML / JavaScript| Server[data-backup · Rust / Axum / Tokio]
-    Browser -->|HTTP JSON · Bearer key| Server
-    Curl[curl / 自动化客户端] -->|HTTP JSON · Bearer key| Server
-    Config[JSON 配置文件] -->|启动时读取| Server
-    Server -.->|后续：读取| Source[源文件系统]
-    Server -.->|后续：快照与恢复| Repository[本地或已挂载存储]
-    Server -.->|后续：任务与运行记录| Metadata[SQLite 元数据]
+The service reads configuration from the working directory and owns `jobs.sqlite3` there. HTTP handlers commit jobs to SQLite before acknowledging them with HTTP 202 and a Location header. SQLite is the authoritative FIFO queue and history; a Tokio notification wakes the worker, without owning any job data. The worker atomically claims the oldest queued job, commits its running state, executes without holding a database transaction, and commits the outcome. A database constraint allows only one running job.
+
+```text
+Users / automation scripts
+          |
+          | HTTP + Bearer authentication
+          v
+     axum HTTP service <------> jobs.sqlite3
+          |                         ^
+          | wake                    | claim / complete
+          v                         |
+     Tokio job worker --------------+
+          |
+          v
+     backup / restore
+          |
+          v
+     Local repository: repository.sqlite3 + external file contents
 ```
 
-| 运行单元 | 当前职责 | 后续能力 |
-|---|---|---|
-| `data-backup` | 读取 `listen` 与 `secret_key` 配置；提供控制台、认证 API、JSON 状态和错误；响应 SIGINT/SIGTERM。 | 在同一进程内实现备份、恢复、调度、元数据与仓库存储。 |
-| 浏览器 | 加载内置控制台；在页面内存中持有用户输入的 key；通过 API 查看服务器状态。 | 通过同一 API 管理任务、运行、快照和恢复。 |
-| curl / 自动化客户端 | 使用 Authorization Bearer header 调用状态 API。 | 通过与控制台相同的接口执行备份管理。 |
+Repository metadata support stores each backup's header and ordered entries in one transaction in `repository.sqlite3` at the repository root. Backups are immutable by ID. This replaces JSON manifest file I/O; no legacy manifest import or read fallback exists. Backup, restore, and listing remain stubs, so this metadata support is not yet connected to the worker's file operations.
 
-`GET /` 返回不含 key 的控制台；所有 `/api/` 请求经过同一认证中间件。当前 `GET /api/status` 只报告服务器状态、package 版本及 `backup_available: false`；未知 API 返回明确错误。响应不缓存，key 不写入 URL、日志或响应。
+SQLite databases use WAL, `synchronous=FULL`, foreign keys, a five-second busy timeout, and pools of at most four connections. Schema initialization and its version commit together; unsupported versions are errors. ACID applies separately to job and repository database transactions. External file contents and these two databases cannot be committed together. Future backup implementation must make referenced file contents durable before publishing metadata and handle incomplete external work after interruptions.
 
-配置仅启动时读取，文件名固定为工作目录下的 `config.json`；默认工作目录是启动时的当前目录，`--working-directory` / `-d` 会切换进程目录。`--help` / `-h` 输出帮助和配置手册，`--version` / `-v` 输出版本，两者直接退出，不读取配置或启动服务。原 `DATA_BACKUP_CONFIG` 不再使用；目录错误、端口冲突及无效配置使启动失败。默认示例监听 loopback，HTTP 服务无内置 TLS，远程访问通过 HTTPS 反向代理提供传输加密。当前只提供共享 secret key 认证，无多用户权限模型。
+Restart preserves terminal outcomes and queued work. Before serving requests, startup marks leftover running jobs failed with an interruption error; it does not replay them. The worker then continues queued jobs in FIFO order. Ctrl-C and Unix SIGTERM stop admission and further claims, finish the active job, and retain the queue for restart. The HTTP service supervises the worker: unexpected termination or failure to persist an outcome stops the service with a failure exit status.
 
-同一进程中的业务调用使用普通 Rust 调用，无跨进程兼容检查。未来的 API 类型与业务代码仍放在同一 package 中，接口稳定后再按实际需要决定版本策略。
+Use one service instance per working directory and local filesystems for SQLite databases. Multi-process job coordination, cancellation, automatic retries, progress reporting, and filesystem crash recovery are outside the current implementation. JSONL logs are no longer written; SQLite history is always enabled. Existing manifests and logs are preserved on disk but not consumed.
+
+The source modules divide responsibilities into configuration and arguments, HTTP routing and lifecycle supervision, durable jobs and worker execution, SQLite initialization, and backup/restore logic. [README](../../README.md) documents the HTTP contract, configuration, current status, and acceptance criteria.
