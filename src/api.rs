@@ -536,6 +536,8 @@ mod tests {
     #[tokio::test]
     async fn operation_requests_return_accepted_queryable_jobs() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
+        std::fs::create_dir(directory.path().join("source"))?;
+        std::fs::create_dir(directory.path().join("repo"))?;
         let jobs = JobManager::open(directory.path().to_owned()).await?;
         let app = router(jobs.clone(), "test-key".into());
         for (path, payload, kind) in [

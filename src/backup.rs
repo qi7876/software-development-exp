@@ -10,6 +10,36 @@ pub(crate) struct BackupSummary {
     pub(crate) created_at: String,
 }
 
+fn paths_overlap(left: &Path, right: &Path) -> bool {
+    left.starts_with(right) || right.starts_with(left)
+}
+
+fn get_absolute_directory_path(path: &Path) -> Result<PathBuf, JobError> {
+    let path = std::fs::canonicalize(path).map_err(|error| {
+        JobError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to resolve path {}: {}", path.display(), error),
+        )
+    })?;
+    let path_metadata = path.metadata().map_err(|error| {
+        JobError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "failed to load path {} metadata : {}",
+                path.display(),
+                error
+            ),
+        )
+    })?;
+    if !path_metadata.is_dir() {
+        return Err(JobError::new(
+            StatusCode::BAD_REQUEST,
+            format!("path {} is not a directory", path.display()),
+        ));
+    };
+    Ok(path)
+}
+
 pub(crate) fn list(_repository: &Path) -> Result<Vec<BackupSummary>, JobError> {
     Err(JobError::new(
         StatusCode::NOT_IMPLEMENTED,
@@ -17,7 +47,19 @@ pub(crate) fn list(_repository: &Path) -> Result<Vec<BackupSummary>, JobError> {
     ))
 }
 
-pub(crate) fn run(_source: &Path, _repository: &Path, _backup_id: &str) -> Result<(), JobError> {
+pub(crate) fn run(source: &Path, repository: &Path, _backup_id: &str) -> Result<(), JobError> {
+    let source = get_absolute_directory_path(source)?;
+    let repository = get_absolute_directory_path(repository)?;
+    if paths_overlap(&source, &repository) {
+        return Err(JobError::new(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "source path {} and repository path {} overlap",
+                source.display(),
+                repository.display()
+            ),
+        ));
+    }
     Err(JobError::new(
         StatusCode::NOT_IMPLEMENTED,
         "backup execution is not implemented yet",
@@ -209,8 +251,73 @@ impl Manifest {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
     use super::*;
     use crate::test_support::TestDirectory;
+
+    #[test]
+    fn overlap_paths() {
+        let source_1 = Path::new("/data/source");
+        let backup_1 = Path::new("/data/backup");
+        assert!(!paths_overlap(source_1, backup_1));
+        assert!(paths_overlap(source_1, source_1));
+        let backup_2 = Path::new("/data/source/backup");
+        assert!(paths_overlap(source_1, backup_2));
+        let source_2 = Path::new("/data/backup/source");
+        assert!(paths_overlap(source_2, backup_1));
+        let backup_3 = Path::new("/data/source-copy");
+        assert!(!paths_overlap(source_1, backup_3));
+    }
+
+    #[test]
+    fn send_file_path_to_run() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source");
+        let repo = directory.path().join("repo");
+        std::fs::write(&source, "hello")?;
+        std::fs::create_dir(&repo)?;
+        let backup_id = "12345";
+        let err = run(&source, &repo, backup_id)
+            .err()
+            .ok_or("accepted a file as source")?;
+        assert_eq!(err.code, StatusCode::BAD_REQUEST);
+        assert!(err.message.contains("not a directory"));
+        Ok(())
+    }
+
+    #[test]
+    fn send_overlaped_paths_to_run() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source");
+        let repo = directory.path().join("source/repo");
+        std::fs::create_dir(&source)?;
+        std::fs::create_dir(&repo)?;
+        let backup_id = "12345";
+        let err = run(&source, &repo, backup_id)
+            .err()
+            .ok_or("accepted overlaped paths")?;
+        assert_eq!(err.code, StatusCode::BAD_REQUEST);
+        assert!(err.message.contains("overlap"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn send_source_alias_to_run() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source");
+        let alias = directory.path().join("alias");
+        std::fs::create_dir(&source)?;
+        std::os::unix::fs::symlink(&source, &alias)?;
+        let backup_id = "12345";
+        let err = run(&source, &alias, backup_id)
+            .err()
+            .ok_or("accepted overlaped symlink paths")?;
+        assert_eq!(err.code, StatusCode::BAD_REQUEST);
+        assert!(err.message.contains("overlap"));
+        Ok(())
+    }
 
     fn manifest() -> Manifest {
         Manifest {
