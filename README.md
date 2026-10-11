@@ -37,7 +37,7 @@ curl -H 'Authorization: Bearer example-local-test-key' \
   http://127.0.0.1:8080/api/jobs/JOB_ID
 ```
 
-Accepted responses include `Location: /api/jobs/{job_id}` and a job with fields `job_id`, `kind`, `state`, `result`, and `error`. States are `queued`, `running`, `succeeded`, and `failed`. Pending jobs have null result/error; completed jobs contain either a result or an error. POST no longer waits for execution. A failed job query still returns HTTP 200: its `error.code` describes the operation failure. Backup reaches 501 after successful path validation. Restore currently finish as failed jobs with error code 501.
+Accepted responses include `Location: /api/jobs/{job_id}` and a job with fields `job_id`, `kind`, `state`, `result`, and `error`. States are `queued`, `running`, `succeeded`, and `failed`. Pending jobs have null result/error; completed jobs contain either a result or an error. POST no longer waits for execution. A failed job query still returns HTTP 200: its `error.code` describes the operation failure. Backup reaches 501 after successful path validation and traversal. Restore currently finish as failed jobs with error code 501.
 
 Request errors use `{"error":{"code":400,"message":"..."}}` with the corresponding HTTP status. JSON bodies are limited to 2 MiB; `application/json` and `application/*+json` are accepted. Invalid or missing fields return 400, oversized bodies 413, unsupported media types 415, and missing or invalid authentication 401 with `WWW-Authenticate: Bearer`. There is no cancellation endpoint.
 
@@ -72,9 +72,11 @@ src/
 
 Command-line parsing, configuration, authenticated HTTP routing, JSON error responses, durable background jobs,
 restart recovery, repository metadata storage, and backup path validation are implemented.
-Backup jobs require existing source and repository directories.
-Equal or nested paths are rejected after resolving symlinks.
+
+Backup jobs require existing source and repository directories. Equal or nested paths are rejected after resolving symlinks.
+Recursive source discovery is implemented, including empty directories. Symlinks and other unsupported types inside source are rejected.
 Restore path validation remains unimplemented.
+
 Backup, restore, and listing file operations remain unimplemented.
 There is no web console, progress reporting, or cancellation.
 
@@ -85,7 +87,7 @@ The current milestone is a minimal end-to-end workflow for local full backups an
 - Publish complete repository metadata transactionally after the referenced file contents are durable.
 - Restore into a separate empty directory and compare relative paths, entry types, and contents. Report clear failures and interruptions while preserving source files and existing successful backups.
 
-The next step is incremental implementation of file operations, including scanning files and directories in source, archive and compression.
+The next step is incremental implementation of file operations, including per-file compression and SHA-256 checksums.
 File consistency and cleanup after abnormal exits remain to be implemented. Verify each step before continuing.
 
 ## Documentation

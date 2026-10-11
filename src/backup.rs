@@ -10,6 +10,12 @@ pub(crate) struct BackupSummary {
     pub(crate) created_at: String,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum BackupEntry {
+    File(PathBuf),
+    Directory(PathBuf),
+}
+
 fn paths_overlap(left: &Path, right: &Path) -> bool {
     left.starts_with(right) || right.starts_with(left)
 }
@@ -47,6 +53,78 @@ pub(crate) fn list(_repository: &Path) -> Result<Vec<BackupSummary>, JobError> {
     ))
 }
 
+fn walk_directory(
+    root: &Path,
+    current: &Path,
+    entries: &mut Vec<BackupEntry>,
+) -> Result<(), JobError> {
+    let source_dir = std::fs::read_dir(current).map_err(|error| {
+        JobError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to open path {}: {}", current.display(), error),
+        )
+    })?;
+    for entry in source_dir {
+        let entry = entry.map_err(|error| {
+            JobError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "failed to get entry under path {}: {}",
+                    current.display(),
+                    error
+                ),
+            )
+        })?;
+        let absolute_entry_path = entry.path();
+        let relative_entry_path = absolute_entry_path
+            .strip_prefix(root)
+            .map_err(|error| {
+                JobError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!(
+                        "failed to strip entry prefix {}: {}",
+                        entry.path().display(),
+                        error
+                    ),
+                )
+            })?
+            .to_path_buf();
+        let entry_type = entry.file_type().map_err(|error| {
+            JobError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "failed to get entry type {}: {}",
+                    relative_entry_path.display(),
+                    error
+                ),
+            )
+        })?;
+        if entry_type.is_dir() {
+            entries.push(BackupEntry::Directory(relative_entry_path));
+            walk_directory(root, &absolute_entry_path, entries)?;
+        } else if entry_type.is_file() {
+            entries.push(BackupEntry::File(relative_entry_path));
+        } else if entry_type.is_symlink() {
+            return Err(JobError::new(
+                StatusCode::BAD_REQUEST,
+                format!("find symlink entry: {}", relative_entry_path.display()),
+            ));
+        } else {
+            return Err(JobError::new(
+                StatusCode::BAD_REQUEST,
+                format!("unsupported entry: {}", relative_entry_path.display()),
+            ));
+        };
+    }
+    Ok(())
+}
+
+fn path_traversal(source: &Path) -> Result<Vec<BackupEntry>, JobError> {
+    let mut entries = Vec::<BackupEntry>::new();
+    walk_directory(source, source, &mut entries)?;
+    Ok(entries)
+}
+
 pub(crate) fn run(source: &Path, repository: &Path, _backup_id: &str) -> Result<(), JobError> {
     let source = get_absolute_directory_path(source)?;
     let repository = get_absolute_directory_path(repository)?;
@@ -60,6 +138,7 @@ pub(crate) fn run(source: &Path, repository: &Path, _backup_id: &str) -> Result<
             ),
         ));
     }
+    let _entries = path_traversal(&source)?;
     Err(JobError::new(
         StatusCode::NOT_IMPLEMENTED,
         "backup execution is not implemented yet",
@@ -316,6 +395,65 @@ mod tests {
             .ok_or("accepted overlaped symlink paths")?;
         assert_eq!(err.code, StatusCode::BAD_REQUEST);
         assert!(err.message.contains("overlap"));
+        Ok(())
+    }
+
+    #[test]
+    fn simple_traversal() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source");
+        let source_file = directory.path().join("source/hello.txt");
+        let source_empty = directory.path().join("source/empty");
+        std::fs::create_dir(&source)?;
+        std::fs::write(&source_file, "hello")?;
+        std::fs::create_dir(&source_empty)?;
+        let entries = path_traversal(&source)?;
+        assert_eq!(entries.len(), 2);
+        assert!(entries.contains(&BackupEntry::File(PathBuf::from("hello.txt"))));
+        assert!(entries.contains(&BackupEntry::Directory(PathBuf::from("empty"))));
+        Ok(())
+    }
+
+    #[test]
+    fn recursive_traversal() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source");
+        let source_file = directory.path().join("source/hello.txt");
+        let source_docs = directory.path().join("source/docs");
+        let source_docs_file = directory.path().join("source/docs/README.txt");
+        let source_empty = directory.path().join("source/empty");
+        std::fs::create_dir(&source)?;
+        std::fs::write(&source_file, "hello")?;
+        std::fs::create_dir(&source_docs)?;
+        std::fs::write(&source_docs_file, "readme")?;
+        std::fs::create_dir(&source_empty)?;
+        let entries = path_traversal(&source)?;
+        assert_eq!(entries.len(), 4);
+        assert!(entries.contains(&BackupEntry::File(PathBuf::from("hello.txt"))));
+        assert!(entries.contains(&BackupEntry::Directory(PathBuf::from("empty"))));
+        assert!(entries.contains(&BackupEntry::Directory(PathBuf::from("docs"))));
+        assert!(entries.contains(&BackupEntry::File(PathBuf::from("docs/README.txt"))));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recursive_traversal_reject_symlinks() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source");
+        let source_file = directory.path().join("source/hello.txt");
+        let source_docs = directory.path().join("source/docs");
+        let alias = directory.path().join("source/docs/alias");
+        std::fs::create_dir(&source)?;
+        std::fs::write(&source_file, "hello")?;
+        std::fs::create_dir(&source_docs)?;
+        std::os::unix::fs::symlink(&source_file, &alias)?;
+        let err = path_traversal(&source)
+            .err()
+            .ok_or("accepted symlink file")?;
+        assert_eq!(err.code, StatusCode::BAD_REQUEST);
+        assert!(err.message.contains("symlink"));
+        assert!(err.message.contains("docs/alias"));
         Ok(())
     }
 
