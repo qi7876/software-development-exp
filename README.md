@@ -7,6 +7,7 @@
 Install the Rust toolchain specified in `rust-toolchain.toml`. Install uv to run the complete local checks.
 
 ```shell
+mkdir -p working-directory-example/source working-directory-example/repository
 cargo run -- -d working-directory-example
 curl -H 'Authorization: Bearer example-local-test-key' http://127.0.0.1:8080/api/status
 uv run scripts/check.py
@@ -37,7 +38,7 @@ curl -H 'Authorization: Bearer example-local-test-key' \
   http://127.0.0.1:8080/api/jobs/JOB_ID
 ```
 
-Accepted responses include `Location: /api/jobs/{job_id}` and a job with fields `job_id`, `kind`, `state`, `result`, and `error`. States are `queued`, `running`, `succeeded`, and `failed`. Pending jobs have null result/error; completed jobs contain either a result or an error. POST no longer waits for execution. A failed job query still returns HTTP 200: its `error.code` describes the operation failure. Backup reaches 501 after successful path validation and traversal. Restore currently finish as failed jobs with error code 501.
+Accepted responses include `Location: /api/jobs/{job_id}` and a job with fields `job_id`, `kind`, `state`, `result`, and `error`. States are `queued`, `running`, `succeeded`, and `failed`. Pending jobs have null result/error; completed jobs contain either a result or an error. POST no longer waits for execution. A failed job query still returns HTTP 200: its `error.code` describes the operation failure. Successful backup jobs contain `{"backup_id":"..."}` in `result` and a null error. Restore jobs currently fail with error code 501. Full backup execution currently supports Unix platforms; on other platforms it fails with code 501 before creating backup contents.
 
 Request errors use `{"error":{"code":400,"message":"..."}}` with the corresponding HTTP status. JSON bodies are limited to 2 MiB; `application/json` and `application/*+json` are accepted. Invalid or missing fields return 400, oversized bodies 413, unsupported media types 415, and missing or invalid authentication 401 with `WWW-Authenticate: Bearer`. There is no cancellation endpoint.
 
@@ -49,9 +50,11 @@ At startup, jobs left `running` by an earlier service exit become failed with co
 
 Run only one service instance per working directory. Both the working directory database and repository databases require local filesystems. SQLite uses WAL, `synchronous=FULL`, foreign keys, and a five-second busy timeout; pools allow at most four connections. Schema installation and versioning are transactional; unsupported versions prevent use.
 
-Repository metadata read/write support stores backup headers and ordered file/directory entries in `repository.sqlite3` at each repository root. A complete metadata record is committed atomically and an existing backup ID cannot be overwritten. The model retains format version 1, Zstd compression, and SHA-256 checksums. It is not yet connected to backup or restore execution. JSON `manifest.json` files and old JSONL logs are left untouched, and are not read or migrated.
+Full backups store headers and ordered file/directory entries in `repository.sqlite3` at each repository root. A complete metadata record is committed atomically and an existing backup ID cannot be overwritten. Format version 1 stores a mirrored tree under `backups/<backup_id>/`: each regular file retains its relative name and contains Zstd-compressed bytes. Directory entries preserve empty directories. Metadata records each file's original byte count and SHA-256 checksum of its uncompressed contents, plus a UTC RFC 3339 creation timestamp. Entry ordinals preserve metadata ordering; file locations are determined by relative paths.
 
-ACID guarantees cover individual database transactions. Job history and repository metadata use separate databases; they do not share a transaction. File contents remain outside SQLite, so future file operations must coordinate durable file writes with metadata publication. WAL databases may have `-wal` and `-shm` sidecars; do not copy a live database file alone as a database backup.
+Backup execution finishes and synchronizes each compressed file, synchronizes the mirrored directories and their repository ancestors, then commits the metadata transaction before reporting success. SQLite metadata defines which backups are published; a directory alone does not establish a completed backup. JSON `manifest.json` files and old JSONL logs are left untouched, and are not read or migrated.
+
+ACID guarantees cover individual database transactions. Job history and repository metadata use separate databases; they do not share a transaction. File contents remain outside SQLite. Failed or interrupted operations may leave backup directories without metadata; automatic cleanup is not implemented. Keep source files unchanged while backing up: concurrent source modifications are not detected. WAL databases may have `-wal` and `-shm` sidecars; do not copy a live database file alone as a database backup.
 
 ## Project structure
 
@@ -63,7 +66,7 @@ src/
   api.rs           axum routing, authentication, JSON responses, and shutdown supervision
   jobs.rs          Durable FIFO job lifecycle and the background worker
   storage.rs       SQLite connection settings and schema initialization
-  backup.rs        Backup/listing stubs and transactional repository metadata
+  backup.rs        Full backups, mirrored file storage, and transactional metadata; listing stub
   restore.rs       Restore execution stub
   test_support.rs  Temporary directories for tests
 ```
@@ -71,13 +74,13 @@ src/
 ## Current status and acceptance criteria
 
 Command-line parsing, configuration, authenticated HTTP routing, JSON error responses, durable background jobs,
-restart recovery, repository metadata storage, and backup path validation are implemented.
+restart recovery, repository metadata storage, and Unix full backup execution are implemented.
 
 Backup jobs require existing source and repository directories. Equal or nested paths are rejected after resolving symlinks.
 Recursive source discovery is implemented, including empty directories. Symlinks and other unsupported types inside source are rejected.
 Restore path validation remains unimplemented.
 
-Backup, restore, and listing file operations remain unimplemented.
+Restore and listing remain unimplemented. Backup checks cover stored metadata, decompressed contents, empty directories, source preservation, duplicate IDs, and failed metadata publication. These tests do not simulate power loss.
 There is no web console, progress reporting, or cancellation.
 
 The current milestone is a minimal end-to-end workflow for local full backups and restores, with these acceptance criteria:
@@ -87,7 +90,7 @@ The current milestone is a minimal end-to-end workflow for local full backups an
 - Publish complete repository metadata transactionally after the referenced file contents are durable.
 - Restore into a separate empty directory and compare relative paths, entry types, and contents. Report clear failures and interruptions while preserving source files and existing successful backups.
 
-The next step is incremental implementation of file operations, including per-file compression and SHA-256 checksums.
+The next step is restore path validation, decompression, and verification against stored sizes and checksums, followed by backup listing.
 File consistency and cleanup after abnormal exits remain to be implemented. Verify each step before continuing.
 
 ## Documentation
@@ -98,6 +101,7 @@ File consistency and cleanup after abnormal exits remain to be implemented. Veri
 ## TODOs
 
 - Web console, controlled by `web_ui.enabled`, after the core local workflow is complete.
+- Directory synchronization support for non-Unix backup execution.
 - Permissions, modification times, symbolic links, and other advanced restore capabilities.
 - Scheduled jobs, incremental backups, retention policies, file filtering, and repository encryption. Consider WebDAV / S3 after the local workflow is stable. Mobile clients, real-time synchronization, and multi-user collaboration are outside the current scope.
 

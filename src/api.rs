@@ -591,9 +591,21 @@ mod tests {
                         .await?;
                     assert_eq!(response.status(), StatusCode::OK);
                     let body = json_body(response).await?;
-                    if body["state"] == "failed" {
-                        assert_eq!(body["error"]["code"], 501);
+                    if body["state"] == "succeeded" || body["state"] == "failed" {
                         assert_eq!(body["job_id"], accepted["job_id"]);
+                        assert_eq!(body["kind"], kind);
+                        if kind == "backup" && cfg!(unix) {
+                            assert_eq!(body["state"], "succeeded");
+                            assert!(body["error"].is_null());
+                            let backup_id = body["result"]["backup_id"]
+                                .as_str()
+                                .ok_or("missing backup_id in successful job")?;
+                            assert!(!backup_id.is_empty());
+                        } else {
+                            assert_eq!(body["state"], "failed");
+                            assert!(body["result"].is_null());
+                            assert_eq!(body["error"]["code"], 501);
+                        }
                         break;
                     }
                     tokio::task::yield_now().await;

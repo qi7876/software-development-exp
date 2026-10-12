@@ -1,6 +1,11 @@
+use chrono::{SecondsFormat, Utc};
 use http::StatusCode;
+use sha2::{Digest, Sha256};
 use sqlx::Row;
-use std::path::{Path, PathBuf};
+use std::{
+    io::{self, Read, Write},
+    path::{Path, PathBuf},
+};
 
 use crate::{jobs::JobError, storage};
 
@@ -16,6 +21,11 @@ enum BackupEntry {
     Directory(PathBuf),
 }
 
+struct FileBackupResult {
+    original_size: u64,
+    checksum: String,
+}
+
 fn paths_overlap(left: &Path, right: &Path) -> bool {
     left.starts_with(right) || right.starts_with(left)
 }
@@ -24,17 +34,13 @@ fn get_absolute_directory_path(path: &Path) -> Result<PathBuf, JobError> {
     let path = std::fs::canonicalize(path).map_err(|error| {
         JobError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to resolve path {}: {}", path.display(), error),
+            format!("failed to resolve path {}: {error}", path.display()),
         )
     })?;
     let path_metadata = path.metadata().map_err(|error| {
         JobError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!(
-                "failed to load path {} metadata : {}",
-                path.display(),
-                error
-            ),
+            format!("failed to load path {} metadata : {error}", path.display(),),
         )
     })?;
     if !path_metadata.is_dir() {
@@ -54,101 +60,330 @@ pub(crate) fn list(_repository: &Path) -> Result<Vec<BackupSummary>, JobError> {
 }
 
 fn walk_directory(
-    root: &Path,
-    current: &Path,
-    entries: &mut Vec<BackupEntry>,
+    absolute_root: &Path,
+    absolute_current: &Path,
+    backup_entries: &mut Vec<BackupEntry>,
 ) -> Result<(), JobError> {
-    let source_dir = std::fs::read_dir(current).map_err(|error| {
+    let source_dir = std::fs::read_dir(absolute_current).map_err(|error| {
         JobError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to open path {}: {}", current.display(), error),
+            format!(
+                "failed to open path {}: {error}",
+                absolute_current.display(),
+            ),
         )
     })?;
-    for entry in source_dir {
-        let entry = entry.map_err(|error| {
+    for file in source_dir {
+        let file = file.map_err(|error| {
             JobError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
-                    "failed to get entry under path {}: {}",
-                    current.display(),
-                    error
+                    "failed to get file under path {}: {error}",
+                    absolute_current.display(),
                 ),
             )
         })?;
-        let absolute_entry_path = entry.path();
-        let relative_entry_path = absolute_entry_path
-            .strip_prefix(root)
+        let absolute_file_path = file.path();
+        let relative_file_path = absolute_file_path
+            .strip_prefix(absolute_root)
             .map_err(|error| {
                 JobError::new(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!(
-                        "failed to strip entry prefix {}: {}",
-                        entry.path().display(),
-                        error
+                        "failed to strip file prefix {}: {error}",
+                        file.path().display(),
                     ),
                 )
             })?
             .to_path_buf();
-        let entry_type = entry.file_type().map_err(|error| {
+        let file_type = file.file_type().map_err(|error| {
             JobError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
-                    "failed to get entry type {}: {}",
-                    relative_entry_path.display(),
-                    error
+                    "failed to get file type {}: {error}",
+                    relative_file_path.display(),
                 ),
             )
         })?;
-        if entry_type.is_dir() {
-            entries.push(BackupEntry::Directory(relative_entry_path));
-            walk_directory(root, &absolute_entry_path, entries)?;
-        } else if entry_type.is_file() {
-            entries.push(BackupEntry::File(relative_entry_path));
-        } else if entry_type.is_symlink() {
+        if file_type.is_dir() {
+            backup_entries.push(BackupEntry::Directory(relative_file_path));
+            walk_directory(absolute_root, &absolute_file_path, backup_entries)?;
+        } else if file_type.is_file() {
+            backup_entries.push(BackupEntry::File(relative_file_path));
+        } else if file_type.is_symlink() {
             return Err(JobError::new(
                 StatusCode::BAD_REQUEST,
-                format!("find symlink entry: {}", relative_entry_path.display()),
+                format!("find symlink file: {}", relative_file_path.display()),
             ));
         } else {
             return Err(JobError::new(
                 StatusCode::BAD_REQUEST,
-                format!("unsupported entry: {}", relative_entry_path.display()),
+                format!("unsupported file: {}", relative_file_path.display()),
             ));
         };
     }
     Ok(())
 }
 
-fn path_traversal(source: &Path) -> Result<Vec<BackupEntry>, JobError> {
-    let mut entries = Vec::<BackupEntry>::new();
-    walk_directory(source, source, &mut entries)?;
-    Ok(entries)
+/// Returns paths relative to the source directory.
+fn path_traversal(absolute_source_path: &Path) -> Result<Vec<BackupEntry>, JobError> {
+    let mut backup_entries = Vec::<BackupEntry>::new();
+    walk_directory(
+        absolute_source_path,
+        absolute_source_path,
+        &mut backup_entries,
+    )?;
+    Ok(backup_entries)
 }
 
-pub(crate) fn run(source: &Path, repository: &Path, _backup_id: &str) -> Result<(), JobError> {
-    let source = get_absolute_directory_path(source)?;
-    let repository = get_absolute_directory_path(repository)?;
-    if paths_overlap(&source, &repository) {
+fn backup_one_file(
+    source_file_path: &Path,
+    backup_file_path: &Path,
+) -> Result<FileBackupResult, JobError> {
+    let mut source_file = std::fs::OpenOptions::new()
+        .read(true)
+        .open(source_file_path)
+        .map_err(|error| {
+            JobError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "failed to open source file {}: {error}",
+                    source_file_path.display(),
+                ),
+            )
+        })?;
+    let backup_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(backup_file_path)
+        .map_err(|error| match error.kind() {
+            io::ErrorKind::AlreadyExists => JobError::new(
+                StatusCode::CONFLICT,
+                format!(
+                    "backup file {} already exists: {error}",
+                    backup_file_path.display(),
+                ),
+            ),
+            _ => JobError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "failed to write backup file {}: {error}",
+                    backup_file_path.display(),
+                ),
+            ),
+        })?;
+
+    let mut buffer = [0u8; 128 * 1024];
+    let mut backup_file = zstd::stream::write::Encoder::new(backup_file, 0).map_err(|error| {
+        JobError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "failed to create zstd encoder on backup file {}: {error}",
+                backup_file_path.display(),
+            ),
+        )
+    })?;
+    let mut hasher = Sha256::new();
+    let mut original_size: u64 = 0;
+
+    loop {
+        let n = source_file.read(&mut buffer).map_err(|error| {
+            JobError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "failed to read source file {}: {error}",
+                    source_file_path.display(),
+                ),
+            )
+        })?;
+
+        if n == 0 {
+            break;
+        }
+
+        let chunk = &buffer[..n];
+        backup_file.write_all(chunk).map_err(|error| {
+            JobError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "failed to compress and forward data to backup file {}: {error}",
+                    backup_file_path.display(),
+                ),
+            )
+        })?;
+        hasher.update(chunk);
+        original_size += n as u64;
+    }
+    let backup_file = backup_file.finish().map_err(|error| {
+        JobError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "failed to finish writing on backup file {}: {error}",
+                backup_file_path.display(),
+            ),
+        )
+    })?;
+
+    backup_file.sync_all().map_err(|error| {
+        JobError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "failed to sync backup file {}: {error}",
+                backup_file_path.display(),
+            ),
+        )
+    })?;
+
+    Ok(FileBackupResult {
+        original_size,
+        checksum: hex::encode(hasher.finalize()),
+    })
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> Result<(), JobError> {
+    std::fs::File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| {
+            JobError::internal(format!(
+                "failed to sync directory {}: {error}",
+                path.display()
+            ))
+        })
+}
+
+#[cfg(not(unix))]
+fn sync_directory(path: &Path) -> Result<(), JobError> {
+    Err(JobError::new(
+        StatusCode::NOT_IMPLEMENTED,
+        format!(
+            "directory synchronization is not implemented on this platform: {}",
+            path.display()
+        ),
+    ))
+}
+
+fn backup_all(
+    backup_entries: &[BackupEntry],
+    absolute_source_path: &Path,
+    absolute_backup_root_directory_path: &Path,
+) -> Result<Vec<ManifestEntry>, JobError> {
+    let mut manifest_entries = Vec::<ManifestEntry>::new();
+    for backup_entry in backup_entries {
+        let manifest_entry = match backup_entry {
+            // The parent directory is always created before writing files.
+            BackupEntry::File(relative_path) => {
+                let absolute_source_file_path = absolute_source_path.join(relative_path);
+                let absolute_backup_file_path =
+                    absolute_backup_root_directory_path.join(relative_path);
+                let backup_result =
+                    backup_one_file(&absolute_source_file_path, &absolute_backup_file_path)?;
+                ManifestEntry::File {
+                    path: relative_path.to_path_buf(),
+                    original_size: backup_result.original_size,
+                    checksum: backup_result.checksum,
+                }
+            }
+            BackupEntry::Directory(relative_path) => {
+                let absolute_backup_directory_path =
+                    absolute_backup_root_directory_path.join(relative_path);
+                std::fs::create_dir(&absolute_backup_directory_path).map_err(|error| {
+                    JobError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!(
+                            "failed to create new backup directory {}: {error}",
+                            absolute_backup_directory_path.display(),
+                        ),
+                    )
+                })?;
+                ManifestEntry::Directory {
+                    path: relative_path.to_path_buf(),
+                }
+            }
+        };
+        manifest_entries.push(manifest_entry);
+    }
+
+    Ok(manifest_entries)
+}
+
+pub(crate) fn run(source: &Path, repository: &Path, backup_id: &str) -> Result<(), JobError> {
+    let absolute_source_path = get_absolute_directory_path(source)?;
+    let absolute_repository_path = get_absolute_directory_path(repository)?;
+    if paths_overlap(&absolute_source_path, &absolute_repository_path) {
         return Err(JobError::new(
             StatusCode::BAD_REQUEST,
             format!(
                 "source path {} and repository path {} overlap",
-                source.display(),
-                repository.display()
+                absolute_source_path.display(),
+                absolute_repository_path.display()
             ),
         ));
     }
-    let _entries = path_traversal(&source)?;
-    Err(JobError::new(
-        StatusCode::NOT_IMPLEMENTED,
-        "backup execution is not implemented yet",
-    ))
+    let backup_entries = path_traversal(&absolute_source_path)?;
+
+    #[cfg(not(unix))]
+    sync_directory(&absolute_repository_path)?;
+
+    std::fs::create_dir_all(absolute_repository_path.join("backups")).map_err(|error| {
+        JobError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "failed to create backups directory {}: {error}",
+                absolute_repository_path.join("backups").display(),
+            ),
+        )
+    })?;
+
+    let absolute_backup_root_directory_path =
+        absolute_repository_path.join(format!("backups/{}", backup_id));
+
+    std::fs::create_dir(&absolute_backup_root_directory_path).map_err(|error| {
+        match error.kind() {
+            io::ErrorKind::AlreadyExists => JobError::new(
+                StatusCode::CONFLICT,
+                format!("backup id {backup_id} already exists: {error}"),
+            ),
+            _ => JobError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "failed to create backup id directory {}: {error}",
+                    absolute_backup_root_directory_path.display(),
+                ),
+            ),
+        }
+    })?;
+
+    let created_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    let manifest_entries = backup_all(
+        &backup_entries,
+        &absolute_source_path,
+        &absolute_backup_root_directory_path,
+    )?;
+    for entry in manifest_entries.iter().rev() {
+        if let ManifestEntry::Directory { path } = entry {
+            sync_directory(&absolute_backup_root_directory_path.join(path))?;
+        }
+    }
+    sync_directory(&absolute_backup_root_directory_path)?;
+    sync_directory(&absolute_repository_path.join("backups"))?;
+    sync_directory(&absolute_repository_path)?;
+    let manifest = Manifest {
+        format_version: 1,
+        backup_id: backup_id.to_owned(),
+        created_at,
+        source: absolute_source_path,
+        compression: "zstd".to_string(),
+        checksum_algorithm: "sha256".to_string(),
+        entries: manifest_entries,
+    };
+    let handle = tokio::runtime::Handle::try_current()
+        .map_err(|error| JobError::internal(format!("cannot access Tokio runtime: {error}")))?;
+
+    handle.block_on(manifest.write(&absolute_repository_path))?;
+    Ok(())
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "Metadata IO will be called by backup and restore")
-)]
 const SCHEMA: &str = "
 CREATE TABLE backups (
     backup_id TEXT PRIMARY KEY NOT NULL,
@@ -174,10 +409,6 @@ CREATE TABLE entries (
 ";
 
 // Repository metadata is committed once and is immutable thereafter.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "Manifest writing will be wired into backup::run")
-)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct Manifest {
     pub(crate) format_version: u32,
@@ -189,13 +420,6 @@ pub(crate) struct Manifest {
     pub(crate) entries: Vec<ManifestEntry>,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Manifest entries will be collected by backup::run"
-    )
-)]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
 pub(crate) enum ManifestEntry {
@@ -209,11 +433,11 @@ pub(crate) enum ManifestEntry {
     },
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "Manifest IO will be called by backup and restore")
-)]
 impl Manifest {
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "Restore execution will read repository metadata")
+    )]
     pub(crate) async fn read(repository: &Path, backup_id: &str) -> Result<Self, JobError> {
         let path = repository.join("repository.sqlite3");
         let pool = storage::open(&path, SCHEMA, false).await?;
@@ -454,6 +678,299 @@ mod tests {
         assert_eq!(err.code, StatusCode::BAD_REQUEST);
         assert!(err.message.contains("symlink"));
         assert!(err.message.contains("docs/alias"));
+        Ok(())
+    }
+
+    #[test]
+    fn backup_file_exist() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source");
+        let source_file = directory.path().join("source/hello.txt");
+        let backup = directory.path().join("backup");
+        let backup_file = directory.path().join("backup/hello.txt");
+        std::fs::create_dir(&source)?;
+        std::fs::write(&source_file, "hello")?;
+        std::fs::create_dir(&backup)?;
+        std::fs::write(&backup_file, "existing backup")?;
+        let err = backup_one_file(&source_file, &backup_file)
+            .err()
+            .ok_or("write to an existing file")?;
+        assert_eq!(std::fs::read_to_string(&backup_file)?, "existing backup");
+        assert_eq!(err.code, StatusCode::CONFLICT);
+        assert!(err.message.contains("exists"));
+        Ok(())
+    }
+
+    #[test]
+    fn simple_backup_one_file() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source");
+        let source_file = directory.path().join("source/hello.txt");
+        let backup = directory.path().join("backup");
+        let backup_file = directory.path().join("backup/hello.txt");
+
+        std::fs::create_dir(&source)?;
+        std::fs::write(&source_file, "hello")?;
+        std::fs::create_dir(&backup)?;
+
+        let result = backup_one_file(&source_file, &backup_file)?;
+        assert_eq!(result.original_size, 5);
+        let checksum = hex::encode(Sha256::digest(std::fs::read(source_file)?));
+        assert_eq!(checksum, result.checksum);
+        let decompressed = zstd::decode_all(std::fs::File::open(backup_file)?)?;
+        assert_eq!(std::str::from_utf8(&decompressed)?, "hello");
+        Ok(())
+    }
+
+    #[test]
+    fn simple_backup_empty_file() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source");
+        let source_file = directory.path().join("source/hello.txt");
+        let backup = directory.path().join("backup");
+        let backup_file = directory.path().join("backup/hello.txt");
+
+        std::fs::create_dir(&source)?;
+        std::fs::write(&source_file, "")?;
+        std::fs::create_dir(&backup)?;
+        let result = backup_one_file(&source_file, &backup_file)?;
+
+        let checksum = hex::encode(Sha256::digest(std::fs::read(source_file)?));
+        let decompressed = zstd::decode_all(std::fs::File::open(backup_file)?)?;
+        assert_eq!(result.original_size, 0);
+        assert_eq!(checksum, result.checksum);
+        assert_eq!(std::str::from_utf8(&decompressed)?, "");
+
+        Ok(())
+    }
+
+    #[test]
+    fn backup_binary_file_across_multiple_chunks() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source.bin");
+        let backup = directory.path().join("backup.zst");
+
+        let content: Vec<u8> = (0u8..=255).cycle().take(300_001).collect();
+
+        std::fs::write(&source, &content)?;
+        let result = backup_one_file(&source, &backup)?;
+
+        let decompressed = zstd::decode_all(std::fs::File::open(&backup)?)?;
+        assert_eq!(decompressed, content);
+        assert_eq!(result.original_size, 300_001);
+        assert_eq!(result.checksum, hex::encode(Sha256::digest(&content)));
+        assert_eq!(std::fs::read(&source)?, content);
+
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn full_backup_run() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source");
+        let repository = directory.path().join("repository");
+        std::fs::create_dir(&source)?;
+        std::fs::create_dir(&repository)?;
+
+        std::fs::create_dir(source.join("dir1"))?;
+        std::fs::create_dir(source.join("empty"))?;
+        let files: [(&str, &[u8]); 2] =
+            [("hello.txt", b"hello"), ("dir1/hello.txt", b"nested hello")];
+        for (path, content) in files {
+            std::fs::write(source.join(path), content)?;
+        }
+        assert!(!repository.join("backups").exists());
+
+        let source_for_run = source.clone();
+        let repository_for_run = repository.clone();
+
+        tokio::task::spawn_blocking(move || {
+            run(&source_for_run, &repository_for_run, "backup-001")
+        })
+        .await??;
+
+        let manifest = Manifest::read(&repository, "backup-001").await?;
+        assert_eq!(manifest.backup_id, "backup-001");
+        assert_eq!(manifest.source, std::fs::canonicalize(&source)?);
+        assert_eq!(manifest.format_version, 1);
+        assert_eq!(manifest.compression, "zstd");
+        assert_eq!(manifest.checksum_algorithm, "sha256");
+        let created_at = chrono::DateTime::parse_from_rfc3339(&manifest.created_at)?;
+        assert_eq!(created_at.offset().local_minus_utc(), 0);
+        assert_eq!(manifest.entries.len(), 4);
+
+        let backup_root = repository.join("backups/backup-001");
+        for (relative_path, content) in files {
+            let (original_size, checksum) = manifest
+                .entries
+                .iter()
+                .find_map(|entry| match entry {
+                    ManifestEntry::File {
+                        path,
+                        original_size,
+                        checksum,
+                    } if path.as_path() == Path::new(relative_path) => {
+                        Some((*original_size, checksum))
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| format!("missing file entry {relative_path}"))?;
+            assert_eq!(original_size, content.len() as u64);
+            assert_eq!(checksum, &hex::encode(Sha256::digest(content)));
+            let decompressed =
+                zstd::decode_all(std::fs::File::open(backup_root.join(relative_path))?)?;
+            assert_eq!(decompressed, content);
+            assert_eq!(std::fs::read(source.join(relative_path))?, content);
+        }
+        for relative_path in ["dir1", "empty"] {
+            assert!(manifest.entries.iter().any(|entry| matches!(
+                entry,
+                ManifestEntry::Directory { path }
+                    if path.as_path() == Path::new(relative_path)
+            )));
+            assert!(backup_root.join(relative_path).is_dir());
+            assert!(source.join(relative_path).is_dir());
+        }
+        assert!(
+            std::fs::read_dir(backup_root.join("empty"))?
+                .next()
+                .transpose()?
+                .is_none()
+        );
+        assert!(
+            std::fs::read_dir(source.join("empty"))?
+                .next()
+                .transpose()?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn full_backup_run_rejects_existing_backup_id() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source");
+        let repository = directory.path().join("repository");
+        std::fs::create_dir(&source)?;
+        std::fs::create_dir(&repository)?;
+        let source_file = source.join("hello.txt");
+        std::fs::write(&source_file, b"original")?;
+
+        let source_for_run = source.clone();
+        let repository_for_run = repository.clone();
+        tokio::task::spawn_blocking(move || {
+            run(&source_for_run, &repository_for_run, "backup-001")
+        })
+        .await??;
+        let expected_manifest =
+            serde_json::to_value(Manifest::read(&repository, "backup-001").await?)?;
+        let backup_file = repository.join("backups/backup-001/hello.txt");
+        let expected_compressed = std::fs::read(&backup_file)?;
+        std::fs::write(&source_file, b"changed")?;
+
+        let source_for_retry = source.clone();
+        let repository_for_retry = repository.clone();
+        let retry = tokio::task::spawn_blocking(move || {
+            run(&source_for_retry, &repository_for_retry, "backup-001")
+        })
+        .await?;
+        let error = retry.err().ok_or("accepted duplicate backup ID")?;
+        assert_eq!(error.code, StatusCode::CONFLICT);
+        assert_eq!(
+            serde_json::to_value(Manifest::read(&repository, "backup-001").await?)?,
+            expected_manifest
+        );
+        assert_eq!(std::fs::read(&backup_file)?, expected_compressed);
+        assert_eq!(
+            zstd::decode_all(std::fs::File::open(&backup_file)?)?,
+            b"original"
+        );
+        assert_eq!(std::fs::read(&source_file)?, b"changed");
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn full_backup_run_does_not_publish_failed_metadata() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source");
+        let repository = directory.path().join("repository");
+        std::fs::create_dir(&source)?;
+        std::fs::create_dir(&repository)?;
+        let source_file = source.join("hello.txt");
+        std::fs::write(&source_file, b"original")?;
+
+        let source_for_run = source.clone();
+        let repository_for_run = repository.clone();
+        tokio::task::spawn_blocking(move || {
+            run(&source_for_run, &repository_for_run, "backup-001")
+        })
+        .await??;
+        let expected_manifest =
+            serde_json::to_value(Manifest::read(&repository, "backup-001").await?)?;
+        let existing_backup_file = repository.join("backups/backup-001/hello.txt");
+        let expected_compressed = std::fs::read(&existing_backup_file)?;
+
+        let database_path = repository.join("repository.sqlite3");
+        let pool = storage::open(&database_path, SCHEMA, false).await?;
+        // Fail after inserting the header, exercising rollback and propagation
+        // through run with a real SQLite transaction.
+        sqlx::query(
+            "CREATE TRIGGER reject_backup_entry BEFORE INSERT ON entries
+             WHEN NEW.backup_id = 'backup-002'
+             BEGIN SELECT RAISE(ABORT, 'injected metadata publication failure'); END",
+        )
+        .execute(&pool)
+        .await?;
+        pool.close().await;
+        std::fs::write(&source_file, b"changed")?;
+
+        let source_for_run = source.clone();
+        let repository_for_run = repository.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            run(&source_for_run, &repository_for_run, "backup-002")
+        })
+        .await?;
+        let error = result.err().ok_or("accepted failed metadata publication")?;
+        assert_eq!(error.code, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            error
+                .message
+                .contains("injected metadata publication failure")
+        );
+
+        // The contents were written before publication was attempted. Their
+        // presence alone must not make the backup visible in repository metadata.
+        assert_eq!(
+            zstd::decode_all(std::fs::File::open(
+                repository.join("backups/backup-002/hello.txt")
+            )?)?,
+            b"changed"
+        );
+        let missing = Manifest::read(&repository, "backup-002")
+            .await
+            .err()
+            .ok_or("published failed backup")?;
+        assert_eq!(missing.code, StatusCode::NOT_FOUND);
+        let pool = storage::open(&database_path, SCHEMA, false).await?;
+        for query in [
+            "SELECT COUNT(*) FROM backups",
+            "SELECT COUNT(*) FROM entries",
+        ] {
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>(query).fetch_one(&pool).await?,
+                1
+            );
+        }
+        pool.close().await;
+        assert_eq!(
+            serde_json::to_value(Manifest::read(&repository, "backup-001").await?)?,
+            expected_manifest
+        );
+        assert_eq!(std::fs::read(&existing_backup_file)?, expected_compressed);
+        assert_eq!(std::fs::read(&source_file)?, b"changed");
         Ok(())
     }
 
