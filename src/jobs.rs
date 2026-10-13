@@ -446,12 +446,19 @@ mod tests {
         assert!(jobs.claim().await?.is_none());
         jobs.close().await;
         let jobs = JobManager::open(directory.path().to_owned()).await?;
-        assert_eq!(
-            jobs.get_job(&third.job_id)
-                .await?
-                .ok_or("lost failed result")?
-                .to_json()?["error"]["code"],
-            501
+        let failed = jobs
+            .get_job(&third.job_id)
+            .await?
+            .ok_or("lost failed result")?
+            .to_json()?;
+        assert_eq!(failed["state"], "failed");
+        assert_eq!(failed["error"]["code"], 500);
+        assert!(failed["result"].is_null());
+        assert!(
+            failed["error"]["message"]
+                .as_str()
+                .ok_or("missing failure message")?
+                .contains("repository")
         );
         jobs.close().await;
         Ok(())

@@ -26,22 +26,22 @@ struct FileBackupResult {
     checksum: String,
 }
 
-fn paths_overlap(left: &Path, right: &Path) -> bool {
+pub fn paths_overlap(left: &Path, right: &Path) -> bool {
     left.starts_with(right) || right.starts_with(left)
 }
 
-fn get_absolute_directory_path(path: &Path) -> Result<PathBuf, JobError> {
+pub fn get_absolute_directory_path(path: &Path) -> Result<PathBuf, JobError> {
     let path = std::fs::canonicalize(path).map_err(|error| {
-        JobError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to resolve path {}: {error}", path.display()),
-        )
+        JobError::internal(format!(
+            "failed to resolve path {}: {error}",
+            path.display()
+        ))
     })?;
     let path_metadata = path.metadata().map_err(|error| {
-        JobError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to load path {} metadata : {error}", path.display(),),
-        )
+        JobError::internal(format!(
+            "failed to load path {} metadata : {error}",
+            path.display(),
+        ))
     })?;
     if !path_metadata.is_dir() {
         return Err(JobError::new(
@@ -65,13 +65,10 @@ fn walk_directory(
     backup_entries: &mut Vec<BackupEntry>,
 ) -> Result<(), JobError> {
     let source_dir = std::fs::read_dir(absolute_current).map_err(|error| {
-        JobError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!(
-                "failed to open path {}: {error}",
-                absolute_current.display(),
-            ),
-        )
+        JobError::internal(format!(
+            "failed to open path {}: {error}",
+            absolute_current.display(),
+        ))
     })?;
     for file in source_dir {
         let file = file.map_err(|error| {
@@ -137,52 +134,50 @@ fn path_traversal(absolute_source_path: &Path) -> Result<Vec<BackupEntry>, JobEr
 }
 
 fn backup_one_file(
-    source_file_path: &Path,
-    backup_file_path: &Path,
+    absolute_source_file_path: &Path,
+    absolute_backup_file_path: &Path,
 ) -> Result<FileBackupResult, JobError> {
     let mut source_file = std::fs::OpenOptions::new()
         .read(true)
-        .open(source_file_path)
+        .open(absolute_source_file_path)
         .map_err(|error| {
             JobError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
                     "failed to open source file {}: {error}",
-                    source_file_path.display(),
+                    absolute_source_file_path.display(),
                 ),
             )
         })?;
     let backup_file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(backup_file_path)
+        .open(absolute_backup_file_path)
         .map_err(|error| match error.kind() {
             io::ErrorKind::AlreadyExists => JobError::new(
                 StatusCode::CONFLICT,
                 format!(
                     "backup file {} already exists: {error}",
-                    backup_file_path.display(),
+                    absolute_backup_file_path.display(),
                 ),
             ),
             _ => JobError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
-                    "failed to write backup file {}: {error}",
-                    backup_file_path.display(),
+                    "failed to create backup file {}: {error}",
+                    absolute_backup_file_path.display(),
                 ),
             ),
         })?;
 
     let mut buffer = [0u8; 128 * 1024];
-    let mut backup_file = zstd::stream::write::Encoder::new(backup_file, 0).map_err(|error| {
-        JobError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!(
+    let mut backup_file_encoder =
+        zstd::stream::write::Encoder::new(backup_file, 0).map_err(|error| {
+            JobError::internal(format!(
                 "failed to create zstd encoder on backup file {}: {error}",
-                backup_file_path.display(),
-            ),
-        )
-    })?;
+                absolute_backup_file_path.display(),
+            ))
+        })?;
     let mut hasher = Sha256::new();
     let mut original_size: u64 = 0;
 
@@ -192,7 +187,7 @@ fn backup_one_file(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
                     "failed to read source file {}: {error}",
-                    source_file_path.display(),
+                    absolute_source_file_path.display(),
                 ),
             )
         })?;
@@ -202,36 +197,30 @@ fn backup_one_file(
         }
 
         let chunk = &buffer[..n];
-        backup_file.write_all(chunk).map_err(|error| {
+        backup_file_encoder.write_all(chunk).map_err(|error| {
             JobError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
                     "failed to compress and forward data to backup file {}: {error}",
-                    backup_file_path.display(),
+                    absolute_backup_file_path.display(),
                 ),
             )
         })?;
         hasher.update(chunk);
         original_size += n as u64;
     }
-    let backup_file = backup_file.finish().map_err(|error| {
-        JobError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!(
-                "failed to finish writing on backup file {}: {error}",
-                backup_file_path.display(),
-            ),
-        )
+    let backup_file = backup_file_encoder.finish().map_err(|error| {
+        JobError::internal(format!(
+            "failed to finish writing on backup file {}: {error}",
+            absolute_backup_file_path.display(),
+        ))
     })?;
 
     backup_file.sync_all().map_err(|error| {
-        JobError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!(
-                "failed to sync backup file {}: {error}",
-                backup_file_path.display(),
-            ),
-        )
+        JobError::internal(format!(
+            "failed to sync backup file {}: {error}",
+            absolute_backup_file_path.display(),
+        ))
     })?;
 
     Ok(FileBackupResult {
@@ -241,7 +230,7 @@ fn backup_one_file(
 }
 
 #[cfg(unix)]
-fn sync_directory(path: &Path) -> Result<(), JobError> {
+pub(crate) fn sync_directory(path: &Path) -> Result<(), JobError> {
     std::fs::File::open(path)
         .and_then(|directory| directory.sync_all())
         .map_err(|error| {
@@ -253,7 +242,7 @@ fn sync_directory(path: &Path) -> Result<(), JobError> {
 }
 
 #[cfg(not(unix))]
-fn sync_directory(path: &Path) -> Result<(), JobError> {
+pub(crate) fn sync_directory(path: &Path) -> Result<(), JobError> {
     Err(JobError::new(
         StatusCode::NOT_IMPLEMENTED,
         format!(
@@ -263,8 +252,8 @@ fn sync_directory(path: &Path) -> Result<(), JobError> {
     ))
 }
 
-fn backup_all(
-    backup_entries: &[BackupEntry],
+fn backup_all_files(
+    backup_entries: &Vec<BackupEntry>,
     absolute_source_path: &Path,
     absolute_backup_root_directory_path: &Path,
 ) -> Result<Vec<ManifestEntry>, JobError> {
@@ -304,6 +293,12 @@ fn backup_all(
         manifest_entries.push(manifest_entry);
     }
 
+    for manifest_entry in manifest_entries.iter().rev() {
+        if let ManifestEntry::Directory { path } = manifest_entry {
+            sync_directory(&absolute_backup_root_directory_path.join(path))?;
+        }
+    }
+
     Ok(manifest_entries)
 }
 
@@ -326,13 +321,10 @@ pub(crate) fn run(source: &Path, repository: &Path, backup_id: &str) -> Result<(
     sync_directory(&absolute_repository_path)?;
 
     std::fs::create_dir_all(absolute_repository_path.join("backups")).map_err(|error| {
-        JobError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!(
-                "failed to create backups directory {}: {error}",
-                absolute_repository_path.join("backups").display(),
-            ),
-        )
+        JobError::internal(format!(
+            "failed to create backups directory {}: {error}",
+            absolute_repository_path.join("backups").display(),
+        ))
     })?;
 
     let absolute_backup_root_directory_path =
@@ -355,32 +347,29 @@ pub(crate) fn run(source: &Path, repository: &Path, backup_id: &str) -> Result<(
     })?;
 
     let created_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-    let manifest_entries = backup_all(
+    let manifest_entries = backup_all_files(
         &backup_entries,
         &absolute_source_path,
         &absolute_backup_root_directory_path,
     )?;
-    for entry in manifest_entries.iter().rev() {
-        if let ManifestEntry::Directory { path } = entry {
-            sync_directory(&absolute_backup_root_directory_path.join(path))?;
-        }
-    }
+
     sync_directory(&absolute_backup_root_directory_path)?;
     sync_directory(&absolute_repository_path.join("backups"))?;
     sync_directory(&absolute_repository_path)?;
+
     let manifest = Manifest {
         format_version: 1,
         backup_id: backup_id.to_owned(),
         created_at,
         source: absolute_source_path,
-        compression: "zstd".to_string(),
+        compression_algorithm: "zstd".to_string(),
         checksum_algorithm: "sha256".to_string(),
         entries: manifest_entries,
     };
     let handle = tokio::runtime::Handle::try_current()
         .map_err(|error| JobError::internal(format!("cannot access Tokio runtime: {error}")))?;
-
     handle.block_on(manifest.write(&absolute_repository_path))?;
+
     Ok(())
 }
 
@@ -415,7 +404,7 @@ pub(crate) struct Manifest {
     pub(crate) backup_id: String,
     pub(crate) created_at: String,
     pub(crate) source: PathBuf,
-    pub(crate) compression: String,
+    pub(crate) compression_algorithm: String,
     pub(crate) checksum_algorithm: String,
     pub(crate) entries: Vec<ManifestEntry>,
 }
@@ -434,10 +423,6 @@ pub(crate) enum ManifestEntry {
 }
 
 impl Manifest {
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Restore execution will read repository metadata")
-    )]
     pub(crate) async fn read(repository: &Path, backup_id: &str) -> Result<Self, JobError> {
         let path = repository.join("repository.sqlite3");
         let pool = storage::open(&path, SCHEMA, false).await?;
@@ -460,7 +445,7 @@ impl Manifest {
                 backup_id: row.try_get("backup_id")?,
                 created_at: row.try_get("created_at")?,
                 source: serde_json::from_str(&row.try_get::<String, _>("source")?)?,
-                compression: row.try_get("compression")?,
+                compression_algorithm: row.try_get("compression")?,
                 checksum_algorithm: row.try_get("checksum_algorithm")?,
                 entries: Vec::new(),
             };
@@ -509,7 +494,7 @@ impl Manifest {
             let mut transaction = pool.begin().await?;
             sqlx::query("INSERT INTO backups (backup_id, format_version, created_at, source, compression, checksum_algorithm) VALUES (?, ?, ?, ?, ?, ?)")
                 .bind(&self.backup_id).bind(i64::from(self.format_version)).bind(&self.created_at)
-                .bind(serde_json::to_string(&self.source)?).bind(&self.compression).bind(&self.checksum_algorithm)
+                .bind(serde_json::to_string(&self.source)?).bind(&self.compression_algorithm).bind(&self.checksum_algorithm)
                 .execute(&mut *transaction).await?;
             for (ordinal, entry) in self.entries.iter().enumerate() {
                 let (kind, path, size, checksum) = match entry {
@@ -540,7 +525,7 @@ impl Manifest {
 
     fn validate_format(&self) -> Result<(), JobError> {
         if self.format_version != 1
-            || self.compression != "zstd"
+            || self.compression_algorithm != "zstd"
             || self.checksum_algorithm != "sha256"
         {
             return Err(JobError::new(
@@ -794,7 +779,7 @@ mod tests {
         assert_eq!(manifest.backup_id, "backup-001");
         assert_eq!(manifest.source, std::fs::canonicalize(&source)?);
         assert_eq!(manifest.format_version, 1);
-        assert_eq!(manifest.compression, "zstd");
+        assert_eq!(manifest.compression_algorithm, "zstd");
         assert_eq!(manifest.checksum_algorithm, "sha256");
         let created_at = chrono::DateTime::parse_from_rfc3339(&manifest.created_at)?;
         assert_eq!(created_at.offset().local_minus_utc(), 0);
@@ -980,7 +965,7 @@ mod tests {
             backup_id: "backup-001".into(),
             created_at: "2026-10-09T00:00:00Z".into(),
             source: "/source".into(),
-            compression: "zstd".into(),
+            compression_algorithm: "zstd".into(),
             checksum_algorithm: "sha256".into(),
             entries: vec![
                 ManifestEntry::Directory {
