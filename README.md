@@ -72,7 +72,6 @@ src/
   storage.rs       SQLite connection settings and schema initialization
   backup.rs        Full backups, mirrored file storage, transactional metadata, and listing
   restore.rs       Restore path validation, decompression, and integrity verification
-  restore/tests.rs Integration and property tests using real backups and SQLite metadata
   test_support.rs  Temporary directories for tests
 ```
 
