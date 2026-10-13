@@ -538,20 +538,20 @@ mod tests {
         let directory = TestDirectory::new()?;
         std::fs::create_dir(directory.path().join("source"))?;
         std::fs::create_dir(directory.path().join("repo"))?;
+        std::fs::create_dir(directory.path().join("restored"))?;
+        std::fs::write(
+            directory.path().join("source/payload"),
+            b"round trip contents",
+        )?;
         let jobs = JobManager::open(directory.path().to_owned()).await?;
         let app = router(jobs.clone(), "test-key".into());
-        for (path, payload, kind) in [
-            (
-                "/api/backups",
-                json!({"source": "source", "repository": "repo"}),
-                "backup",
-            ),
-            (
-                "/api/restores",
-                json!({"repository": "repo", "backup_id": "backup-001", "destination": "restored"}),
-                "restore",
-            ),
-        ] {
+        let mut backup_id = "backup-001".to_owned();
+        for (path, kind) in [("/api/backups", "backup"), ("/api/restores", "restore")] {
+            let payload = if kind == "backup" {
+                json!({"source": "source", "repository": "repo"})
+            } else {
+                json!({"repository": "repo", "backup_id": backup_id, "destination": "restored"})
+            };
             let response = app
                 .clone()
                 .oneshot(request(
@@ -594,13 +594,22 @@ mod tests {
                     if body["state"] == "succeeded" || body["state"] == "failed" {
                         assert_eq!(body["job_id"], accepted["job_id"]);
                         assert_eq!(body["kind"], kind);
-                        if kind == "backup" && cfg!(unix) {
+                        if cfg!(unix) {
                             assert_eq!(body["state"], "succeeded");
                             assert!(body["error"].is_null());
-                            let backup_id = body["result"]["backup_id"]
-                                .as_str()
-                                .ok_or("missing backup_id in successful job")?;
-                            assert!(!backup_id.is_empty());
+                            if kind == "backup" {
+                                backup_id = body["result"]["backup_id"]
+                                    .as_str()
+                                    .ok_or("missing backup_id in successful job")?
+                                    .to_owned();
+                                assert!(!backup_id.is_empty());
+                            } else {
+                                assert_eq!(body["result"], json!({"destination": "restored"}));
+                                assert_eq!(
+                                    std::fs::read(directory.path().join("restored/payload"))?,
+                                    b"round trip contents"
+                                );
+                            }
                         } else {
                             assert_eq!(body["state"], "failed");
                             assert!(body["result"].is_null());
