@@ -52,11 +52,50 @@ pub fn get_absolute_directory_path(path: &Path) -> Result<PathBuf, JobError> {
     Ok(path)
 }
 
-pub(crate) fn list(_repository: &Path) -> Result<Vec<BackupSummary>, JobError> {
-    Err(JobError::new(
-        StatusCode::NOT_IMPLEMENTED,
-        "backup listing is not implemented yet",
-    ))
+pub(crate) fn list(repository: &Path) -> Result<Vec<BackupSummary>, JobError> {
+    let absolute_repository_path = get_absolute_directory_path(repository)?;
+    let absolute_db_path = absolute_repository_path.join("repository.sqlite3");
+
+    if !absolute_db_path.try_exists().map_err(|error| {
+        JobError::internal(format!(
+            "failed to check whether repository.sqlite3 {} is existing or not: {error}",
+            absolute_db_path.display()
+        ))
+    })? {
+        return Ok(Vec::new());
+    }
+
+    let handle = tokio::runtime::Handle::try_current()
+        .map_err(|error| JobError::internal(format!("cannot access Tokio runtime: {error}")))?;
+
+    handle.block_on(async {
+        let pool = storage::open(&absolute_db_path, SCHEMA, false).await?;
+
+        let result = async {
+            let rows = sqlx::query(
+                "
+                SELECT backup_id, created_at
+                FROM backups
+                ORDER BY created_at DESC, backup_id ASC
+                ",
+            )
+            .fetch_all(&pool)
+            .await?;
+
+            let mut summaries = Vec::with_capacity(rows.len());
+            for row in rows {
+                summaries.push(BackupSummary {
+                    backup_id: row.try_get("backup_id")?,
+                    created_at: row.try_get("created_at")?,
+                });
+            }
+            Ok(summaries)
+        }
+        .await;
+
+        pool.close().await;
+        result
+    })
 }
 
 fn walk_directory(
@@ -536,6 +575,9 @@ impl Manifest {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod list_tests;
 
 #[cfg(test)]
 mod tests {

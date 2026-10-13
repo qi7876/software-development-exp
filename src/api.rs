@@ -641,6 +641,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn backup_listing_returns_published_summaries() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let repository = directory.path().join("repo with space");
+        std::fs::create_dir(&repository)?;
+        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let app = router(jobs.clone(), "test-key".into());
+        let uri = "/api/backups?repository=repo+with+space";
+        let response = app
+            .clone()
+            .oneshot(request("GET", uri, "Bearer test-key", "", vec![])?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(json_body(response).await?, json!({"backups": []}));
+        assert!(!repository.join("repository.sqlite3").exists());
+
+        let created_at = "2026-10-13T00:00:00.000Z";
+        for backup_id in ["z-backup", "a-backup"] {
+            crate::backup::Manifest {
+                format_version: 1,
+                backup_id: backup_id.into(),
+                created_at: created_at.into(),
+                source: directory.path().to_owned(),
+                compression_algorithm: "zstd".into(),
+                checksum_algorithm: "sha256".into(),
+                entries: Vec::new(),
+            }
+            .write(&repository)
+            .await?;
+        }
+        std::fs::create_dir_all(repository.join("backups/unpublished"))?;
+        let response = app
+            .oneshot(request("GET", uri, "Bearer test-key", "", vec![])?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            json_body(response).await?,
+            json!({"backups": [
+                {"backup_id": "a-backup", "created_at": created_at},
+                {"backup_id": "z-backup", "created_at": created_at},
+            ]})
+        );
+        jobs.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn database_admission_failure_returns_json_500() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
         let jobs = JobManager::open(directory.path().to_owned()).await?;
