@@ -577,7 +577,7 @@ impl Manifest {
 }
 
 #[cfg(test)]
-mod list_tests {
+mod tests {
     // Exercise listing against real repository metadata without relying on file IO order.
     use super::*;
     use crate::test_support::TestDirectory;
@@ -766,14 +766,6 @@ mod list_tests {
         assert_eq!(std::fs::read(&file)?, b"keep contents");
         Ok(())
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::error::Error;
-
-    use super::*;
-    use crate::test_support::TestDirectory;
 
     #[test]
     fn overlap_paths() {
