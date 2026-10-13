@@ -26,7 +26,7 @@ API routes require `Authorization: Bearer <secret_key>`. `GET /` returns a publi
 | `POST /api/backups` | Accept JSON with `source` and `repository`; return HTTP 202 after durably queuing a job. |
 | `POST /api/restores` | Accept JSON with `repository`, `backup_id`, and `destination`; return HTTP 202 after durably queuing a job. |
 | `GET /api/jobs/{job_id}` | Return HTTP 200 with the stored job, or HTTP 404 if it does not exist. |
-| `GET /api/backups?repository=PATH` | Backup listing remains unimplemented and returns HTTP 501. |
+| `GET /api/backups?repository=PATH` | Return HTTP 200 with published backup summaries in `{"backups":[...]}`. |
 
 ```shell
 curl -i -H 'Authorization: Bearer example-local-test-key' \
@@ -56,6 +56,8 @@ Backup execution finishes and synchronizes each compressed file, synchronizes th
 
 Restore requires an existing empty destination directory whose canonical path does not overlap the repository. It validates every metadata entry path before writing, decompresses mirrored files without overwriting existing paths, verifies uncompressed sizes and SHA-256 checksums, then synchronizes files and directories before success. Missing backups return error code 404; invalid metadata, damaged contents, and integrity mismatches fail the job. A failed or interrupted restore may leave partial output; automatic cleanup is not implemented.
 
+Listing reads committed metadata headers and returns each backup's `backup_id` and `created_at`, newest first with backup IDs ascending for equal timestamps. It does not inspect or verify payload contents. An existing repository directory without a metadata database returns an empty list without creating the database; directories from unpublished backups are ignored. Invalid paths, corrupt databases, and unsupported schemas return errors rather than an empty list.
+
 ACID guarantees cover individual database transactions. Job history and repository metadata use separate databases; they do not share a transaction. File contents remain outside SQLite. Failed or interrupted operations may leave backup directories without metadata; automatic cleanup is not implemented. Keep source files unchanged while backing up: concurrent source modifications are not detected. WAL databases may have `-wal` and `-shm` sidecars; do not copy a live database file alone as a database backup.
 
 ## Project structure
@@ -68,7 +70,7 @@ src/
   api.rs           axum routing, authentication, JSON responses, and shutdown supervision
   jobs.rs          Durable FIFO job lifecycle and the background worker
   storage.rs       SQLite connection settings and schema initialization
-  backup.rs        Full backups, mirrored file storage, and transactional metadata; listing stub
+  backup.rs        Full backups, mirrored file storage, transactional metadata, and listing
   restore.rs       Restore path validation, decompression, and integrity verification
   restore/tests.rs Integration and property tests using real backups and SQLite metadata
   test_support.rs  Temporary directories for tests
@@ -77,11 +79,11 @@ src/
 ## Current status and acceptance criteria
 
 Command-line parsing, configuration, authenticated HTTP routing, JSON error responses, durable background jobs,
-restart recovery, repository metadata storage, and Unix full backup and restore execution are implemented.
+restart recovery, repository metadata storage and listing, and Unix full backup and restore execution are implemented.
 
 Backup jobs require existing source and repository directories. Equal or nested paths are rejected after resolving symlinks.
 Recursive source discovery is implemented, including empty directories. Symlinks and other unsupported types inside source are rejected.
-Backup listing remains unimplemented. Backup checks cover stored metadata, decompressed contents, empty directories, source preservation, duplicate IDs, and failed metadata publication. Restore integration checks cover round trips, buffer boundaries, invalid paths, damaged payloads, missing backups, and overlapping paths. Proptest generates directory trees, occupied destinations, and integrity mismatches with 32 cases per property and a fixed seed for reproducible checks. Failed property cases shrink and are persisted for replay; retain generated regression seed files in version control. Run `cargo test restore::tests` for the restore suite. These tests do not simulate power loss.
+Backup checks cover stored metadata, decompressed contents, empty directories, source preservation, duplicate IDs, and failed metadata publication. Restore integration checks cover round trips, buffer boundaries, invalid paths, damaged payloads, missing backups, and overlapping paths. Listing checks cover stable ordering, empty repositories, failed publication, invalid metadata, and HTTP responses. Proptest generates directory trees, occupied destinations, integrity mismatches, and listing headers with 32 cases per property and fixed seeds for reproducible checks. Failed property cases shrink and are persisted for replay; retain generated regression seed files in version control. Run `cargo test restore::tests` or `cargo test backup::list_tests` for the respective suites. These tests do not simulate power loss.
 There is no web console, progress reporting, or cancellation.
 
 The current milestone is a minimal end-to-end workflow for local full backups and restores, with these acceptance criteria:
@@ -91,8 +93,7 @@ The current milestone is a minimal end-to-end workflow for local full backups an
 - Publish complete repository metadata transactionally after the referenced file contents are durable.
 - Restore into a separate empty directory and compare relative paths, entry types, and contents. Report clear failures and interruptions while preserving source files and existing successful backups.
 
-The next step is backup listing.
-File consistency and cleanup after abnormal exits remain to be implemented. Verify each step before continuing.
+The next work is file consistency and cleanup after failed or interrupted operations. Verify each step before continuing.
 
 ## Documentation
 

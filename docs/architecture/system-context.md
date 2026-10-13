@@ -4,7 +4,7 @@
 
 Individual users and automation scripts access its HTTP API through clients such as curl, authenticated by a Bearer secret key. Users submit backup and restore requests, receive a durable job ID immediately, and query outcomes while background execution proceeds. A web console is planned.
 
-The service reads local configuration and persists its job queue and history in a SQLite database in the working directory. Full backups store the information needed for identification, verification, and restoration in a SQLite database at each local repository root. Zstd-compressed contents mirror the source tree in a separate directory per backup. Backup and restore execution currently support Unix platforms; backup listing remains unimplemented.
+The service reads local configuration and persists its job queue and history in a SQLite database in the working directory. Full backups store the information needed for identification, verification, and restoration in a SQLite database at each local repository root. Zstd-compressed contents mirror the source tree in a separate directory per backup. Users can list published backup summaries from repository metadata. Backup and restore execution currently support Unix platforms.
 
 ```text
 Users / automation scripts <-- HTTP --> bak <---> local configuration
