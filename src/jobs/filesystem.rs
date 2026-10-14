@@ -50,3 +50,22 @@ pub fn sync_directory(path: &Path) -> Result<(), JobError> {
         ),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlap_paths() {
+        let source_1 = Path::new("/data/source");
+        let backup_1 = Path::new("/data/backup");
+        assert!(!paths_overlap(source_1, backup_1));
+        assert!(paths_overlap(source_1, source_1));
+        let backup_2 = Path::new("/data/source/backup");
+        assert!(paths_overlap(source_1, backup_2));
+        let source_2 = Path::new("/data/backup/source");
+        assert!(paths_overlap(source_2, backup_1));
+        let backup_3 = Path::new("/data/source-copy");
+        assert!(!paths_overlap(source_1, backup_3));
+    }
+}
