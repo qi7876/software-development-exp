@@ -922,6 +922,9 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             f"峰值采样 RSS 为 {stable['sampled_peak_rss_bytes'] / (1024 * 1024):.1f} MiB。",
         )
     _heading(document, anchor, "4.3 Instruments CPU 与内存分析", 2)
+    signing = evidence.get("instrument_signing_diagnosis", {})
+    if signing:
+        _paragraph(document, anchor, f"采集故障复核：{signing['cause']}修正方式：{signing['fix']}")
     for item in evidence.get("instruments", []):
         _paragraph(
             document,

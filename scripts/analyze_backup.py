@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import platform
+import plistlib
 import random
 import re
 import shutil
@@ -326,11 +327,40 @@ def run_workload(binary: Path, output: Path, kind: str, seconds: int = 0) -> dic
     }
 
 
+def prepare_profile_binary(binary: Path, output: Path) -> Path:
+    """Grant debugger access to a disposable copy, leaving Cargo's binary unchanged."""
+    output.mkdir(parents=True, exist_ok=True)
+    copied = output / "bak"
+    shutil.copy2(binary, copied)
+    entitlements = output / "debug-entitlements.plist"
+    with entitlements.open("wb") as destination:
+        plistlib.dump({"com.apple.security.get-task-allow": True}, destination)
+    subprocess.run(
+        ["codesign", "--force", "--sign", "-", "--entitlements", str(entitlements), str(copied)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return copied
+
+
 def profile(binary: Path, output: Path, template: str) -> dict[str, Any]:
     dataset(output / "source", "incompressible")
     expected = tree(output / "source")
-    server = Server(binary, output / "server", template)
-    result: dict[str, Any] = {"template": template}
+    result: dict[str, Any] = {
+        "template": template,
+        "recorded_at": datetime.now(UTC).isoformat(),
+        "debug_entitlement": "com.apple.security.get-task-allow",
+    }
+    try:
+        copied = prepare_profile_binary(binary, output / "executable")
+        server = Server(copied, output / "server", template)
+    except subprocess.CalledProcessError as error:
+        result.update(status="failed", error=f"cannot sign recording copy: {error.stderr}")
+        return result
+    except OSError as error:
+        result.update(status="failed", error=f"cannot prepare recording: {error}")
+        return result
     try:
         server.start()
         started = time.monotonic()
@@ -379,7 +409,76 @@ def profile(binary: Path, output: Path, template: str) -> dict[str, Any]:
                 result["cpu_summary"] = cpu_summary(samples)
             else:
                 result["sample_export_error"] = export.stderr
+        elif toc.returncode == 0 and template in {"Allocations", "Leaks"}:
+            result["memory_summary"] = memory_profile_summary(server.trace, output, template)
     return result
+
+
+def memory_profile_summary(trace: Path, output: Path, template: str) -> dict[str, Any]:
+    """Export recorded statistics; persistent bytes describe the end of the recording."""
+    queries = [("allocations", "Allocations", "Statistics")]
+    if template == "Leaks":
+        queries.append(("leaks", "Leaks", "Leaks"))
+    summary: dict[str, Any] = {}
+    for key, track, detail in queries:
+        path = output / f"{key}.xml"
+        query = (
+            f'/trace-toc/run[@number="1"]/tracks/track[@name="{track}"]'
+            f'/details/detail[@name="{detail}"]'
+        )
+        result = subprocess.run(
+            [
+                "xcrun",
+                "xctrace",
+                "export",
+                "--input",
+                str(trace),
+                "--xpath",
+                query,
+                "--output",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            summary[key] = {"status": "export failed", "error": result.stderr}
+            continue
+        root = ET.parse(path).getroot()
+        if root.find("node") is None:
+            summary[key] = {"status": "query returned no table"}
+            continue
+        rows = list(root.iter("row"))
+        if key == "allocations":
+            categories = {
+                row.attrib["category"]: {
+                    name: int(value) for name, value in row.attrib.items() if name != "category"
+                }
+                for row in rows
+                if row.attrib.get("category")
+                in {
+                    "All Heap & Anonymous VM",
+                    "All Heap Allocations",
+                    "All Anonymous VM",
+                    "VM: Stack",
+                }
+            }
+            summary[key] = {
+                "status": "exported"
+                if "All Heap Allocations" in categories
+                else "missing statistics",
+                "categories": categories,
+            }
+        else:
+            summary[key] = {
+                "status": "exported",
+                "reported_rows": len(rows),
+                "rows": [row.attrib for row in rows],
+            }
+        summary[key]["output"] = str(path.relative_to(ROOT))
+    return summary
 
 
 def cpu_summary(samples: Path) -> dict[str, Any]:
@@ -490,7 +589,9 @@ def memory_analysis(binary: Path, output: Path) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stability-seconds", type=int, default=600)
-    parser.add_argument("--skip-instruments", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--skip-instruments", action="store_true")
+    mode.add_argument("--instruments-only", action="store_true")
     parser.add_argument("--output", type=Path)
     arguments = parser.parse_args()
     if platform.system() != "Darwin" or arguments.stability_seconds < 1:
@@ -522,24 +623,26 @@ def main() -> None:
         ],
     }
     try:
-        for kind in ["compressible", "incompressible", "small-files"]:
-            print(f"Measuring {kind}", flush=True)
-            results["performance"].append(run_workload(binary, output / kind, kind))
-        print("Running stability workload", flush=True)
-        results["stability"] = run_workload(
-            binary,
-            output / "stability",
-            "stability",
-            arguments.stability_seconds,
-        )
+        if not arguments.instruments_only:
+            for kind in ["compressible", "incompressible", "small-files"]:
+                print(f"Measuring {kind}", flush=True)
+                results["performance"].append(run_workload(binary, output / kind, kind))
+            print("Running stability workload", flush=True)
+            results["stability"] = run_workload(
+                binary,
+                output / "stability",
+                "stability",
+                arguments.stability_seconds,
+            )
         if not arguments.skip_instruments:
             for template in ["Time Profiler", "Allocations", "Leaks"]:
                 print(f"Recording {template}", flush=True)
-                results["instruments"].append(
-                    profile(binary, output / template.replace(" ", "-"), template)
-                )
-            print("Inspecting normal-process memory", flush=True)
-            results["memory_analysis"] = memory_analysis(binary, output / "memory")
+                recorded = profile(binary, output / template.replace(" ", "-"), template)
+                results["instruments"].append(recorded)
+                print(f"{template}: {recorded['status']}", flush=True)
+            if not arguments.instruments_only:
+                print("Inspecting normal-process memory", flush=True)
+                results["memory_analysis"] = memory_analysis(binary, output / "memory")
     finally:
         (output / "summary.json").write_text(
             json.dumps(results, ensure_ascii=False, indent=2) + "\n"
