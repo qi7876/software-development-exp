@@ -396,6 +396,62 @@ async fn round_trip(files: BTreeMap<String, Vec<u8>>) -> TestResult {
     server.stop().await
 }
 
+async fn occupied_destination_is_preserved(
+    entries: BTreeMap<String, Option<Vec<u8>>>,
+) -> TestResult {
+    let mut server = TestServer::start().await?;
+    std::fs::write(server.path("source/payload"), b"keep source contents")?;
+    for (relative, contents) in entries {
+        let path = server.path("restored").join(relative);
+        match contents {
+            Some(contents) => {
+                std::fs::create_dir_all(path.parent().ok_or("missing destination parent")?)?;
+                std::fs::write(path, contents)?;
+            }
+            None => std::fs::create_dir_all(path)?,
+        }
+    }
+    let occupied = read_tree(&server.path("restored"))?;
+    assert!(!occupied.is_empty());
+    let original = read_tree(&server.path("source"))?;
+    let backup_job_id = server.backup().await?;
+    let backup_job = server.wait_job(&backup_job_id, false).await?;
+    assert_eq!(backup_job["state"], "succeeded", "{backup_job}");
+    let backup_id = backup_job["result"]["backup_id"]
+        .as_str()
+        .ok_or("missing backup ID")?;
+    let listed = server.get(LIST_PATH).await?;
+    let repository = read_tree(&server.path("repo with space"))?;
+
+    let restore_job_id = server
+        .submit(
+            "/api/restores",
+            json!({
+                "repository": "repo with space", "backup_id": backup_id, "destination": "restored",
+            }),
+        )
+        .await?;
+    let failed = server.wait_job(&restore_job_id, false).await?;
+    assert_eq!(failed["state"], "failed", "{failed}");
+    assert_eq!(failed["kind"], "restore");
+    assert!(failed["result"].is_null());
+    assert_eq!(failed["error"]["code"], 400);
+    assert_eq!(read_tree(&server.path("restored"))?, occupied);
+    assert_eq!(read_tree(&server.path("source"))?, original);
+    assert_eq!(read_tree(&server.path("repo with space"))?, repository);
+    assert_eq!(server.get(LIST_PATH).await?, listed);
+
+    server.restart().await?;
+    assert_eq!(
+        server.get(&format!("/api/jobs/{restore_job_id}")).await?,
+        failed
+    );
+    assert_eq!(read_tree(&server.path("restored"))?, occupied);
+    assert_eq!(read_tree(&server.path("source"))?, original);
+    assert_eq!(server.get(LIST_PATH).await?, listed);
+    server.stop().await
+}
+
 #[tokio::test]
 async fn startup_authentication_and_failed_job_reporting() -> TestResult {
     let mut server = TestServer::start().await?;
@@ -472,6 +528,104 @@ proptest! {
             .map_err(|error| TestCaseError::fail(error.to_string()))?;
         runtime.block_on(round_trip(files)).map_err(|error| TestCaseError::fail(error.to_string()))?;
     }
+
+    #[test]
+    fn generated_occupied_destinations_are_preserved_through_http(
+        entries in btree_map(
+            "(root|nested|nested/deeper)/entry_[a-z]{1,6}",
+            prop::option::of(vec(any::<u8>(), 0..2049)),
+            1..5,
+        ),
+    ) {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()
+            .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        runtime.block_on(occupied_destination_is_preserved(entries))
+            .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    }
+}
+
+#[tokio::test]
+async fn abrupt_exit_fails_the_active_job_and_resumes_queued_work() -> TestResult {
+    let mut server = TestServer::start().await?;
+    std::fs::write(server.path("source/payload"), b"keep source contents")?;
+    let original = read_tree(&server.path("source"))?;
+    let completed_id = server.backup().await?;
+    let completed = server.wait_job(&completed_id, false).await?;
+    assert_eq!(completed["state"], "succeeded", "{completed}");
+    let backup_id = completed["result"]["backup_id"]
+        .as_str()
+        .ok_or("missing backup ID")?;
+    let payloads = server.path("repo with space/backups").join(backup_id);
+    let compressed = read_tree(&payloads)?;
+
+    let mut connection = SqliteConnection::connect_with(
+        &SqliteConnectOptions::new()
+            .filename(server.path("repo with space/repository.sqlite3"))
+            .create_if_missing(false),
+    )
+    .await?;
+    // Block publication so the process cannot complete the active job before it is killed.
+    sqlx::query("BEGIN IMMEDIATE")
+        .execute(&mut connection)
+        .await?;
+    let active = server.backup().await?;
+    server.wait_job(&active, true).await?;
+    let queued = server.backup().await?;
+    assert_eq!(
+        server.get(&format!("/api/jobs/{queued}")).await?["state"],
+        "queued"
+    );
+    server
+        .child
+        .as_mut()
+        .ok_or("missing server process")?
+        .kill()?;
+    let status = server.wait_exit().await?;
+    assert_eq!(
+        std::os::unix::process::ExitStatusExt::signal(&status),
+        Some(9)
+    );
+    sqlx::query("ROLLBACK").execute(&mut connection).await?;
+    connection.close().await?;
+
+    server.spawn()?;
+    server.wait_ready().await?;
+    let interrupted = server.wait_job(&active, false).await?;
+    assert_eq!(interrupted["state"], "failed", "{interrupted}");
+    assert_eq!(interrupted["kind"], "backup");
+    assert!(interrupted["result"].is_null());
+    assert_eq!(interrupted["error"]["code"], 500);
+    assert!(
+        interrupted["error"]["message"]
+            .as_str()
+            .ok_or("missing interruption message")?
+            .contains("interrupted")
+    );
+    let resumed = server.wait_job(&queued, false).await?;
+    assert_eq!(resumed["state"], "succeeded", "{resumed}");
+    assert!(resumed["error"].is_null());
+    assert_eq!(
+        server.get(&format!("/api/jobs/{completed_id}")).await?,
+        completed
+    );
+    assert_eq!(
+        server.get(&format!("/api/jobs/{active}")).await?,
+        interrupted
+    );
+    let listed = server.get(LIST_PATH).await?;
+    let summaries = listed["backups"].as_array().ok_or("missing summaries")?;
+    assert_eq!(summaries.len(), 2);
+    for id in [
+        backup_id,
+        resumed["result"]["backup_id"]
+            .as_str()
+            .ok_or("missing resumed backup ID")?,
+    ] {
+        assert!(summaries.iter().any(|summary| summary["backup_id"] == id));
+    }
+    assert_eq!(read_tree(&server.path("source"))?, original);
+    assert_eq!(read_tree(&payloads)?, compressed);
+    server.stop().await
 }
 
 #[tokio::test]
