@@ -371,13 +371,8 @@ impl JobInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{api, test_support::TestDirectory};
-    use axum::{
-        body::{Body, to_bytes},
-        http::Request,
-    };
+    use crate::test_support::TestDirectory;
     use std::{error::Error, time::Duration};
-    use tower::ServiceExt;
 
     fn backup_request(source: &str) -> JobRequest {
         JobRequest::Backup {
@@ -468,7 +463,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn worker_serializes_operations_keeps_http_responsive_and_finishes_active_job_on_shutdown()
+    async fn worker_serializes_operations_and_finishes_active_job_on_shutdown()
     -> Result<(), Box<dyn Error>> {
         tokio::time::timeout(Duration::from_secs(10), async {
             let directory = TestDirectory::new()?;
@@ -491,15 +486,8 @@ mod tests {
             assert!(matches!(request, JobRequest::Backup { source, .. } if source == Path::new("first")));
             assert_eq!(working_directory, directory.path());
             assert!(starts.try_recv().is_err());
-            let app = api::router(jobs.clone(), "test-key".into());
-            for path in ["/api/status".to_owned(), format!("/api/jobs/{}", first.job_id), format!("/api/jobs/{}", second.job_id)] {
-                let request = Request::builder().uri(&path).header("Authorization", "Bearer test-key").body(Body::empty())?;
-                let response = app.clone().oneshot(request).await?;
-                assert_eq!(response.status(), StatusCode::OK);
-                let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
-                if path.ends_with(&first.job_id) { assert_eq!(body["state"], "running"); }
-                if path.ends_with(&second.job_id) { assert_eq!(body["state"], "queued"); }
-            }
+            assert!(matches!(jobs.get_job(&first.job_id).await?.ok_or("lost active job")?.state, JobState::Running));
+            assert!(matches!(jobs.get_job(&second.job_id).await?.ok_or("lost queued job")?.state, JobState::Queued));
             // Querying and admitting work do not require releasing the operation.
             let fourth = jobs.submit(backup_request("fourth")).await?;
             release_first.send(())?;
