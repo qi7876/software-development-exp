@@ -1,3 +1,4 @@
+use crate::jobs::{JobError, JobManager, JobRequest};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, FromRequest, Request, State, rejection::JsonRejection},
@@ -8,13 +9,7 @@ use axum::{
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::json;
-use std::{error::Error, future::IntoFuture, path::PathBuf};
-use tokio::sync::watch;
-
-use crate::{
-    config::Config,
-    jobs::{JobError, JobManager, JobRequest},
-};
+use std::path::PathBuf;
 
 #[derive(Clone)]
 struct AppState {
@@ -22,7 +17,7 @@ struct AppState {
     secret_key: String,
 }
 
-pub(crate) fn router(jobs: JobManager, secret_key: String) -> Router {
+pub fn router(jobs: JobManager, secret_key: String) -> Router {
     let state = AppState { jobs, secret_key };
     Router::new()
         .route("/", get(|| async { "bak is running" }))
@@ -40,97 +35,6 @@ pub(crate) fn router(jobs: JobManager, secret_key: String) -> Router {
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
         .layer(middleware::from_fn_with_state(state.clone(), authorize))
         .with_state(state)
-}
-
-pub(crate) async fn serve(config: Config, jobs: JobManager) -> Result<(), Box<dyn Error>> {
-    let listener = tokio::net::TcpListener::bind(config.listen)
-        .await
-        .map_err(|error| format!("cannot listen on {}: {error}", config.listen))?;
-    println!("Listening on {}", listener.local_addr()?);
-    let (stop, mut server_stop) = watch::channel(false);
-    let worker_jobs = jobs.clone();
-    let worker_stop = stop.subscribe();
-    let mut worker = tokio::spawn(async move { worker_jobs.run_worker(worker_stop).await });
-    let server = axum::serve(listener, router(jobs.clone(), config.secret_key))
-        .with_graceful_shutdown(async move {
-            // Sender closure also means the owner has stopped the service.
-            while !*server_stop.borrow() {
-                if server_stop.changed().await.is_err() {
-                    break;
-                }
-            }
-        })
-        .into_future();
-    tokio::pin!(server);
-    let mut worker_finished = false;
-    let mut server_finished = false;
-    let outcome: Result<(), Box<dyn Error>> = tokio::select! {
-        result = shutdown_signal() => result.map_err(Into::into),
-        result = &mut server => {
-            server_finished = true;
-            match result {
-                Ok(()) => Err("HTTP server stopped unexpectedly".into()),
-                Err(error) => Err(format!("HTTP server failed: {error}").into()),
-            }
-        }
-        result = &mut worker => {
-            worker_finished = true;
-            match result {
-                Ok(Ok(())) => Err("job worker stopped unexpectedly".into()),
-                Ok(Err(error)) => Err(error.into()),
-                Err(error) => Err(format!("job worker task failed: {error}").into()),
-            }
-        }
-    };
-    stop.send_replace(true);
-    let (worker_outcome, server_outcome) = tokio::join!(
-        async {
-            if worker_finished {
-                return Ok(());
-            }
-            match worker.await {
-                Ok(result) => result.map_err(|error| -> Box<dyn Error> { error.into() }),
-                Err(error) => {
-                    Err(format!("job worker task failed during shutdown: {error}").into())
-                }
-            }
-        },
-        async {
-            if server_finished {
-                return Ok(());
-            }
-            server.await.map_err(|error| -> Box<dyn Error> {
-                format!("HTTP server failed during shutdown: {error}").into()
-            })
-        }
-    );
-    jobs.close().await;
-    // Report secondary shutdown failures as well as the original cause.
-    if outcome.is_err() {
-        if let Err(error) = &worker_outcome {
-            eprintln!("{error}");
-        }
-        if let Err(error) = &server_outcome {
-            eprintln!("{error}");
-        }
-    }
-    outcome?;
-    worker_outcome?;
-    server_outcome
-}
-
-async fn shutdown_signal() -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        tokio::select! {
-            result = tokio::signal::ctrl_c() => result,
-            _ = terminate.recv() => Ok(()),
-        }
-    }
-    #[cfg(not(unix))]
-    tokio::signal::ctrl_c().await
 }
 
 async fn authorize(State(state): State<AppState>, request: Request, next: Next) -> Response {
@@ -314,7 +218,7 @@ mod tests {
     };
     use axum::body::{Body, to_bytes};
     use serde_json::Value;
-    use std::time::Duration;
+    use std::error::Error;
     use tower::ServiceExt;
 
     fn request(
@@ -530,159 +434,6 @@ mod tests {
                 json!({"error": {"code": status.as_u16(), "message": "request failed"}})
             );
         }
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn operation_requests_return_accepted_queryable_jobs() -> Result<(), Box<dyn Error>> {
-        let directory = TestDirectory::new()?;
-        std::fs::create_dir(directory.path().join("source"))?;
-        std::fs::create_dir(directory.path().join("repo"))?;
-        std::fs::create_dir(directory.path().join("restored"))?;
-        std::fs::write(
-            directory.path().join("source/payload"),
-            b"round trip contents",
-        )?;
-        let jobs = JobManager::open(directory.path().to_owned()).await?;
-        let app = router(jobs.clone(), "test-key".into());
-        let mut backup_id = "backup-001".to_owned();
-        for (path, kind) in [("/api/backups", "backup"), ("/api/restores", "restore")] {
-            let payload = if kind == "backup" {
-                json!({"source": "source", "repository": "repo"})
-            } else {
-                json!({"repository": "repo", "backup_id": backup_id, "destination": "restored"})
-            };
-            let response = app
-                .clone()
-                .oneshot(request(
-                    "POST",
-                    path,
-                    "Bearer test-key",
-                    "application/json",
-                    serde_json::to_vec(&payload)?,
-                )?)
-                .await?;
-            assert_eq!(response.status(), StatusCode::ACCEPTED);
-            let location = response
-                .headers()
-                .get(header::LOCATION)
-                .ok_or("missing location")?
-                .to_str()?
-                .to_owned();
-            let accepted = json_body(response).await?;
-            assert_eq!(accepted["kind"], kind);
-            assert_eq!(accepted["state"], "queued");
-            assert!(accepted["result"].is_null());
-            assert!(accepted["error"].is_null());
-            let response = app
-                .clone()
-                .oneshot(request("GET", &location, "Bearer test-key", "", vec![])?)
-                .await?;
-            assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(json_body(response).await?, accepted);
-            let (stop, receiver) = watch::channel(false);
-            let worker_jobs = jobs.clone();
-            let worker = tokio::spawn(async move { worker_jobs.run_worker(receiver).await });
-            tokio::time::timeout(Duration::from_secs(5), async {
-                loop {
-                    let response = app
-                        .clone()
-                        .oneshot(request("GET", &location, "Bearer test-key", "", vec![])?)
-                        .await?;
-                    assert_eq!(response.status(), StatusCode::OK);
-                    let body = json_body(response).await?;
-                    if body["state"] == "succeeded" || body["state"] == "failed" {
-                        assert_eq!(body["job_id"], accepted["job_id"]);
-                        assert_eq!(body["kind"], kind);
-                        if cfg!(unix) {
-                            assert_eq!(body["state"], "succeeded");
-                            assert!(body["error"].is_null());
-                            if kind == "backup" {
-                                backup_id = body["result"]["backup_id"]
-                                    .as_str()
-                                    .ok_or("missing backup_id in successful job")?
-                                    .to_owned();
-                                assert!(!backup_id.is_empty());
-                            } else {
-                                assert_eq!(body["result"], json!({"destination": "restored"}));
-                                assert_eq!(
-                                    std::fs::read(directory.path().join("restored/payload"))?,
-                                    b"round trip contents"
-                                );
-                            }
-                        } else {
-                            assert_eq!(body["state"], "failed");
-                            assert!(body["result"].is_null());
-                            assert_eq!(body["error"]["code"], 501);
-                        }
-                        break;
-                    }
-                    tokio::task::yield_now().await;
-                }
-                Ok::<_, Box<dyn Error>>(())
-            })
-            .await??;
-            stop.send(true)?;
-            worker.await??;
-            let response = app
-                .clone()
-                .oneshot(request(
-                    "POST",
-                    &format!("{location}/cancel"),
-                    "Bearer test-key",
-                    "",
-                    vec![],
-                )?)
-                .await?;
-            assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        }
-        jobs.close().await;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn backup_listing_returns_published_summaries() -> Result<(), Box<dyn Error>> {
-        let directory = TestDirectory::new()?;
-        let repository = directory.path().join("repo with space");
-        std::fs::create_dir(&repository)?;
-        let jobs = JobManager::open(directory.path().to_owned()).await?;
-        let app = router(jobs.clone(), "test-key".into());
-        let uri = "/api/backups?repository=repo+with+space";
-        let response = app
-            .clone()
-            .oneshot(request("GET", uri, "Bearer test-key", "", vec![])?)
-            .await?;
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(json_body(response).await?, json!({"backups": []}));
-        assert!(!repository.join("repository.sqlite3").exists());
-
-        let created_at = "2026-10-13T00:00:00.000Z";
-        for backup_id in ["z-backup", "a-backup"] {
-            crate::backup::Manifest {
-                format_version: 1,
-                backup_id: backup_id.into(),
-                created_at: created_at.into(),
-                source: directory.path().to_owned(),
-                compression_algorithm: "zstd".into(),
-                checksum_algorithm: "sha256".into(),
-                entries: Vec::new(),
-            }
-            .write(&repository)
-            .await?;
-        }
-        std::fs::create_dir_all(repository.join("backups/unpublished"))?;
-        let response = app
-            .oneshot(request("GET", uri, "Bearer test-key", "", vec![])?)
-            .await?;
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            json_body(response).await?,
-            json!({"backups": [
-                {"backup_id": "a-backup", "created_at": created_at},
-                {"backup_id": "z-backup", "created_at": created_at},
-            ]})
-        );
-        jobs.close().await;
         Ok(())
     }
 

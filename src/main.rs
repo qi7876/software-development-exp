@@ -1,12 +1,9 @@
 use std::{error::Error, process::ExitCode};
 
-mod api;
 mod args;
-mod backup;
 mod config;
 mod jobs;
-mod restore;
-mod storage;
+mod server;
 #[cfg(test)]
 mod test_support;
 
@@ -32,5 +29,5 @@ async fn run() -> Result<(), Box<dyn Error>> {
     println!("working_directory: {}", working_directory.display());
     let config = config::Config::load(&working_directory)?;
     let jobs = jobs::JobManager::open(working_directory).await?;
-    api::serve(config, jobs).await
+    server::serve(config, jobs).await
 }

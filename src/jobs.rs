@@ -1,7 +1,9 @@
-use crate::{
-    backup::{self, BackupSummary},
-    restore, storage,
-};
+mod backup;
+mod filesystem;
+mod repository;
+mod restore;
+mod storage;
+
 use http::StatusCode;
 use serde_json::{Value, json};
 use sqlx::{Row, SqlitePool, sqlite::SqliteRow};
@@ -14,7 +16,7 @@ use std::{
 use tokio::sync::{Notify, watch};
 use uuid::Uuid;
 
-const SCHEMA: &str = "
+const JOBS_SCHEMA: &str = "
 CREATE TABLE jobs (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id TEXT NOT NULL UNIQUE,
@@ -45,7 +47,8 @@ pub(crate) struct JobManager {
 
 impl JobManager {
     pub(crate) async fn open(working_directory: PathBuf) -> Result<Self, JobError> {
-        let pool = storage::open(&working_directory.join("jobs.sqlite3"), SCHEMA, true).await?;
+        let pool =
+            storage::open(&working_directory.join("jobs.sqlite3"), JOBS_SCHEMA, true).await?;
         // A running operation may have performed external effects. Never replay it.
         sqlx::query("UPDATE jobs SET state = 'failed', error_code = 500, error_message = 'operation interrupted by service exit', finished_at = ? WHERE state = 'running'")
             .bind(timestamp()?).execute(&pool).await
@@ -91,9 +94,9 @@ impl JobManager {
     pub(crate) async fn list_backups(
         &self,
         repository: &Path,
-    ) -> Result<Vec<BackupSummary>, JobError> {
+    ) -> Result<Vec<repository::RepoBackupInfo>, JobError> {
         let repository = self.working_directory.join(repository);
-        tokio::task::spawn_blocking(move || backup::list(&repository))
+        tokio::task::spawn_blocking(move || repository::list(&repository))
             .await
             .map_err(|error| JobError::internal(format!("backup listing task failed: {error}")))?
     }
@@ -368,13 +371,8 @@ impl JobInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{api, test_support::TestDirectory};
-    use axum::{
-        body::{Body, to_bytes},
-        http::Request,
-    };
+    use crate::test_support::TestDirectory;
     use std::{error::Error, time::Duration};
-    use tower::ServiceExt;
 
     fn backup_request(source: &str) -> JobRequest {
         JobRequest::Backup {
@@ -465,7 +463,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn worker_serializes_operations_keeps_http_responsive_and_finishes_active_job_on_shutdown()
+    async fn worker_serializes_operations_and_finishes_active_job_on_shutdown()
     -> Result<(), Box<dyn Error>> {
         tokio::time::timeout(Duration::from_secs(10), async {
             let directory = TestDirectory::new()?;
@@ -488,15 +486,8 @@ mod tests {
             assert!(matches!(request, JobRequest::Backup { source, .. } if source == Path::new("first")));
             assert_eq!(working_directory, directory.path());
             assert!(starts.try_recv().is_err());
-            let app = api::router(jobs.clone(), "test-key".into());
-            for path in ["/api/status".to_owned(), format!("/api/jobs/{}", first.job_id), format!("/api/jobs/{}", second.job_id)] {
-                let request = Request::builder().uri(&path).header("Authorization", "Bearer test-key").body(Body::empty())?;
-                let response = app.clone().oneshot(request).await?;
-                assert_eq!(response.status(), StatusCode::OK);
-                let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
-                if path.ends_with(&first.job_id) { assert_eq!(body["state"], "running"); }
-                if path.ends_with(&second.job_id) { assert_eq!(body["state"], "queued"); }
-            }
+            assert!(matches!(jobs.get_job(&first.job_id).await?.ok_or("lost active job")?.state, JobState::Running));
+            assert!(matches!(jobs.get_job(&second.job_id).await?.ok_or("lost queued job")?.state, JobState::Queued));
             // Querying and admitting work do not require releasing the operation.
             let fourth = jobs.submit(backup_request("fourth")).await?;
             release_first.send(())?;

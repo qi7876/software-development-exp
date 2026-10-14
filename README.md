@@ -67,13 +67,19 @@ src/
   main.rs          Startup and exit reporting
   args.rs          Command-line arguments
   config.rs        Configuration loading and validation
-  api.rs           axum routing, authentication, JSON responses, and shutdown supervision
-  jobs.rs          Durable FIFO job lifecycle and the background worker
-  storage.rs       SQLite connection settings and schema initialization
-  backup.rs        Full backups, mirrored file storage, transactional metadata, and listing
-  restore.rs       Restore path validation, decompression, and integrity verification
-  restore/tests.rs Integration and property tests using real backups and SQLite metadata
+  server.rs        HTTP listener, worker supervision, and graceful shutdown
+  server/
+    api.rs         Private HTTP routing, authentication, validation, and JSON responses
+  jobs.rs          Job manager facade, durable FIFO lifecycle, and the background worker
+  jobs/
+    backup.rs      Full backup traversal, compression, and synchronization
+    restore.rs     Restore path validation, decompression, and integrity verification
+    repository.rs  Repository metadata types, transactional persistence, and listing
+    filesystem.rs  Shared path resolution, overlap checks, and directory synchronization
+    storage.rs     SQLite connection settings and schema initialization
   test_support.rs  Temporary directories for tests
+tests/
+  server.rs        Application integration tests through the compiled binary and HTTP
 ```
 
 ## Current status and acceptance criteria
@@ -83,7 +89,11 @@ restart recovery, repository metadata storage and listing, and Unix full backup 
 
 Backup jobs require existing source and repository directories. Equal or nested paths are rejected after resolving symlinks.
 Recursive source discovery is implemented, including empty directories. Symlinks and other unsupported types inside source are rejected.
-Backup checks cover stored metadata, decompressed contents, empty directories, source preservation, duplicate IDs, and failed metadata publication. Restore integration checks cover round trips, buffer boundaries, invalid paths, damaged payloads, missing backups, and overlapping paths. Listing checks cover stable ordering, empty repositories, failed publication, invalid metadata, and HTTP responses. Proptest generates directory trees, occupied destinations, integrity mismatches, and listing headers with 32 cases per property and fixed seeds for reproducible checks. Failed property cases shrink and are persisted for replay; retain generated regression seed files in version control. Run `cargo test restore::tests` or `cargo test backup::list_tests` for the respective suites. These tests do not simulate power loss.
+Backup checks cover stored metadata, decompressed contents, empty directories, source preservation, duplicate IDs, and failed metadata publication. Restore component checks cover round trips, buffer boundaries, invalid paths, damaged payloads, missing backups, and overlapping paths. Listing checks cover stable ordering, empty repositories, failed publication, invalid metadata, and HTTP responses. Component tests stay inline with their implementation modules. Run `cargo test jobs::backup::tests` or `cargo test jobs::restore::tests` for the operation suites, `cargo test jobs::repository::tests` for metadata and listing, and `cargo test jobs::filesystem::tests` for shared path logic.
+
+Cross-component tests live in `tests/server.rs` and launch the compiled binary on an OS-assigned loopback port. They check authentication, failed job reporting, backup/list/restore round trips, occupied destination preservation, persisted history across restart, HTTP responsiveness during an active backup, and SIGTERM shutdown that finishes the active job while retaining queued work. Abrupt termination with SIGKILL verifies that restart fails the interrupted job, resumes queued work, and preserves completed results. A real repository SQLite write lock holds metadata publication pending during the shutdown and interruption tests. Fixtures terminate and reap child processes and remove temporary directories. Run `cargo test --test server` for these Unix integration tests; `uv run scripts/check.py` includes them.
+
+Proptest generates directory trees, occupied destinations, integrity mismatches, and listing headers with 32 cases per component property. Process-level HTTP round trips and occupied destination checks each use eight generated cases. Fixed seeds keep checks reproducible; failed property cases shrink and are persisted for replay. Retain generated regression seed files in version control. These tests do not simulate power loss.
 There is no web console, progress reporting, or cancellation.
 
 The current milestone is a minimal end-to-end workflow for local full backups and restores, with these acceptance criteria:
