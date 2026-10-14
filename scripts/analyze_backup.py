@@ -18,6 +18,8 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -76,7 +78,9 @@ class Server:
             )
         )
         self.log_path = directory / "server.log"
-        self.log = self.log_path.open("w")
+        self.tool_log_path = directory / "recorder.log" if template else self.log_path
+        self.log_path.write_text("")
+        self.log = self.tool_log_path.open("w")
         self.trace = directory / "recording.trace"
         self.command = [str(binary), "-d", str(directory)]
         wrapper = (
@@ -111,16 +115,16 @@ class Server:
     def start(self) -> None:
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
+            processes = subprocess.check_output(["ps", "-axo", "pid=,command="], text=True)
+            for line in processes.splitlines():
+                pid, _, command = line.strip().partition(" ")
+                if command.strip() == " ".join(self.command):
+                    self.pid = int(pid)
+                    break
             log = self.log_path.read_text(errors="replace")
             match = re.search(r"Listening on ([^\s]+)", log)
             if match:
                 self.address = "http://" + match[1]
-                processes = subprocess.check_output(["ps", "-axo", "pid=,command="], text=True)
-                for line in processes.splitlines():
-                    pid, _, command = line.strip().partition(" ")
-                    if command.strip() == " ".join(self.command):
-                        self.pid = int(pid)
-                        break
                 if not self.pid:
                     raise RuntimeError("cannot identify the owned server process")
                 self.get("/api/status")
@@ -128,9 +132,9 @@ class Server:
                 self.sampler.start()
                 return
             if self.process.poll() is not None:
-                raise RuntimeError(f"server launcher exited: {log}")
+                raise RuntimeError(f"server launcher exited: {self.tool_log_path.read_text()}")
             time.sleep(0.05)
-        raise TimeoutError(f"server startup timed out: {self.log_path.read_text()}")
+        raise TimeoutError(f"server startup timed out: {self.tool_log_path.read_text()}")
 
     def _sample(self) -> None:
         started = time.monotonic()
@@ -195,6 +199,10 @@ class Server:
         if self.pid:
             with contextlib.suppress(ProcessLookupError):
                 os.kill(self.pid, signal.SIGTERM)
+                # Cancel even a target that Instruments left suspended before startup.
+                os.kill(self.pid, signal.SIGCONT)
+        elif self.template and self.process.poll() is None:
+            self.process.send_signal(signal.SIGINT)
         try:
             status = self.process.wait(timeout=30)
             if status != 0:
@@ -287,6 +295,8 @@ def run_workload(binary: Path, output: Path, kind: str, seconds: int = 0) -> dic
         server.close()
         timing = (output / "server/time.txt").read_text()
         if seconds:
+            shutil.copy2(output / "server/rss.json", output / "rss.json")
+            shutil.copy2(output / "server/server.log", output / "server-before-restart.log")
             # Reuse the original working directory and its durable job history.
             server = Server(binary, output / "server")
             server.start()
@@ -335,7 +345,8 @@ def profile(binary: Path, output: Path, template: str) -> dict[str, Any]:
         try:
             server.close()
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
-            result.update(status="failed", error=str(error))
+            result["shutdown_error"] = str(error)
+            result["status"] = "failed"
     if result.get("status") == "recorded":
         toc = subprocess.run(
             ["xcrun", "xctrace", "export", "--input", str(server.trace), "--toc"],
@@ -346,7 +357,134 @@ def profile(binary: Path, output: Path, template: str) -> dict[str, Any]:
         (output / "toc.xml").write_text(toc.stdout)
         result["trace"] = str(server.trace.relative_to(ROOT))
         result["toc_export_exit_code"] = toc.returncode
+        if toc.returncode == 0 and template == "Time Profiler":
+            samples = output / "samples.xml"
+            export = subprocess.run(
+                [
+                    "xcrun",
+                    "xctrace",
+                    "export",
+                    "--input",
+                    str(server.trace),
+                    "--xpath",
+                    '/trace-toc/run[@number="1"]/data/table[@schema="time-profile"]',
+                    "--output",
+                    str(samples),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if export.returncode == 0:
+                result["cpu_summary"] = cpu_summary(samples)
+            else:
+                result["sample_export_error"] = export.stderr
     return result
+
+
+def cpu_summary(samples: Path) -> dict[str, Any]:
+    """Weight leaf frames only; categories are CPU samples, not wall-time fractions."""
+    root = ET.parse(samples).getroot()
+    references = {node.attrib["id"]: node for node in root.iter() if "id" in node.attrib}
+
+    def resolve(node: ET.Element) -> ET.Element:
+        return references.get(node.attrib.get("ref", ""), node)
+
+    counts: Counter[str] = Counter()
+    categories: Counter[str] = Counter()
+    count = 0
+    for row in root.iter("row"):
+        values = list(row)
+        frames = [resolve(frame) for frame in resolve(values[-1]) if frame.tag == "frame"]
+        if not frames:
+            continue
+        name = frames[0].attrib.get("name", "unknown")
+        weight = int(resolve(values[-2]).text or "0")
+        count += 1
+        counts[name] += weight
+        if name.startswith("ZSTD"):
+            group = "Zstd"
+        elif "sha2" in name or "compress256" in name:
+            group = "SHA-256"
+        elif "sqlite" in name.lower():
+            group = "SQLite"
+        elif name in [
+            "read",
+            "write",
+            "fsync",
+            "fcntl",
+            "pread",
+            "pwrite",
+            "open",
+            "close",
+            "fstat",
+            "stat",
+        ]:
+            group = "Filesystem/syscalls"
+        else:
+            group = "Other"
+        categories[group] += weight
+    total = sum(counts.values())
+    if not total:
+        return {"samples": 0, "status": "no weighted samples"}
+    return {
+        "samples": count,
+        "sampled_cpu_seconds": total / 1e9,
+        "leaf_categories_percent": {
+            name: round(value / total * 100, 2) for name, value in categories.most_common()
+        },
+        "top_leaf_frames": [
+            {"symbol": name, "sampled_ms": value / 1e6, "percent": round(value / total * 100, 2)}
+            for name, value in counts.most_common(8)
+        ],
+    }
+
+
+def memory_analysis(binary: Path, output: Path) -> dict[str, Any]:
+    """Inspect a normally running process independently of instrumented launch failures."""
+    dataset(output / "source", "stability")
+    expected = tree(output / "source")
+    server = Server(binary, output / "server")
+    results: dict[str, Any] = {"cycles": 20, "tools": []}
+    try:
+        server.start()
+        for phase in ["before", "after"]:
+            if phase == "after":
+                for index in range(20):
+                    cycle(server, output / "source", expected, index)
+            for tool, args in [
+                ("vmmap", ["-summary"]),
+                ("heap", ["-s"]),
+                ("leaks", []),
+            ]:
+                command = ["/usr/bin/" + tool, *args, str(server.pid)]
+                try:
+                    result = subprocess.run(
+                        command,
+                        capture_output=True,
+                        text=True,
+                        timeout=45,
+                        check=False,
+                    )
+                    path = output / f"{phase}-{tool}.txt"
+                    path.write_text(result.stdout + result.stderr)
+                    results["tools"].append(
+                        {
+                            "phase": phase,
+                            "tool": tool,
+                            "exit_code": result.returncode,
+                            "output": str(path.relative_to(ROOT)),
+                        }
+                    )
+                except subprocess.TimeoutExpired:
+                    results["tools"].append({"phase": phase, "tool": tool, "status": "timed out"})
+    finally:
+        server.close()
+    results["sampled_peak_rss_bytes"] = max(
+        (row["rss_bytes"] for row in server.rss_samples),
+        default=0,
+    )
+    return results
 
 
 def main() -> None:
@@ -400,6 +538,8 @@ def main() -> None:
                 results["instruments"].append(
                     profile(binary, output / template.replace(" ", "-"), template)
                 )
+            print("Inspecting normal-process memory", flush=True)
+            results["memory_analysis"] = memory_analysis(binary, output / "memory")
     finally:
         (output / "summary.json").write_text(
             json.dumps(results, ensure_ascii=False, indent=2) + "\n"

@@ -1,0 +1,369 @@
+{
+  "recorded_at": "2026-10-14T09:45:59.952762+00:00",
+  "production_revision": "36eed9e6671fc51a3ca8bf4d251cb2a08917264e",
+  "environment": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+  "build_profile": "profiling (release optimization with debug symbols)",
+  "seed": 20261014,
+  "performance": [
+    {
+      "dataset": "compressible",
+      "source_bytes": 268435456,
+      "cycles": 3,
+      "duration_seconds": 1.4589145829995687,
+      "runs": [
+        {
+          "backup_seconds": 0.13985200000024633,
+          "restore_seconds": 0.13790791599967633,
+          "payload_bytes": 8210
+        },
+        {
+          "backup_seconds": 0.14534466700024495,
+          "restore_seconds": 0.14549983400138444,
+          "payload_bytes": 8210
+        },
+        {
+          "backup_seconds": 0.15246591699906276,
+          "restore_seconds": 0.14190833300017403,
+          "payload_bytes": 8210
+        }
+      ],
+      "http_status_latency": {
+        "samples": 64,
+        "median_ms": 3.3177915001942893,
+        "p95_ms": 3.7348750011005905,
+        "max_ms": 11.661000000458444
+      },
+      "sampled_peak_rss_bytes": 11272192,
+      "rss_start_bytes": 6488064,
+      "rss_end_bytes": 11272192,
+      "correctness": "passed",
+      "restart_history": "not exercised",
+      "time_peak_rss_bytes": 11370496,
+      "raw_evidence": "target/report-analysis/current/compressible"
+    },
+    {
+      "dataset": "incompressible",
+      "source_bytes": 268435456,
+      "cycles": 3,
+      "duration_seconds": 2.2450957500004733,
+      "runs": [
+        {
+          "backup_seconds": 0.22103324999989127,
+          "restore_seconds": 0.15512741599923174,
+          "payload_bytes": 268441609
+        },
+        {
+          "backup_seconds": 0.20577787500042177,
+          "restore_seconds": 0.15396999999938998,
+          "payload_bytes": 268441609
+        },
+        {
+          "backup_seconds": 0.20243779200063727,
+          "restore_seconds": 0.14274312499946973,
+          "payload_bytes": 268441609
+        }
+      ],
+      "http_status_latency": {
+        "samples": 78,
+        "median_ms": 3.4069164994434686,
+        "p95_ms": 3.6901670009683585,
+        "max_ms": 3.8535830008186167
+      },
+      "sampled_peak_rss_bytes": 11517952,
+      "rss_start_bytes": 6438912,
+      "rss_end_bytes": 11517952,
+      "correctness": "passed",
+      "restart_history": "not exercised",
+      "time_peak_rss_bytes": 11616256,
+      "raw_evidence": "target/report-analysis/current/incompressible"
+    },
+    {
+      "dataset": "small-files",
+      "source_bytes": 4096000,
+      "cycles": 3,
+      "duration_seconds": 22.8088453750006,
+      "runs": [
+        {
+          "backup_seconds": 3.7946509159992274,
+          "restore_seconds": 3.8163910410003155,
+          "payload_bytes": 4105000
+        },
+        {
+          "backup_seconds": 3.811700041000222,
+          "restore_seconds": 3.389554125000359,
+          "payload_bytes": 4105000
+        },
+        {
+          "backup_seconds": 3.6322533330003353,
+          "restore_seconds": 3.6461173330008023,
+          "payload_bytes": 4105000
+        }
+      ],
+      "http_status_latency": {
+        "samples": 1156,
+        "median_ms": 6.422146000659268,
+        "p95_ms": 9.28929200017592,
+        "max_ms": 32.462249999298365
+      },
+      "sampled_peak_rss_bytes": 10502144,
+      "rss_start_bytes": 6438912,
+      "rss_end_bytes": 10502144,
+      "correctness": "passed",
+      "restart_history": "not exercised",
+      "time_peak_rss_bytes": 10600448,
+      "raw_evidence": "target/report-analysis/current/small-files"
+    }
+  ],
+  "instruments": [
+    {
+      "template": "Time Profiler",
+      "status": "recorded",
+      "cycles": 46,
+      "trace": "target/report-analysis/current/Time-Profiler/server/recording.trace",
+      "toc_export_exit_code": 0,
+      "cpu_summary": {
+        "samples": 14865,
+        "sampled_cpu_seconds": 14.865,
+        "leaf_categories_percent": {
+          "SHA-256": 49.59,
+          "Filesystem/syscalls": 31.15,
+          "Other": 12.51,
+          "Zstd": 6.57,
+          "SQLite": 0.19
+        },
+        "top_leaf_frames": [
+          {
+            "symbol": "_RNvNtCsa7A7AsypVnu_4sha26sha25611compress256",
+            "sampled_ms": 7372.0,
+            "percent": 49.59
+          },
+          {
+            "symbol": "write",
+            "sampled_ms": 3387.0,
+            "percent": 22.79
+          },
+          {
+            "symbol": "_platform_memmove",
+            "sampled_ms": 1352.0,
+            "percent": 9.1
+          },
+          {
+            "symbol": "read",
+            "sampled_ms": 1194.0,
+            "percent": 8.03
+          },
+          {
+            "symbol": "ZSTD_compressBlock_doubleFast_extDict_generic",
+            "sampled_ms": 922.0,
+            "percent": 6.2
+          },
+          {
+            "symbol": "HIST_count_simple",
+            "sampled_ms": 183.0,
+            "percent": 1.23
+          },
+          {
+            "symbol": "ZSTD_compressBlock_doubleFast",
+            "sampled_ms": 39.0,
+            "percent": 0.26
+          },
+          {
+            "symbol": "__open",
+            "sampled_ms": 35.0,
+            "percent": 0.24
+          }
+        ]
+      },
+      "analysis": "35.876 秒采集、46 个循环、14,865 个 CPU 样本。按叶帧权重统计：SHA-256 49.59%，文件读写等系统调用 31.15%，Zstd 6.57%；这些是采样 CPU 占比，不能解释为墙钟时间占比。"
+    },
+    {
+      "template": "Allocations",
+      "status": "failed",
+      "error": "xctrace 启动采集后，目标进程在监听前保持暂停，30 秒内未就绪；关闭采集也超时。无有效分配或泄漏 trace，已清理自有进程。",
+      "analysis": "Instruments 模板未完成有效采集；正常进程的系统内存工具分析单独记录。",
+      "retry": {
+        "template": "Allocations",
+        "status": "failed",
+        "error": "server startup timed out: Starting recording with the Allocations template. Launching process: bak. Time limit: 70.0 s\n",
+        "shutdown_error": "Command '['xcrun', 'xctrace', 'record', '--template', 'Allocations', '--time-limit', '70s', '--output', '/Users/qi7876/projects/software-development-exp/target/report-analysis/allocations-retry/server/recording.trace', '--target-stdout', '/Users/qi7876/projects/software-development-exp/target/report-analysis/allocations-retry/server/server.log', '--no-prompt', '--launch', '--', '/Users/qi7876/projects/software-development-exp/target/profiling/bak', '-d', '/Users/qi7876/projects/software-development-exp/target/report-analysis/allocations-retry/server']' timed out after 30 seconds"
+      }
+    },
+    {
+      "template": "Leaks",
+      "status": "failed",
+      "error": "xctrace 启动采集后，目标进程在监听前保持暂停，30 秒内未就绪；关闭采集也超时。无有效分配或泄漏 trace，已清理自有进程。",
+      "analysis": "Instruments 模板未完成有效采集；正常进程的系统内存工具分析单独记录。"
+    }
+  ],
+  "limitations": [
+    "单台 Apple Silicon macOS 机器；优化构建、缓存预热、HTTP 轮询与 RSS 采样开销；未建立性能合格线，未验证其他平台。",
+    "每轮使用独立临时仓库且成功校验后删除输出；没有测量一个长期仓库的规模增长或磁盘空间压力。",
+    "RSS、physical footprint 与 malloc 存活字节是不同指标；采样峰值不是 time -l 的进程终生峰值。",
+    "10 分钟稳定性观察与 SIGKILL 回归不覆盖长期运行、断电、文件系统崩溃或并发源修改。",
+    "当前运行记录保存稳定性聚合指标；脚本已修正重启时覆盖原始 RSS/日志的问题，后续运行将单独保留重启前完整样本。",
+    "无生产代码优化；失败输出自动清理、非 Unix 执行和其他规划功能仍未实现。"
+  ],
+  "stability": {
+    "dataset": "stability",
+    "source_bytes": 1150976,
+    "cycles": 320,
+    "duration_seconds": 601.7353506659983,
+    "http_status_latency": {
+      "samples": 9950,
+      "median_ms": 6.414062499970896,
+      "p95_ms": 10.561749999396852,
+      "max_ms": 64.94674999885319
+    },
+    "sampled_peak_rss_bytes": 11386880,
+    "rss_start_bytes": 6455296,
+    "rss_end_bytes": 11288576,
+    "correctness": "passed",
+    "restart_history": "passed",
+    "runs_summary": {
+      "backup_seconds": {
+        "min": 0.2529211250002845,
+        "median": 0.4099972495005204,
+        "max": 0.7509708749985293
+      },
+      "restore_seconds": {
+        "min": 0.22708383299868728,
+        "median": 0.41089500050020433,
+        "max": 0.6398566670013679
+      },
+      "payload_bytes": {
+        "min": 1151909,
+        "median": 1151909.0,
+        "max": 1151909
+      }
+    },
+    "raw_evidence": "target/report-analysis/current/stability"
+  },
+  "baseline_commit": "7d0cbbc",
+  "hardware": {
+    "model": "Mac17,3",
+    "memory_bytes": 17179869184,
+    "cpu": "Apple M5"
+  },
+  "memory_analysis": {
+    "cycles": 20,
+    "tools": [
+      {
+        "phase": "before",
+        "tool": "vmmap",
+        "exit_code": 0,
+        "output": "target/report-analysis/memory-followup/before-vmmap.txt"
+      },
+      {
+        "phase": "before",
+        "tool": "heap",
+        "exit_code": 0,
+        "output": "target/report-analysis/memory-followup/before-heap.txt"
+      },
+      {
+        "phase": "before",
+        "tool": "leaks",
+        "exit_code": 0,
+        "output": "target/report-analysis/memory-followup/before-leaks.txt"
+      },
+      {
+        "phase": "after",
+        "tool": "vmmap",
+        "exit_code": 0,
+        "output": "target/report-analysis/memory-followup/after-vmmap.txt"
+      },
+      {
+        "phase": "after",
+        "tool": "heap",
+        "exit_code": 0,
+        "output": "target/report-analysis/memory-followup/after-heap.txt"
+      },
+      {
+        "phase": "after",
+        "tool": "leaks",
+        "exit_code": 0,
+        "output": "target/report-analysis/memory-followup/after-leaks.txt"
+      }
+    ],
+    "sampled_peak_rss_bytes": 10977280,
+    "snapshots": [
+      {
+        "phase": "before",
+        "physical_footprint_bytes": 2670592,
+        "malloc_nodes": 1394,
+        "malloc_reported_kb": 387,
+        "leak_count": 0,
+        "leaked_bytes": 0
+      },
+      {
+        "phase": "after",
+        "physical_footprint_bytes": 6930432,
+        "malloc_nodes": 1919,
+        "malloc_reported_kb": 463,
+        "leak_count": 0,
+        "leaked_bytes": 0
+      }
+    ],
+    "analysis": "正常进程执行 20 个循环前后，vmmap/heap/leaks 均执行成功；存活 malloc 节点从 1,394 增至 1,919，报告大小从 387 KB 增至 463 KB，physical footprint 从 2,608 KiB 增至 6,768 KiB。两次 leaks 均报告 0 leaks / 0 bytes；工具提示进程不可调试，受安全限制只能显示只读内容，且未启用 MallocStackLogging，不能推断所有路径无泄漏或增长有界。"
+  },
+  "checks": [
+    {
+      "command": "cargo fmt --all --check",
+      "result": "通过"
+    },
+    {
+      "command": "cargo clippy --all-targets --all-features -- -D warnings",
+      "result": "通过，未发现警告"
+    },
+    {
+      "command": "cargo test --all-targets",
+      "result": "42 个组件测试与 6 个应用集成测试通过"
+    },
+    {
+      "command": "cargo build --all-targets",
+      "result": "通过"
+    },
+    {
+      "command": "uv run ruff check .",
+      "result": "通过"
+    },
+    {
+      "command": "uv run basedpyright",
+      "result": "0 errors / 0 warnings"
+    },
+    {
+      "command": "uv run python -m unittest discover -s docs/report/tests",
+      "result": "8 个文档测试通过"
+    },
+    {
+      "command": "uv run scripts/update_use_cases.py --check; uv run scripts/update_system_design.py --check",
+      "result": "D2 和 PNG 无漂移"
+    }
+  ],
+  "commands": [
+    "uv run python scripts/analyze_backup.py --stability-seconds 600 --output target/report-analysis/current",
+    "xcrun xctrace export --input target/report-analysis/current/Time-Profiler/server/recording.trace --xpath '/trace-toc/run[@number=\"1\"]/data/table[@schema=\"time-profile\"]' --output target/report-analysis/current/Time-Profiler/samples.xml",
+    "analyze_backup.profile(target/profiling/bak, target/report-analysis/allocations-retry, \"Allocations\")",
+    "analyze_backup.memory_analysis(target/profiling/bak, target/report-analysis/memory-followup)",
+    "uv run scripts/check.py --report"
+  ],
+  "findings": [
+    "当前公开功能和故障回归均通过；测试类型按被验证行为划分，42 个组件内测试不能全部称为纯单元测试。",
+    "1,000 个 4 KiB 小文件的备份/恢复中位耗时约 3.79/3.65 秒，高于 256 MiB 大文件约 0.15–0.21 秒；吞吐不能仅按字节数推断。逐文件同步与元数据成本值得进一步用 File Activity 分析，此处仅为候选解释。",
+    "稳定性测量 601.7 秒、320 个循环全部通过；RSS 从约 6.2 MiB 增至约 10.8 MiB，峰值约 10.9 MiB。需要预热后更长采样和分配调用栈确认增长是否趋稳；不能凭此宣称无泄漏或内存恒定。",
+    "Time Profiler 当前大文件采样中 SHA-256 是最大叶帧热点；优化前应分别验证算法、IO 与同步成本，并保持正确性。",
+    "Instruments Allocations/Leaks 启动未完成，内存结论来自正常进程 vmmap、heap、leaks 的有限快照；工具失败本身不是程序内存缺陷的证据。"
+  ],
+  "final_check": {
+    "recorded_at": "2026-10-14T09:49:30.744856+00:00",
+    "command": "uv run scripts/check.py --report",
+    "exit_code": 0,
+    "log": "target/report-analysis/final-check.log"
+  },
+  "report_validation": {
+    "protected_content_compared_with_original_backup": "passed",
+    "template_bytes_unchanged": true,
+    "diagram_visual_review": "passed",
+    "preview": "Quick Look HTML rendered through Chrome, 15 pages; tables and diagrams inspected. Microsoft Word PDF automation timed out; Word pagination not independently checked."
+  }
+}

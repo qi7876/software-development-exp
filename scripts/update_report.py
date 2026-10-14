@@ -929,6 +929,9 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             f"{item['template']}：{item['status']}。"
             f"{item.get('analysis', item.get('error', '原始 trace 已保存。'))}",
         )
+    _heading(document, anchor, "4.4 正常进程内存快照", 2)
+    memory = evidence.get("memory_analysis", {})
+    _paragraph(document, anchor, memory.get("analysis", "尚未取得正常进程内存快照。"))
     _heading(document, anchor, "5. 结果分析与限制")
     for text in evidence.get("findings", []) + evidence.get("limitations", []):
         _paragraph(document, anchor, text, bullet=True)
