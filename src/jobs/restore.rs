@@ -1,7 +1,8 @@
-use crate::backup::{
-    Manifest, ManifestEntry, get_absolute_directory_path, paths_overlap, sync_directory,
+use super::{
+    JobError,
+    filesystem::{get_absolute_directory_path, paths_overlap, sync_directory},
+    repository::{Manifest, ManifestEntry},
 };
-use crate::jobs::JobError;
 use http::StatusCode;
 use sha2::{Digest, Sha256};
 use std::{
@@ -170,7 +171,7 @@ fn restore_all_files(
     Ok(())
 }
 
-pub(crate) fn run(repository: &Path, backup_id: &str, destination: &Path) -> Result<(), JobError> {
+pub fn run(repository: &Path, backup_id: &str, destination: &Path) -> Result<(), JobError> {
     let absolute_repository_path = get_absolute_directory_path(repository)?;
     let absolute_destination_path = get_absolute_directory_path(destination)?;
     if paths_overlap(&absolute_repository_path, &absolute_destination_path) {
@@ -262,8 +263,9 @@ pub(crate) fn run(repository: &Path, backup_id: &str, destination: &Path) -> Res
 mod tests {
     // These integration tests use the real filesystem, compression, and SQLite IO.
     // Full operations currently support Unix directory synchronization only.
+    use super::super::backup;
     use super::*;
-    use crate::{backup, test_support::TestDirectory};
+    use crate::test_support::TestDirectory;
     use proptest::{
         collection::{btree_map, btree_set, vec},
         prelude::*,

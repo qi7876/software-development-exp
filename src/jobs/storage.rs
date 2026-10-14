@@ -1,19 +1,13 @@
-use std::{path::Path, time::Duration};
-
+use super::JobError;
 use sqlx::{
     SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
 };
-
-use crate::jobs::JobError;
+use std::{path::Path, time::Duration};
 
 // Schema installation and its version are committed together. Connections never
 // relax durability: acknowledgement means SQLite has completed the commit.
-pub(crate) async fn open(
-    path: &Path,
-    schema: &'static str,
-    create: bool,
-) -> Result<SqlitePool, JobError> {
+pub async fn open(path: &Path, schema: &'static str, create: bool) -> Result<SqlitePool, JobError> {
     let pool = SqlitePoolOptions::new()
         .max_connections(4)
         .connect_with(

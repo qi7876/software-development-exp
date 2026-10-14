@@ -1,19 +1,15 @@
+use super::{
+    JobError,
+    filesystem::{get_absolute_directory_path, paths_overlap, sync_directory},
+    repository::{Manifest, ManifestEntry},
+};
 use chrono::{SecondsFormat, Utc};
 use http::StatusCode;
 use sha2::{Digest, Sha256};
-use sqlx::Row;
 use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
 };
-
-use crate::{jobs::JobError, storage};
-
-#[derive(serde::Serialize)]
-pub(crate) struct BackupSummary {
-    pub(crate) backup_id: String,
-    pub(crate) created_at: String,
-}
 
 #[derive(Debug, PartialEq, Eq)]
 enum BackupEntry {
@@ -24,78 +20,6 @@ enum BackupEntry {
 struct FileBackupResult {
     original_size: u64,
     checksum: String,
-}
-
-pub fn paths_overlap(left: &Path, right: &Path) -> bool {
-    left.starts_with(right) || right.starts_with(left)
-}
-
-pub fn get_absolute_directory_path(path: &Path) -> Result<PathBuf, JobError> {
-    let path = std::fs::canonicalize(path).map_err(|error| {
-        JobError::internal(format!(
-            "failed to resolve path {}: {error}",
-            path.display()
-        ))
-    })?;
-    let path_metadata = path.metadata().map_err(|error| {
-        JobError::internal(format!(
-            "failed to load path {} metadata : {error}",
-            path.display(),
-        ))
-    })?;
-    if !path_metadata.is_dir() {
-        return Err(JobError::new(
-            StatusCode::BAD_REQUEST,
-            format!("path {} is not a directory", path.display()),
-        ));
-    };
-    Ok(path)
-}
-
-pub(crate) fn list(repository: &Path) -> Result<Vec<BackupSummary>, JobError> {
-    let absolute_repository_path = get_absolute_directory_path(repository)?;
-    let absolute_db_path = absolute_repository_path.join("repository.sqlite3");
-
-    if !absolute_db_path.try_exists().map_err(|error| {
-        JobError::internal(format!(
-            "failed to check whether repository.sqlite3 {} is existing or not: {error}",
-            absolute_db_path.display()
-        ))
-    })? {
-        return Ok(Vec::new());
-    }
-
-    let handle = tokio::runtime::Handle::try_current()
-        .map_err(|error| JobError::internal(format!("cannot access Tokio runtime: {error}")))?;
-
-    handle.block_on(async {
-        let pool = storage::open(&absolute_db_path, SCHEMA, false).await?;
-
-        let result = async {
-            let rows = sqlx::query(
-                "
-                SELECT backup_id, created_at
-                FROM backups
-                ORDER BY created_at DESC, backup_id ASC
-                ",
-            )
-            .fetch_all(&pool)
-            .await?;
-
-            let mut summaries = Vec::with_capacity(rows.len());
-            for row in rows {
-                summaries.push(BackupSummary {
-                    backup_id: row.try_get("backup_id")?,
-                    created_at: row.try_get("created_at")?,
-                });
-            }
-            Ok(summaries)
-        }
-        .await;
-
-        pool.close().await;
-        result
-    })
 }
 
 fn walk_directory(
@@ -268,29 +192,6 @@ fn backup_one_file(
     })
 }
 
-#[cfg(unix)]
-pub(crate) fn sync_directory(path: &Path) -> Result<(), JobError> {
-    std::fs::File::open(path)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| {
-            JobError::internal(format!(
-                "failed to sync directory {}: {error}",
-                path.display()
-            ))
-        })
-}
-
-#[cfg(not(unix))]
-pub(crate) fn sync_directory(path: &Path) -> Result<(), JobError> {
-    Err(JobError::new(
-        StatusCode::NOT_IMPLEMENTED,
-        format!(
-            "directory synchronization is not implemented on this platform: {}",
-            path.display()
-        ),
-    ))
-}
-
 fn backup_all_files(
     backup_entries: &Vec<BackupEntry>,
     absolute_source_path: &Path,
@@ -341,7 +242,7 @@ fn backup_all_files(
     Ok(manifest_entries)
 }
 
-pub(crate) fn run(source: &Path, repository: &Path, backup_id: &str) -> Result<(), JobError> {
+pub fn run(source: &Path, repository: &Path, backup_id: &str) -> Result<(), JobError> {
     let absolute_source_path = get_absolute_directory_path(source)?;
     let absolute_repository_path = get_absolute_directory_path(repository)?;
     if paths_overlap(&absolute_source_path, &absolute_repository_path) {
@@ -412,174 +313,14 @@ pub(crate) fn run(source: &Path, repository: &Path, backup_id: &str) -> Result<(
     Ok(())
 }
 
-const SCHEMA: &str = "
-CREATE TABLE backups (
-    backup_id TEXT PRIMARY KEY NOT NULL,
-    format_version INTEGER NOT NULL,
-    created_at TEXT NOT NULL,
-    source TEXT NOT NULL,
-    compression TEXT NOT NULL,
-    checksum_algorithm TEXT NOT NULL
-);
-CREATE TABLE entries (
-    backup_id TEXT NOT NULL REFERENCES backups(backup_id),
-    ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
-    type TEXT NOT NULL CHECK (type IN ('file', 'directory')),
-    path TEXT NOT NULL,
-    original_size INTEGER,
-    checksum TEXT,
-    PRIMARY KEY (backup_id, ordinal),
-    CHECK (
-        (type = 'file' AND original_size IS NOT NULL AND original_size >= 0 AND checksum IS NOT NULL) OR
-        (type = 'directory' AND original_size IS NULL AND checksum IS NULL)
-    )
-);
-";
-
-// Repository metadata is committed once and is immutable thereafter.
-#[derive(serde::Serialize, serde::Deserialize)]
-pub(crate) struct Manifest {
-    pub(crate) format_version: u32,
-    pub(crate) backup_id: String,
-    pub(crate) created_at: String,
-    pub(crate) source: PathBuf,
-    pub(crate) compression_algorithm: String,
-    pub(crate) checksum_algorithm: String,
-    pub(crate) entries: Vec<ManifestEntry>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type")]
-pub(crate) enum ManifestEntry {
-    File {
-        path: PathBuf,
-        original_size: u64,
-        checksum: String,
-    },
-    Directory {
-        path: PathBuf,
-    },
-}
-
-impl Manifest {
-    pub(crate) async fn read(repository: &Path, backup_id: &str) -> Result<Self, JobError> {
-        let path = repository.join("repository.sqlite3");
-        let pool = storage::open(&path, SCHEMA, false).await?;
-        let result = async {
-            let mut transaction = pool.begin().await?;
-            let row = sqlx::query("SELECT * FROM backups WHERE backup_id = ?")
-                .bind(backup_id)
-                .fetch_optional(&mut *transaction)
-                .await?
-                .ok_or_else(|| {
-                    JobError::new(
-                        StatusCode::NOT_FOUND,
-                        format!("backup {backup_id} not found"),
-                    )
-                })?;
-            let mut manifest = Self {
-                format_version: u32::try_from(row.try_get::<i64, _>("format_version")?).map_err(
-                    |error| JobError::internal(format!("invalid format version: {error}")),
-                )?,
-                backup_id: row.try_get("backup_id")?,
-                created_at: row.try_get("created_at")?,
-                source: serde_json::from_str(&row.try_get::<String, _>("source")?)?,
-                compression_algorithm: row.try_get("compression")?,
-                checksum_algorithm: row.try_get("checksum_algorithm")?,
-                entries: Vec::new(),
-            };
-            manifest.validate_format()?;
-            for row in sqlx::query("SELECT * FROM entries WHERE backup_id = ? ORDER BY ordinal")
-                .bind(backup_id)
-                .fetch_all(&mut *transaction)
-                .await?
-            {
-                let path = serde_json::from_str(&row.try_get::<String, _>("path")?)?;
-                let entry = match row.try_get::<String, _>("type")?.as_str() {
-                    "directory" => ManifestEntry::Directory { path },
-                    "file" => ManifestEntry::File {
-                        path,
-                        original_size: u64::try_from(row.try_get::<i64, _>("original_size")?)
-                            .map_err(|error| {
-                                JobError::internal(format!("invalid original size: {error}"))
-                            })?,
-                        checksum: row.try_get("checksum")?,
-                    },
-                    kind => return Err(JobError::internal(format!("invalid entry type {kind}"))),
-                };
-                manifest.entries.push(entry);
-            }
-            transaction.commit().await?;
-            Ok::<_, JobError>(manifest)
-        }
-        .await;
-        pool.close().await;
-        result.map_err(|error| {
-            JobError::new(
-                error.code,
-                format!(
-                    "cannot read metadata for backup {backup_id} from {}: {error}",
-                    path.display()
-                ),
-            )
-        })
-    }
-
-    pub(crate) async fn write(&self, repository: &Path) -> Result<(), JobError> {
-        self.validate_format()?;
-        let path = repository.join("repository.sqlite3");
-        let pool = storage::open(&path, SCHEMA, true).await?;
-        let result = async {
-            let mut transaction = pool.begin().await?;
-            sqlx::query("INSERT INTO backups (backup_id, format_version, created_at, source, compression, checksum_algorithm) VALUES (?, ?, ?, ?, ?, ?)")
-                .bind(&self.backup_id).bind(i64::from(self.format_version)).bind(&self.created_at)
-                .bind(serde_json::to_string(&self.source)?).bind(&self.compression_algorithm).bind(&self.checksum_algorithm)
-                .execute(&mut *transaction).await?;
-            for (ordinal, entry) in self.entries.iter().enumerate() {
-                let (kind, path, size, checksum) = match entry {
-                    ManifestEntry::Directory { path } => ("directory", path, None, None),
-                    ManifestEntry::File { path, original_size, checksum } => (
-                        "file", path,
-                        Some(i64::try_from(*original_size).map_err(|error| JobError::internal(format!("file size for {} is out of range: {error}", path.display())))?),
-                        Some(checksum),
-                    ),
-                };
-                let ordinal = i64::try_from(ordinal).map_err(|error| JobError::internal(format!("entry ordinal is out of range: {error}")))?;
-                sqlx::query("INSERT INTO entries (backup_id, ordinal, type, path, original_size, checksum) VALUES (?, ?, ?, ?, ?, ?)")
-                    .bind(&self.backup_id).bind(ordinal).bind(kind).bind(serde_json::to_string(path)?)
-                    .bind(size).bind(checksum).execute(&mut *transaction).await?;
-            }
-            transaction.commit().await?;
-            Ok::<_, JobError>(())
-        }.await;
-        pool.close().await;
-        result.map_err(|error| {
-            JobError::internal(format!(
-                "cannot write metadata for backup {} to {}: {error}",
-                self.backup_id,
-                path.display()
-            ))
-        })
-    }
-
-    fn validate_format(&self) -> Result<(), JobError> {
-        if self.format_version != 1
-            || self.compression_algorithm != "zstd"
-            || self.checksum_algorithm != "sha256"
-        {
-            return Err(JobError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "unsupported manifest format, compression or checksum algorithm",
-            ));
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     // Exercise listing against real repository metadata without relying on file IO order.
-    use super::*;
+    use super::{
+        super::repository::{REPO_SCHEMA, RepoBackupInfo, list},
+        super::storage,
+        *,
+    };
     use crate::test_support::TestDirectory;
     use proptest::{
         collection::btree_map,
@@ -592,7 +333,7 @@ mod tests {
 
     async fn list_at(
         repository: &Path,
-    ) -> Result<Result<Vec<BackupSummary>, JobError>, tokio::task::JoinError> {
+    ) -> Result<Result<Vec<RepoBackupInfo>, JobError>, tokio::task::JoinError> {
         let repository = repository.to_owned();
         tokio::task::spawn_blocking(move || list(&repository)).await
     }
@@ -613,7 +354,7 @@ mod tests {
         let directory = TestDirectory::new()?;
         let repository = directory.path();
         // Initialize even for an empty generated set, covering an empty metadata DB.
-        storage::open(&repository.join("repository.sqlite3"), SCHEMA, true)
+        storage::open(&repository.join("repository.sqlite3"), REPO_SCHEMA, true)
             .await?
             .close()
             .await;
@@ -725,7 +466,7 @@ mod tests {
             if damage == "corrupt" {
                 std::fs::write(&database, b"invalid SQLite database")?;
             } else {
-                let pool = storage::open(&database, SCHEMA, true).await?;
+                let pool = storage::open(&database, REPO_SCHEMA, true).await?;
                 if damage == "unsupported-schema" {
                     sqlx::query("PRAGMA user_version = 99")
                         .execute(&pool)
@@ -1122,7 +863,7 @@ mod tests {
         let expected_compressed = std::fs::read(&existing_backup_file)?;
 
         let database_path = repository.join("repository.sqlite3");
-        let pool = storage::open(&database_path, SCHEMA, false).await?;
+        let pool = storage::open(&database_path, REPO_SCHEMA, false).await?;
         // Fail after inserting the header, exercising rollback and propagation
         // through run with a real SQLite transaction.
         sqlx::query(
@@ -1162,7 +903,7 @@ mod tests {
             .err()
             .ok_or("published failed backup")?;
         assert_eq!(missing.code, StatusCode::NOT_FOUND);
-        let pool = storage::open(&database_path, SCHEMA, false).await?;
+        let pool = storage::open(&database_path, REPO_SCHEMA, false).await?;
         for query in [
             "SELECT COUNT(*) FROM backups",
             "SELECT COUNT(*) FROM entries",
@@ -1246,8 +987,12 @@ mod tests {
             .err()
             .ok_or("accepted out-of-range file size")?;
         assert!(error.message.contains("too-large"));
-        let pool =
-            storage::open(&directory.path().join("repository.sqlite3"), SCHEMA, false).await?;
+        let pool = storage::open(
+            &directory.path().join("repository.sqlite3"),
+            REPO_SCHEMA,
+            false,
+        )
+        .await?;
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM backups")
                 .fetch_one(&pool)
@@ -1265,8 +1010,12 @@ mod tests {
         manifest.write(directory.path()).await?;
         manifest.format_version = 2;
         assert!(manifest.write(directory.path()).await.is_err());
-        let pool =
-            storage::open(&directory.path().join("repository.sqlite3"), SCHEMA, false).await?;
+        let pool = storage::open(
+            &directory.path().join("repository.sqlite3"),
+            REPO_SCHEMA,
+            false,
+        )
+        .await?;
         sqlx::query("UPDATE backups SET compression = 'unknown'")
             .execute(&pool)
             .await?;

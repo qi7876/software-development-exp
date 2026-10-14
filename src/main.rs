@@ -2,11 +2,8 @@ use std::{error::Error, process::ExitCode};
 
 mod api;
 mod args;
-mod backup;
 mod config;
 mod jobs;
-mod restore;
-mod storage;
 #[cfg(test)]
 mod test_support;
 

@@ -640,11 +640,13 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn backup_listing_returns_published_summaries() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
         let repository = directory.path().join("repo with space");
         std::fs::create_dir(&repository)?;
+        std::fs::create_dir(directory.path().join("source"))?;
         let jobs = JobManager::open(directory.path().to_owned()).await?;
         let app = router(jobs.clone(), "test-key".into());
         let uri = "/api/backups?repository=repo+with+space";
@@ -656,32 +658,104 @@ mod tests {
         assert_eq!(json_body(response).await?, json!({"backups": []}));
         assert!(!repository.join("repository.sqlite3").exists());
 
-        let created_at = "2026-10-13T00:00:00.000Z";
-        for backup_id in ["z-backup", "a-backup"] {
-            crate::backup::Manifest {
-                format_version: 1,
-                backup_id: backup_id.into(),
-                created_at: created_at.into(),
-                source: directory.path().to_owned(),
-                compression_algorithm: "zstd".into(),
-                checksum_algorithm: "sha256".into(),
-                entries: Vec::new(),
-            }
-            .write(&repository)
-            .await?;
+        let mut accepted = Vec::new();
+        for _ in 0..2 {
+            accepted.push(
+                jobs.submit(JobRequest::Backup {
+                    source: "source".into(),
+                    repository: "repo with space".into(),
+                })
+                .await?,
+            );
         }
+        let (stop, receiver) = watch::channel(false);
+        let worker_jobs = jobs.clone();
+        let worker = tokio::spawn(async move { worker_jobs.run_worker(receiver).await });
+        let completed = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut backup_ids = std::collections::BTreeSet::new();
+            for accepted in accepted {
+                loop {
+                    let job = jobs
+                        .get_job(&accepted.job_id)
+                        .await?
+                        .ok_or("lost backup job")?;
+                    match job.state {
+                        JobState::Succeeded(JobResult::Backup { backup_id }) => {
+                            backup_ids.insert(backup_id);
+                            break;
+                        }
+                        JobState::Failed(error) => return Err(error.into()),
+                        JobState::Succeeded(_) => return Err("unexpected backup result".into()),
+                        _ => tokio::task::yield_now().await,
+                    }
+                }
+            }
+            Ok::<_, Box<dyn Error>>(backup_ids)
+        })
+        .await;
+        // Stop and join the worker even if waiting for completion failed.
+        stop.send_replace(true);
+        worker.await??;
+        let expected_ids = completed??;
         std::fs::create_dir_all(repository.join("backups/unpublished"))?;
         let response = app
             .oneshot(request("GET", uri, "Bearer test-key", "", vec![])?)
             .await?;
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            json_body(response).await?,
-            json!({"backups": [
-                {"backup_id": "a-backup", "created_at": created_at},
-                {"backup_id": "z-backup", "created_at": created_at},
-            ]})
-        );
+        let body = json_body(response).await?;
+        let summaries = body["backups"]
+            .as_array()
+            .ok_or("missing backup summaries")?;
+        assert_eq!(body.as_object().ok_or("expected listing object")?.len(), 1);
+        assert_eq!(summaries.len(), 2);
+        let mut actual_ids = std::collections::BTreeSet::new();
+        let mut actual_order = Vec::new();
+        for summary in summaries {
+            assert_eq!(
+                summary.as_object().ok_or("expected summary object")?.len(),
+                2
+            );
+            let backup_id = summary["backup_id"].as_str().ok_or("missing backup ID")?;
+            let created_at = summary["created_at"]
+                .as_str()
+                .ok_or("missing creation time")?;
+            let created_at = chrono::DateTime::parse_from_rfc3339(created_at)?;
+            assert_eq!(created_at.offset().local_minus_utc(), 0);
+            actual_ids.insert(backup_id.to_owned());
+            actual_order.push((backup_id.to_owned(), created_at));
+        }
+        assert_eq!(actual_ids, expected_ids);
+        let mut sorted = actual_order.clone();
+        sorted.sort_by(|(left_id, left_time), (right_id, right_time)| {
+            right_time
+                .cmp(left_time)
+                .then_with(|| left_id.cmp(right_id))
+        });
+        assert_eq!(actual_order, sorted);
+        jobs.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn backup_listing_returns_empty_without_initializing_metadata()
+    -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let repository = directory.path().join("repo with space");
+        std::fs::create_dir(&repository)?;
+        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let app = router(jobs.clone(), "test-key".into());
+        let response = app
+            .oneshot(request(
+                "GET",
+                "/api/backups?repository=repo+with+space",
+                "Bearer test-key",
+                "",
+                vec![],
+            )?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(json_body(response).await?, json!({"backups": []}));
+        assert!(!repository.join("repository.sqlite3").exists());
         jobs.close().await;
         Ok(())
     }

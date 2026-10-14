@@ -1,7 +1,9 @@
-use crate::{
-    backup::{self, BackupSummary},
-    restore, storage,
-};
+mod backup;
+mod filesystem;
+mod repository;
+mod restore;
+mod storage;
+
 use http::StatusCode;
 use serde_json::{Value, json};
 use sqlx::{Row, SqlitePool, sqlite::SqliteRow};
@@ -14,7 +16,7 @@ use std::{
 use tokio::sync::{Notify, watch};
 use uuid::Uuid;
 
-const SCHEMA: &str = "
+const JOBS_SCHEMA: &str = "
 CREATE TABLE jobs (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id TEXT NOT NULL UNIQUE,
@@ -45,7 +47,8 @@ pub(crate) struct JobManager {
 
 impl JobManager {
     pub(crate) async fn open(working_directory: PathBuf) -> Result<Self, JobError> {
-        let pool = storage::open(&working_directory.join("jobs.sqlite3"), SCHEMA, true).await?;
+        let pool =
+            storage::open(&working_directory.join("jobs.sqlite3"), JOBS_SCHEMA, true).await?;
         // A running operation may have performed external effects. Never replay it.
         sqlx::query("UPDATE jobs SET state = 'failed', error_code = 500, error_message = 'operation interrupted by service exit', finished_at = ? WHERE state = 'running'")
             .bind(timestamp()?).execute(&pool).await
@@ -91,9 +94,9 @@ impl JobManager {
     pub(crate) async fn list_backups(
         &self,
         repository: &Path,
-    ) -> Result<Vec<BackupSummary>, JobError> {
+    ) -> Result<Vec<repository::RepoBackupInfo>, JobError> {
         let repository = self.working_directory.join(repository);
-        tokio::task::spawn_blocking(move || backup::list(&repository))
+        tokio::task::spawn_blocking(move || repository::list(&repository))
             .await
             .map_err(|error| JobError::internal(format!("backup listing task failed: {error}")))?
     }

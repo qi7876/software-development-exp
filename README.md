@@ -68,10 +68,13 @@ src/
   args.rs          Command-line arguments
   config.rs        Configuration loading and validation
   api.rs           axum routing, authentication, JSON responses, and shutdown supervision
-  jobs.rs          Durable FIFO job lifecycle and the background worker
-  storage.rs       SQLite connection settings and schema initialization
-  backup.rs        Full backups, mirrored file storage, transactional metadata, and listing
-  restore.rs       Restore path validation, decompression, and integrity verification
+  jobs.rs          Job manager facade, durable FIFO lifecycle, and the background worker
+  jobs/
+    backup.rs      Full backup traversal, compression, and synchronization
+    restore.rs     Restore path validation, decompression, and integrity verification
+    repository.rs  Repository metadata types, transactional persistence, and listing
+    filesystem.rs  Shared path resolution, overlap checks, and directory synchronization
+    storage.rs     SQLite connection settings and schema initialization
   test_support.rs  Temporary directories for tests
 ```
 
@@ -82,7 +85,7 @@ restart recovery, repository metadata storage and listing, and Unix full backup 
 
 Backup jobs require existing source and repository directories. Equal or nested paths are rejected after resolving symlinks.
 Recursive source discovery is implemented, including empty directories. Symlinks and other unsupported types inside source are rejected.
-Backup checks cover stored metadata, decompressed contents, empty directories, source preservation, duplicate IDs, and failed metadata publication. Restore integration checks cover round trips, buffer boundaries, invalid paths, damaged payloads, missing backups, and overlapping paths. Listing checks cover stable ordering, empty repositories, failed publication, invalid metadata, and HTTP responses. Proptest generates directory trees, occupied destinations, integrity mismatches, and listing headers with 32 cases per property and fixed seeds for reproducible checks. Failed property cases shrink and are persisted for replay; retain generated regression seed files in version control. Run `cargo test restore::tests` or `cargo test backup::list_tests` for the respective suites. These tests do not simulate power loss.
+Backup checks cover stored metadata, decompressed contents, empty directories, source preservation, duplicate IDs, and failed metadata publication. Restore integration checks cover round trips, buffer boundaries, invalid paths, damaged payloads, missing backups, and overlapping paths. Listing checks cover stable ordering, empty repositories, failed publication, invalid metadata, and HTTP responses. Proptest generates directory trees, occupied destinations, integrity mismatches, and listing headers with 32 cases per property and fixed seeds for reproducible checks. Failed property cases shrink and are persisted for replay; retain generated regression seed files in version control. Run `cargo test jobs::restore::tests` or `cargo test jobs::backup::tests` for the respective suites. These tests do not simulate power loss.
 There is no web console, progress reporting, or cancellation.
 
 The current milestone is a minimal end-to-end workflow for local full backups and restores, with these acceptance criteria:
