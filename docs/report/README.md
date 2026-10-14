@@ -1,25 +1,53 @@
 # Course Report Materials
 
-This directory only stores the inputs and images required to write `report.docx`; it does not serve as a project implementation specification. For the project's current architecture, see [C1](../architecture/system-context.md) and [C2](../architecture/containers.md); for development and usage, see the root [README](../../README.md).
+These materials describe the current `bak` implementation. The requirements, logical design, and software test report cover the local full-backup workflow: service configuration, authenticated HTTP operations, durable FIFO jobs, published backup listing, verified restore, graceful shutdown, and interrupted-job recovery. Unimplemented features appear only in a short outlook.
 
-The current project name is `bak`. This directory retains the Data Backup course report snapshot from before the rename (at the time PR #5 was merged), including the single-server skeleton, startup parameters, and authentication status API from that time. The project has now removed the product implementation and is starting paired development from the C1 and C2 designs; therefore, the "implemented" markers in the report do not represent the current code state. After reimplementation, the report will be synchronized according to actual progress; for now, the structured model, images, and local Word files are retained for requirements and historical design reference.
+The project's maintained architecture views are [C1](../architecture/system-context.md) and [C2](../architecture/containers.md). See the root [README](../../README.md) for usage and development. Course class and sequence diagrams express the existing Rust types, modules, and interactions; they do not prescribe additional classes, services, or frameworks.
 
-- `use-cases.yaml`: source for the actors, use cases, flows, and requirements traceability in the report.
-- `model.yaml`: source for the component diagrams, class diagrams, sequence diagrams, and their descriptions in the report.
-- `generated/`: D2 diagram sources and the PNG images referenced by the report. Both are generated from the above models and committed to Git to check for drift. Edit the models rather than the generated files. The delivery roadmap is drawn separately by the report generator.
-- `report.docx`: current report and typesetting baseline; `report.template.docx`: course style reference. Both Word files are stored only locally and are not tracked by Git.
+- `use-cases.yaml`: JSON-formatted YAML 1.2 containing the implemented functional/nonfunctional requirements, actors, seven use cases, flows, and traceability. Requirement IDs are defined here and validated across both models.
+- `model.yaml`: seven current design views: runtime/storage and module components, two static type/module diagrams, and startup, backup, and restore sequences.
+- `verification.json`: dated measurements and checks against a recorded production source-tree revision. This is evidence from one run, not a claim about every environment or later code revision.
+- `generated/`: D2 sources and PNG images generated from the models, plus the implemented workflow illustration. Edit the inputs rather than generated files.
+- `report.docx`: local report and typesetting baseline; `report.template.docx`: untouched course style reference. Both Word files remain ignored by Git.
 
-All diagram titles and labels are in English. The surrounding report prose remains in its original language. Historical implementation-status labels are retained as part of the report snapshot.
+Report prose is Chinese and diagram titles/labels are English. D2 uses 32 px labels and connection text, 36 px container headings, and 44 px titles. Graphics are fitted to the report's 14 cm content width. D2 **0.9.0**, the bundled ELK engine, theme 0, and native PNG export keep generation reproducible.
 
-D2 diagrams use 32 px node labels and class members, 36 px container and class headings, and 44 px titles. Connection labels use bold, upright 48 px text in dark slate for readability, including `<<include>>`, `<<extend>>`, and sequence messages. Long labels wrap and ELK spacing is reduced to keep the text readable when graphics are fitted to the report's full 14 cm content width.
+## Regeneration and verification
 
-Diagram generation requires [D2](https://d2lang.com/tour/install/) **0.9.0** on `PATH`. The renderer checks this version and uses the bundled ELK layout engine, theme 0, and native PNG export to keep rendering consistent. Java and PlantUML are no longer required. D2 represents use cases as ovals inside a system boundary, preserves UML relationship types and multiplicities, and uses nested sequence groups for conditional branches, loops, and optional interactions. Multi-participant notes are attached to the first participant and identify their full scope in the label.
+```shell
+uv run scripts/update_report.py
+uv run scripts/check.py --report
+```
 
-After modifying the structured model, run `uv run scripts/update_report.py` to synchronize the diagrams and local report. To regenerate diagrams without a local Word file, run:
+The report generator backs up the local Word file under `target/report-backups/` and replaces only the requirements, system-design, and software-test chapter contents. It preserves the cover, course instructions, other chapters, and template. Tests verify both protected content and visible diagram members/relationships. The diagram checks compare committed D2 and PNG outputs with regenerated bytes.
+
+Generate diagrams without a local Word file:
 
 ```shell
 uv run scripts/update_use_cases.py
 uv run scripts/update_system_design.py
 ```
 
-Run `uv run scripts/check.py --report` to check the use-case diagrams, design diagrams, and report generation logic. The diagram generators also accept `--check` to detect drift in both D2 sources and PNGs. The report generator only replaces the target areas for requirements analysis and system design; it does not rearrange the cover. Early detailed requirements drafts, ADRs, and reproducible view documents have been removed from the current directory; Git history can be consulted when traceability is needed.
+## Performance, stability, and memory evidence
+
+On macOS with Xcode Instruments available, run:
+
+```shell
+uv run scripts/analyze_backup.py
+```
+
+The script builds the optimized `profiling` profile with debug symbols and runs the actual binary through HTTP. It measures three datasets after one warm-up each: a 256 MiB compressible file, a 256 MiB fixed-seed random file, and 1,000 files of 4 KiB. Each dataset has three measured backup/restore cycles. Job durations include queue admission, HTTP polling, compression/decompression, checksums, and filesystem synchronization. Content hashing, fixture generation, and cleanup are outside job timing. HTTP latency and RSS observations include warm-up. Filesystem caches are not cleared; these are local baselines rather than pure algorithm benchmarks.
+
+A 600-second stability workload repeatedly backs up and restores a 1 MiB random file plus 100 files of 1 KiB, verifies source/output/payload hashes and directory structure, queries status, samples RSS, and checks terminal history after restart. Each cycle uses a disposable repository and destination, removed after verification to bound disk usage; this does not exercise growth of one long-lived repository. `jobs.sqlite3` persists across all cycles. `--stability-seconds` permits shorter diagnostic runs, and `--skip-instruments` records only workload metrics.
+
+Instruments runs separately from baseline timing, using **Time Profiler**, **Allocations**, and **Leaks**, each against repeated 256 MiB random-file workflows. The script copies the executable into each recording's `executable/` directory and ad-hoc signs that copy with `com.apple.security.get-task-allow`. Cargo's binary stays unchanged. Debug symbols alone do not grant debugger access. Time Profiler samples are exported and summarized by weighted leaf frame, rather than inclusive stack counts or wall-time percentages. Allocations exports cumulative and end-of-recording persistent statistics; Leaks exports its reported entries. These statistics do not establish peak resident memory or long-term leak freedom. A separate normally launched process runs 20 smaller cycles with `vmmap`, `heap`, and `leaks` snapshots before and after. Raw `.trace`, exported tables, recorder logs, RSS samples, and `time -l` output remain under `target/report-analysis/`. Tool failures are recorded separately from recording success and analytical conclusions.
+
+The first Allocations and Leaks attempts could not attach because the binary lacked the debug entitlement. A controlled signing comparison confirmed the cause. After the script fix, both templates completed 45 verified backup/restore cycles, and their tables exported successfully; Leaks reported no entries. The original failed attempts and normal-process snapshots remain in the evidence as earlier observations. Both system `leaks` snapshots reported zero leaks with a non-debuggable-process restriction. These are limited observations, not proof that all paths are leak-free. The initial harness also overwrote the stability RSS/log files on restart; aggregate metrics remain, and the script now preserves the pre-restart files separately.
+
+Repeat only the instrumented recordings without repeating the performance and stability baselines:
+
+```shell
+uv run scripts/analyze_backup.py --instruments-only
+```
+
+The checked-in evidence includes commands, environment, data sizes, repeated measurements, and interpretation. Re-run analysis when the production code changes and update this dated record explicitly. Short observations cannot establish long-term stability, bounded memory for arbitrary file counts, cross-platform performance, or power-loss safety. No performance acceptance threshold has been agreed.

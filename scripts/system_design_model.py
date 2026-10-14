@@ -6,15 +6,10 @@ import json
 from pathlib import Path
 from typing import Any, Literal, NotRequired, TypedDict, cast
 
+from use_case_model import load_model as load_use_cases
+
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = ROOT / "docs" / "report" / "model.yaml"
-FR_IDS = {f"FR-{index:02d}" for index in range(1, 17)}
-NFR_IDS = {f"NFR-{index:02d}" for index in range(1, 14)}
-UC_IDS = {
-    *(f"UC-{index:02d}" for index in range(1, 19)),
-    "UC-14L",
-    "UC-14R",
-}
 
 
 class Trace(TypedDict):
@@ -133,10 +128,12 @@ def _require_text(value: object, owner: str) -> None:
         raise ValueError(f"{owner}: expected non-empty text")
 
 
-def _validate_trace(trace: Trace, owner: str) -> None:
-    unknown_uc = set(trace["use_cases"]) - UC_IDS
-    unknown_fr = set(trace["requirements"]) - FR_IDS
-    unknown_nfr = set(trace["nfr"]) - NFR_IDS
+def _validate_trace(
+    trace: Trace, owner: str, uc_ids: set[str], fr_ids: set[str], nfr_ids: set[str]
+) -> None:
+    unknown_uc = set(trace["use_cases"]) - uc_ids
+    unknown_fr = set(trace["requirements"]) - fr_ids
+    unknown_nfr = set(trace["nfr"]) - nfr_ids
     if unknown_uc or unknown_fr or unknown_nfr:
         raise ValueError(
             f"{owner}: unknown trace IDs: "
@@ -206,6 +203,10 @@ def _validate_component(diagram: ComponentDiagram) -> None:
 def validate_model(model: Model) -> None:
     """Reject incomplete diagrams, dangling references, and traceability gaps."""
     diagrams = model.get("diagrams", [])
+    requirements = load_use_cases()
+    uc_ids = {case["id"] for case in requirements["use_cases"]}
+    fr_ids = {requirement["id"] for requirement in requirements["functional_requirements"]}
+    nfr_ids = {requirement["id"] for requirement in requirements["nonfunctional_requirements"]}
     if len(diagrams) != 7:
         raise ValueError("docs/report/model.yaml must define exactly seven diagrams")
     ids = [diagram.get("id", "") for diagram in diagrams]
@@ -236,7 +237,7 @@ def validate_model(model: Model) -> None:
             _require_text(value, owner)
         if not diagram["responsibilities"] or not diagram["details"] or not diagram["constraints"]:
             raise ValueError(f"{owner}: descriptions must not be empty")
-        _validate_trace(diagram["trace"], owner)
+        _validate_trace(diagram["trace"], owner, uc_ids, fr_ids, nfr_ids)
         covered_fr.update(diagram["trace"]["requirements"])
         covered_uc.update(diagram["trace"]["use_cases"])
         if diagram["kind"] == "class":
@@ -245,10 +246,10 @@ def validate_model(model: Model) -> None:
             _validate_sequence(diagram)
         else:
             _validate_component(diagram)
-    if covered_fr != FR_IDS:
-        raise ValueError(f"functional requirements not fully traced: {sorted(FR_IDS - covered_fr)}")
-    if not covered_uc >= UC_IDS:
-        raise ValueError(f"use cases not fully traced: {sorted(UC_IDS - covered_uc)}")
+    if covered_fr != fr_ids:
+        raise ValueError(f"functional requirements not fully traced: {sorted(fr_ids - covered_fr)}")
+    if not covered_uc >= uc_ids:
+        raise ValueError(f"use cases not fully traced: {sorted(uc_ids - covered_uc)}")
 
 
 def load_model(path: Path = MODEL_PATH) -> Model:

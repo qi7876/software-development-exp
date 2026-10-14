@@ -4,22 +4,17 @@ direction: right
 (** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
 (** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
 (** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
-diagram: "Data Backup System: Use-case Overview" {
+diagram: "bak: Implemented Use Cases" {
   style.font-size: 44
   style.fill: white
   style.stroke: transparent
-  CLIENT: "Operator" {
+  CLIENT: "Operator (HTTP client)" {
     shape: person
     style.stroke: "#334155"
     style.fill: white
   }
-  USR: "Individual user (web\nconsole)" {
+  AUT: "Automation client (curl)" {
     shape: person
-    style.stroke: "#334155"
-    style.fill: white
-  }
-  AUT: "<<system>>\nAutomation client (curl)" {
-    shape: rectangle
     style.stroke: "#334155"
     style.fill: white
   }
@@ -28,51 +23,46 @@ diagram: "Data Backup System: Use-case Overview" {
     style.stroke: "#334155"
     style.fill: white
   }
-  TGT: "<<system>>\nBackup storage" {
+  TGT: "<<system>>\nLocal repository and\ndestination" {
     shape: rectangle
     style.stroke: "#334155"
     style.fill: white
   }
-  system: "Data Backup System" {
+  system: "bak Local Backup Service" {
     style.font-size: 36
     style.stroke: "#64748B"
     style.fill: white
-    UC_01: "UC-01\nManage backup tasks" {
+    UC_01: "UC-01\nStart and configure service" {
       shape: oval
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    UC_02: "UC-02\nRun backup" {
+    UC_02: "UC-02\nQuery authenticated status" {
       shape: oval
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    UC_03: "UC-03\nView status and history" {
+    UC_03: "UC-03\nCreate full backup" {
       shape: oval
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    UC_04: "UC-04\nVerify backups" {
+    UC_04: "UC-04\nList published backups" {
       shape: oval
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    UC_05: "UC-05\nBrowse snapshots" {
+    UC_05: "UC-05\nRestore and verify backup" {
       shape: oval
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    UC_06: "UC-06\nRestore data" {
+    UC_06: "UC-06\nQuery durable job result" {
       shape: oval
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    UC_07: "UC-07\nManage retention policies" {
-      shape: oval
-      style.stroke: "#2563EB"
-      style.fill: "#EFF6FF"
-    }
-    UC_08: "UC-08\nExport diagnostics" {
+    UC_07: "UC-07\nStop and restart service" {
       shape: oval
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
@@ -85,14 +75,11 @@ diagram: "Data Backup System: Use-case Overview" {
   CLIENT -- system.UC_05
   CLIENT -- system.UC_06
   CLIENT -- system.UC_07
-  CLIENT -- system.UC_08
-  system.UC_01 -- SRC
-  system.UC_02 -- SRC
-  system.UC_02 -- TGT
+  system.UC_03 -- SRC
+  system.UC_03 -- TGT
   system.UC_04 -- TGT
   system.UC_05 -- TGT
-  system.UC_06 -- TGT
-  system.UC_07 -- TGT
-  USR -> CLIENT: {target-arrowhead.style.filled: false}
   AUT -> CLIENT: {target-arrowhead.style.filled: false}
+  system.UC_03 -> system.UC_06: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_05 -> system.UC_06: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
 }

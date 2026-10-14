@@ -1,763 +1,768 @@
 {
-  "version": "0.3",
-  "updated": "2026-10-08",
+  "version": "1.0",
+  "updated": "2026-10-14",
   "author": "项目开发者",
-  "system": "Data Backup System",
+  "system": "bak Local Backup Service",
+  "functional_requirements": [
+    {
+      "id": "FR-01",
+      "name": "服务启动与配置",
+      "description": "bak 从已有工作目录读取 config.json；支持帮助、版本和工作目录参数，配置或启动失败可见。"
+    },
+    {
+      "id": "FR-02",
+      "name": "认证与状态",
+      "description": "HTTP API 使用 Bearer secret key；状态返回 version，错误使用统一 JSON。"
+    },
+    {
+      "id": "FR-03",
+      "name": "全量备份",
+      "description": "备份已有源目录中的普通文件和目录，拒绝路径重叠与源内符号链接；Zstd 压缩并记录原始大小、SHA-256 和 UTC 时间。"
+    },
+    {
+      "id": "FR-04",
+      "name": "备份列表",
+      "description": "仅列出已提交元数据的备份编号和创建时间；时间降序、同时间编号升序；未初始化仓库返回空列表且不建库。"
+    },
+    {
+      "id": "FR-05",
+      "name": "恢复与校验",
+      "description": "恢复到已有、空且不与仓库重叠的目录；预先验证全部相对路径，验证解压大小和 SHA-256，不覆盖已有内容。"
+    },
+    {
+      "id": "FR-06",
+      "name": "持久化作业与历史",
+      "description": "提交备份和恢复先持久化再返回 202 与 Location；单个 worker 按 FIFO 执行，查询 queued/running/succeeded/failed 和结果或错误。"
+    },
+    {
+      "id": "FR-07",
+      "name": "关闭与重启恢复",
+      "description": "正常关闭等待活动操作完成并留下排队作业；重启将中断的 running 作业标为失败、不重放，继续 queued 作业并保留终态历史。"
+    }
+  ],
+  "nonfunctional_requirements": [
+    {
+      "id": "NFR-01",
+      "name": "数据正确性",
+      "description": "恢复后相对路径、目录类型和文件内容一致；已有源和成功备份不被恢复修改。"
+    },
+    {
+      "id": "NFR-02",
+      "name": "流式处理",
+      "description": "文件压缩、解压和校验使用缓冲区流式处理；元数据和遍历列表仍随条目数增长。"
+    },
+    {
+      "id": "NFR-03",
+      "name": "可观测性",
+      "description": "输入、数据库与作业执行失败有明确错误；worker 或结果持久化失败导致服务失败退出。"
+    },
+    {
+      "id": "NFR-04",
+      "name": "响应性",
+      "description": "阻塞文件操作在 Tokio blocking task 中运行，状态和作业查询保持可用；性能基线通过实测记录。"
+    },
+    {
+      "id": "NFR-05",
+      "name": "持久化边界",
+      "description": "SQLite 使用 WAL、FULL 同步和事务；两个数据库与外部文件不共享事务，单工作目录只运行一个服务。"
+    },
+    {
+      "id": "NFR-06",
+      "name": "安全边界",
+      "description": "API key 控制访问；恢复拒绝危险元数据路径与占用目录；HTTP 无内置 TLS，仓库内容未加密。"
+    },
+    {
+      "id": "NFR-07",
+      "name": "平台与验证边界",
+      "description": "当前备份和恢复执行支持 Unix，实测平台为 macOS；短时验证不等于长期稳定性或断电保证。"
+    }
+  ],
   "actors": [
-    {"id": "CLIENT", "name": "Operator", "stereotype": "person"},
-    {"id": "USR", "name": "Individual user (web console)", "stereotype": "person", "parent": "CLIENT"},
-    {"id": "AUT", "name": "Automation client (curl)", "stereotype": "system", "parent": "CLIENT"},
-    {"id": "SRC", "name": "Source file system", "stereotype": "system"},
-    {"id": "TGT", "name": "Backup storage", "stereotype": "system"},
-    {"id": "LOCAL", "name": "Local storage", "stereotype": "system", "parent": "TGT"},
-    {"id": "REMOTE", "name": "WebDAV / S3 (candidate extension)", "stereotype": "system", "parent": "TGT"}
+    {
+      "id": "CLIENT",
+      "name": "Operator (HTTP client)",
+      "stereotype": "human"
+    },
+    {
+      "id": "AUT",
+      "name": "Automation client (curl)",
+      "stereotype": "human",
+      "parent": "CLIENT"
+    },
+    {
+      "id": "SRC",
+      "name": "Source file system",
+      "stereotype": "system"
+    },
+    {
+      "id": "TGT",
+      "name": "Local repository and destination",
+      "stereotype": "system"
+    }
   ],
   "diagrams": [
     {
       "id": "overview",
-      "title": "Data Backup System: Use-case Overview",
-      "actors": ["CLIENT", "USR", "AUT", "SRC", "TGT"],
-      "use_cases": ["UC-01", "UC-02", "UC-03", "UC-04", "UC-05", "UC-06", "UC-07", "UC-08"],
+      "title": "bak: Implemented Use Cases",
+      "actors": [
+        "CLIENT",
+        "AUT",
+        "SRC",
+        "TGT"
+      ],
+      "use_cases": [
+        "UC-01",
+        "UC-02",
+        "UC-03",
+        "UC-04",
+        "UC-05",
+        "UC-06",
+        "UC-07"
+      ],
       "associations": [
-        ["CLIENT", "UC-01"],
-        ["CLIENT", "UC-02"],
-        ["CLIENT", "UC-03"],
-        ["CLIENT", "UC-04"],
-        ["CLIENT", "UC-05"],
-        ["CLIENT", "UC-06"],
-        ["CLIENT", "UC-07"],
-        ["CLIENT", "UC-08"],
-        ["SRC", "UC-01"],
-        ["SRC", "UC-02"],
-        ["TGT", "UC-02"],
-        ["TGT", "UC-04"],
-        ["TGT", "UC-05"],
-        ["TGT", "UC-06"],
-        ["TGT", "UC-07"]
+        [
+          "CLIENT",
+          "UC-01"
+        ],
+        [
+          "CLIENT",
+          "UC-02"
+        ],
+        [
+          "CLIENT",
+          "UC-03"
+        ],
+        [
+          "CLIENT",
+          "UC-04"
+        ],
+        [
+          "CLIENT",
+          "UC-05"
+        ],
+        [
+          "CLIENT",
+          "UC-06"
+        ],
+        [
+          "CLIENT",
+          "UC-07"
+        ],
+        [
+          "SRC",
+          "UC-03"
+        ],
+        [
+          "TGT",
+          "UC-03"
+        ],
+        [
+          "TGT",
+          "UC-04"
+        ],
+        [
+          "TGT",
+          "UC-05"
+        ]
       ]
     },
     {
       "id": "configuration-execution",
-      "title": "Backup Task Configuration and Execution",
-      "actors": ["CLIENT", "USR", "AUT", "SRC", "TGT"],
-      "use_cases": ["UC-01", "UC-02", "UC-09", "UC-10", "UC-11", "UC-12", "UC-13", "UC-16"],
+      "title": "Service Lifecycle and Full Backup",
+      "actors": [
+        "CLIENT",
+        "AUT",
+        "SRC",
+        "TGT"
+      ],
+      "use_cases": [
+        "UC-01",
+        "UC-02",
+        "UC-03",
+        "UC-06",
+        "UC-07"
+      ],
       "associations": [
-        ["CLIENT", "UC-01"],
-        ["CLIENT", "UC-02"],
-        ["CLIENT", "UC-16"],
-        ["SRC", "UC-12"],
-        ["TGT", "UC-13"]
+        [
+          "CLIENT",
+          "UC-01"
+        ],
+        [
+          "CLIENT",
+          "UC-02"
+        ],
+        [
+          "CLIENT",
+          "UC-03"
+        ],
+        [
+          "CLIENT",
+          "UC-06"
+        ],
+        [
+          "CLIENT",
+          "UC-07"
+        ],
+        [
+          "SRC",
+          "UC-03"
+        ],
+        [
+          "TGT",
+          "UC-03"
+        ]
       ]
     },
     {
       "id": "restore-maintenance",
-      "title": "Backup Browsing, Restoration, and Maintenance",
-      "actors": ["CLIENT", "USR", "AUT", "TGT", "LOCAL", "REMOTE"],
-      "use_cases": ["UC-04", "UC-05", "UC-06", "UC-07", "UC-14", "UC-14L", "UC-14R", "UC-15", "UC-17", "UC-18"],
+      "title": "Backup Listing, Restore and Job Results",
+      "actors": [
+        "CLIENT",
+        "AUT",
+        "TGT"
+      ],
+      "use_cases": [
+        "UC-04",
+        "UC-05",
+        "UC-06"
+      ],
       "associations": [
-        ["CLIENT", "UC-04"],
-        ["CLIENT", "UC-05"],
-        ["CLIENT", "UC-06"],
-        ["CLIENT", "UC-07"],
-        ["TGT", "UC-14"],
-        ["LOCAL", "UC-14L"],
-        ["REMOTE", "UC-14R"]
+        [
+          "CLIENT",
+          "UC-04"
+        ],
+        [
+          "CLIENT",
+          "UC-05"
+        ],
+        [
+          "CLIENT",
+          "UC-06"
+        ],
+        [
+          "TGT",
+          "UC-04"
+        ],
+        [
+          "TGT",
+          "UC-05"
+        ]
       ]
     }
   ],
   "use_cases": [
     {
       "id": "UC-01",
-      "name": "Manage backup tasks",
+      "name": "Start and configure service",
       "kind": "main",
-      "priority": "Must",
-      "goal": "用户创建或修改可由系统执行的备份任务，并安全地启停或删除任务。",
-      "primary_actor": "USR",
-      "supporting_actors": ["SRC", "TGT"],
-      "trigger": "用户选择新建任务，或打开已有任务进行管理。",
-      "preconditions": ["服务器已启动，客户端请求通过 secret key 认证。", "用户对所选源和目标具有必要访问权限。"],
-      "success": "任务配置通过验证并持久化，同一服务器进程更新任务状态。",
-      "failure": "无效配置未被启用，原有任务和已有备份数据保持不变。",
-      "includes": ["UC-09", "UC-10", "UC-11"],
+      "priority": "高",
+      "goal": "启动配置明确、错误可见的本地备份服务。",
+      "primary_actor": "CLIENT",
+      "supporting_actors": [],
+      "trigger": "执行 bak -d <目录>。",
+      "preconditions": [
+        "已有工作目录和 config.json。"
+      ],
+      "success": "服务监听配置地址，持久化作业库与 worker 就绪。",
+      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "includes": [],
       "extension_points": [],
       "extends": null,
       "parent": null,
-      "requirements": ["FR-01", "FR-02", "FR-03", "FR-10", "FR-14", "FR-15", "FR-16", "FR-12"],
-      "nfr": ["NFR-03", "NFR-05", "NFR-07"],
-      "business_rules": ["删除任务与删除备份数据是两个独立动作。", "危险路径嵌套必须阻止保存。"],
-      "notes": "新建和编辑共享同一配置流程；启停和删除作为任务管理的备选流程。 Web 控制台与 curl 使用同一 HTTP API；流程中的人工选择也可由客户端参数表达。",
+      "requirements": [
+        "FR-01",
+        "FR-07"
+      ],
+      "nfr": [
+        "NFR-03",
+        "NFR-05",
+        "NFR-07"
+      ],
+      "business_rules": [],
+      "notes": "web_ui 配置仍为必需对象，但控制台没有实现，应保持 enabled=false；logging 字段已废弃。帮助和版本参数直接退出。",
       "basic_flow": [
-        {"id": "B1", "actor": "USR", "action": "选择新建任务或打开已有任务。"},
-        {"id": "B2", "actor": "系统", "action": "显示名称、源、目标、计划、保留和当前配置。"},
-        {"id": "B3", "actor": "USR", "action": "填写或修改基本配置。"},
-        {"id": "B4", "actor": "系统", "action": "执行 UC-09 和 UC-10，收集数据保护与筛选配置。"},
-        {"id": "B5", "actor": "USR", "action": "确认配置摘要并保存。"},
-        {"id": "B6", "actor": "系统", "action": "执行 UC-11；验证成功后持久化配置并更新同进程调度状态。"}
+        {
+          "id": "B1",
+          "actor": "CLIENT",
+          "action": "操作方准备配置并启动 bak。"
+        },
+        {
+          "id": "B2",
+          "actor": "系统",
+          "action": "系统解析启动参数并读取配置。"
+        },
+        {
+          "id": "B3",
+          "actor": "系统",
+          "action": "系统打开 jobs.sqlite3，恢复中断作业。"
+        },
+        {
+          "id": "B4",
+          "actor": "系统",
+          "action": "系统绑定监听地址并启动 HTTP 服务和 worker。"
+        }
       ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B1", "condition": "用户选择启用或停用任务", "steps": ["系统更新启用状态和下一次运行时间，不修改快照数据。"]},
-        {"id": "A2", "from": "B1", "condition": "用户选择删除任务", "steps": ["系统分别确认任务配置和备份数据的处理方式。", "用户确认后系统删除配置；备份数据默认保留。"]}
-      ],
+      "alternative_flows": [],
       "exception_flows": [
-        {"id": "E1", "from": "B6", "condition": "配置验证失败", "steps": ["系统定位错误字段并拒绝启用新配置。", "用户修改后返回 B5。"]}
+        {
+          "id": "E1",
+          "from": "B2",
+          "condition": "参数或配置无效",
+          "steps": [
+            "输出错误并非零退出；不启动服务。"
+          ]
+        },
+        {
+          "id": "E2",
+          "from": "B3-B4",
+          "condition": "数据库不可用或端口占用",
+          "steps": [
+            "输出启动失败原因并非零退出。"
+          ]
+        }
       ]
     },
     {
       "id": "UC-02",
-      "name": "Run backup",
+      "name": "Query authenticated status",
       "kind": "main",
-      "priority": "Must",
-      "goal": "根据任务配置生成可验证、可恢复且原子提交的增量快照。",
-      "primary_actor": "USR",
-      "supporting_actors": ["SRC", "TGT"],
-      "trigger": "用户点击立即备份，或同进程调度逻辑到达计划时间。",
-      "preconditions": ["手动执行请求通过 API 认证；计划执行由同进程调度逻辑内部触发。", "存在已启用且有效的任务。", "同一任务没有其他写操作正在执行。"],
-      "success": "新快照完整提交，运行历史和统计记录成功结果。",
-      "failure": "不产生成功快照，已提交快照保持可读取。",
-      "includes": ["UC-12", "UC-13"],
-      "extension_points": ["Backup is running"],
+      "priority": "高",
+      "goal": "通过认证接口确认服务可访问和程序版本。",
+      "primary_actor": "CLIENT",
+      "supporting_actors": [],
+      "trigger": "GET /api/status。",
+      "preconditions": [
+        "服务已启动。"
+      ],
+      "success": "返回 HTTP 200 和包含 version 的 JSON。",
+      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "includes": [],
+      "extension_points": [],
       "extends": null,
       "parent": null,
-      "requirements": ["FR-03", "FR-04", "FR-05", "FR-06", "FR-13", "FR-14", "FR-15", "FR-16", "FR-12"],
-      "nfr": ["NFR-01", "NFR-02", "NFR-04", "NFR-10", "NFR-11", "NFR-12"],
-      "business_rules": ["只有完成原子提交的快照可显示为成功。", "浏览器或 curl 断开不终止同一服务器进程中的备份运行。"],
-      "notes": "手动和计划执行使用同一备份流程。 Web 控制台与 curl 使用同一 HTTP API；流程中的人工选择也可由客户端参数表达。 调度与备份业务均待实现，不依赖外部操作系统调度器。",
+      "requirements": [
+        "FR-02"
+      ],
+      "nfr": [
+        "NFR-03",
+        "NFR-06"
+      ],
+      "business_rules": [],
+      "notes": "GET / 返回公开文本 bak is running。状态不包含旧 backup_available 字段，不表示特定作业成功。",
       "basic_flow": [
-        {"id": "B1", "actor": "用户/系统", "action": "触发任务执行。"},
-        {"id": "B2", "actor": "系统", "action": "创建运行记录并锁定任务写操作。"},
-        {"id": "B3", "actor": "系统", "action": "检查源、目标、仓库版本和可用空间。"},
-        {"id": "B4", "actor": "系统", "action": "执行 UC-12，得到本次包含的文件集合。"},
-        {"id": "B5", "actor": "系统", "action": "执行 UC-13，写入并提交快照。"},
-        {"id": "B6", "actor": "系统", "action": "保存统计和运行结果，释放任务锁并通知用户。"}
+        {
+          "id": "B1",
+          "actor": "CLIENT",
+          "action": "客户端携带 Bearer key 查询状态。"
+        },
+        {
+          "id": "B2",
+          "actor": "系统",
+          "action": "系统校验 API 认证信息。"
+        },
+        {
+          "id": "B3",
+          "actor": "系统",
+          "action": "系统返回当前软件版本。"
+        }
       ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B4", "condition": "没有新增或变化内容", "steps": ["系统记录无变化结果；按策略创建轻量快照或结束运行。", "流程继续到 B6。"]},
-        {"id": "A2", "from": "B3", "condition": "远程目标暂时不可用", "steps": ["系统执行有界重试。", "目标恢复后返回 B3。"]}
-      ],
+      "alternative_flows": [],
       "exception_flows": [
-        {"id": "E1", "from": "B3-B5", "condition": "空间不足、权限失败或目标持续离线", "steps": ["系统停止写入并清理未提交数据。", "运行标记为失败并记录可操作原因。"]},
-        {"id": "E2", "from": "B2-B5", "condition": "用户取消运行", "steps": ["转入 UC-16。"]}
+        {
+          "id": "E1",
+          "from": "B2",
+          "condition": "key 缺失或不匹配",
+          "steps": [
+            "返回 401、WWW-Authenticate: Bearer 与 JSON 错误。"
+          ]
+        },
+        {
+          "id": "E2",
+          "from": "B1",
+          "condition": "服务不可连接",
+          "steps": [
+            "客户端报告连接失败，不推断服务状态。"
+          ]
+        }
       ]
     },
     {
       "id": "UC-03",
-      "name": "View status and history",
+      "name": "Create full backup",
       "kind": "main",
-      "priority": "Must",
-      "goal": "用户了解当前保护状态、运行进度和历史结果。",
-      "primary_actor": "USR",
-      "supporting_actors": [],
-      "trigger": "用户打开概览、任务详情或通过 curl 调用 HTTP API 查询。",
-      "preconditions": ["服务器可连接，外部请求携带有效 Bearer secret key。", "客户端可连接 HTTP API，且持有有效 secret key。"],
-      "success": "向用户展示带运行 ID 和数据时效标识的状态。",
-      "failure": "明确展示服务离线或数据不可用，不把缓存状态伪装为实时状态。",
-      "includes": [],
+      "priority": "高",
+      "goal": "将本地源目录完整备份到独立仓库。",
+      "primary_actor": "CLIENT",
+      "supporting_actors": [
+        "SRC",
+        "TGT"
+      ],
+      "trigger": "POST /api/backups。",
+      "preconditions": [
+        "有效 Bearer key；已有源和仓库目录，规范化路径不重叠。"
+      ],
+      "success": "作业成功并返回 backup_id；已同步压缩内容和已提交元数据可供恢复。",
+      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "includes": [
+        "UC-06"
+      ],
       "extension_points": [],
       "extends": null,
       "parent": null,
-      "requirements": ["FR-06", "FR-09", "FR-11", "FR-12"],
-      "nfr": ["NFR-05", "NFR-06", "NFR-08"],
-      "business_rules": ["Web 控制台与 HTTP API 客户端 对同一运行返回一致状态和运行 ID。"],
-      "notes": "进度未知时只显示阶段和累计统计。 Web 控制台与 curl 使用同一 HTTP API；流程中的人工选择也可由客户端参数表达。 当前仅实现 GET /api/status，返回版本和 backup_available=false；任务进度、历史和通知待实现。",
+      "requirements": [
+        "FR-03",
+        "FR-06"
+      ],
+      "nfr": [
+        "NFR-01",
+        "NFR-02",
+        "NFR-03",
+        "NFR-04",
+        "NFR-05"
+      ],
+      "business_rules": [
+        "备份编号不可覆盖；本版本仅全量备份。",
+        "备份期间需保持源文件不变，程序不检测并发源修改。"
+      ],
+      "notes": "操作通过当前 bak 的公开接口完成。",
       "basic_flow": [
-        {"id": "B1", "actor": "USR", "action": "打开状态或历史视图。"},
-        {"id": "B2", "actor": "系统", "action": "读取任务、运行和服务器状态。"},
-        {"id": "B3", "actor": "系统", "action": "显示最近结果、下一次运行及活动任务进度。"},
-        {"id": "B4", "actor": "USR", "action": "选择一条运行记录查看统计、警告和错误详情。"},
-        {"id": "B5", "actor": "系统", "action": "展示带关联运行 ID 的详情。"}
+        {
+          "id": "B1",
+          "actor": "CLIENT",
+          "action": "客户端提交 source 和 repository。"
+        },
+        {
+          "id": "B2",
+          "actor": "系统",
+          "action": "系统校验请求并持久化 queued 作业，返回 202 和 Location。"
+        },
+        {
+          "id": "B3",
+          "actor": "系统",
+          "action": "worker 按 FIFO 领取作业并写入 running 状态。"
+        },
+        {
+          "id": "B4",
+          "actor": "系统",
+          "action": "系统遍历文件和目录，流式压缩、统计大小与哈希。"
+        },
+        {
+          "id": "B5",
+          "actor": "系统",
+          "action": "系统同步文件和目录，再事务提交仓库元数据。"
+        },
+        {
+          "id": "B6",
+          "actor": "系统",
+          "action": "系统持久化成功结果，客户端查询作业结果。"
+        }
       ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B3", "condition": "当前没有任务", "steps": ["系统显示空状态和创建首个任务入口。"]}
-      ],
+      "alternative_flows": [],
       "exception_flows": [
-        {"id": "E1", "from": "B2", "condition": "服务器不可达", "steps": ["系统标记服务离线，显示最后更新时间和重连建议。"]}
+        {
+          "id": "E1",
+          "from": "B2",
+          "condition": "JSON 或路径字段无效",
+          "steps": [
+            "拒绝请求并返回对应 HTTP JSON 错误。"
+          ]
+        },
+        {
+          "id": "E2",
+          "from": "B4-B5",
+          "condition": "路径重叠、源内符号链接、IO 或元数据写入失败",
+          "steps": [
+            "作业失败，不发布未提交元数据；可能保留未发布目录。"
+          ]
+        }
       ]
     },
     {
       "id": "UC-04",
-      "name": "Verify backups",
+      "name": "List published backups",
       "kind": "main",
-      "priority": "Must",
-      "goal": "确认快照引用和内容对象未缺失、未损坏或被篡改。",
-      "primary_actor": "USR",
-      "supporting_actors": ["TGT"],
-      "trigger": "用户对任务或快照选择校验。",
-      "preconditions": ["服务器可连接，外部请求携带有效 Bearer secret key。", "至少存在一个已提交快照。"],
-      "success": "生成带时间戳的校验记录并列出完整统计。",
-      "failure": "校验记录明确失败或受影响对象，快照内容不被修改。",
-      "includes": ["UC-14"],
+      "priority": "高",
+      "goal": "获取仓库中已经发布的备份摘要。",
+      "primary_actor": "CLIENT",
+      "supporting_actors": [
+        "TGT"
+      ],
+      "trigger": "GET /api/backups?repository=PATH。",
+      "preconditions": [
+        "有效 Bearer key；仓库目录存在。"
+      ],
+      "success": "返回 backups 数组，每项仅包含 backup_id 和 created_at。",
+      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "includes": [],
       "extension_points": [],
       "extends": null,
       "parent": null,
-      "requirements": ["FR-07", "FR-11", "FR-14", "FR-12"],
-      "nfr": ["NFR-02", "NFR-08", "NFR-11"],
-      "business_rules": ["认证失败不能被降级为普通哈希不一致。"],
-      "notes": "支持单快照校验和整个仓库校验。 Web 控制台与 curl 使用同一 HTTP API；流程中的人工选择也可由客户端参数表达。",
+      "requirements": [
+        "FR-04"
+      ],
+      "nfr": [
+        "NFR-03",
+        "NFR-05"
+      ],
+      "business_rules": [],
+      "notes": "目录内没有 repository.sqlite3 时返回空列表且不初始化数据库；忽略未发布目录；列表不检查载荷完整性。",
       "basic_flow": [
-        {"id": "B1", "actor": "USR", "action": "选择校验范围。"},
-        {"id": "B2", "actor": "系统", "action": "执行 UC-14 访问仓库。"},
-        {"id": "B3", "actor": "系统", "action": "读取清单并检查全部引用存在。"},
-        {"id": "B4", "actor": "系统", "action": "认证并重新计算选定对象的内容哈希。"},
-        {"id": "B5", "actor": "系统", "action": "保存结果并通知用户。"}
+        {
+          "id": "B1",
+          "actor": "CLIENT",
+          "action": "客户端提交仓库查询路径。"
+        },
+        {
+          "id": "B2",
+          "actor": "系统",
+          "action": "系统校验参数并规范化目录。"
+        },
+        {
+          "id": "B3",
+          "actor": "系统",
+          "action": "系统读取已提交的元数据头并按时间降序、编号升序返回。"
+        }
       ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B1", "condition": "用户选择快速校验", "steps": ["系统只检查清单、索引和对象存在性后继续 B5。"]}
-      ],
+      "alternative_flows": [],
       "exception_flows": [
-        {"id": "E1", "from": "B3-B4", "condition": "发现缺失、损坏或认证失败", "steps": ["系统记录受影响文件和快照，结果标记失败。"]},
-        {"id": "E2", "from": "B2-B4", "condition": "目标中途离线", "steps": ["系统停止本次校验并保留已完成统计。"]}
+        {
+          "id": "E1",
+          "from": "B2",
+          "condition": "参数缺失、重复或目录无效",
+          "steps": [
+            "返回明确错误，不伪装为空列表。"
+          ]
+        },
+        {
+          "id": "E2",
+          "from": "B3",
+          "condition": "数据库损坏或 schema 不支持",
+          "steps": [
+            "返回数据库错误，不返回成功空列表。"
+          ]
+        }
       ]
     },
     {
       "id": "UC-05",
-      "name": "Browse snapshots",
+      "name": "Restore and verify backup",
       "kind": "main",
-      "priority": "Must",
-      "goal": "用户按时间点浏览和搜索已备份的目录及文件版本。",
-      "primary_actor": "USR",
-      "supporting_actors": ["TGT"],
-      "trigger": "用户进入快照页或通过 HTTP API 查询快照列表。",
-      "preconditions": ["服务器可连接，外部请求携带有效 Bearer secret key。", "任务至少有一个已提交快照。"],
-      "success": "用户看到所选快照的可用文件树和版本元数据。",
-      "failure": "系统标明仓库不可访问或索引未经实时验证，不提供误导性恢复入口。",
-      "includes": ["UC-14"],
+      "priority": "高",
+      "goal": "把选定的备份恢复到单独的空目录并验证内容。",
+      "primary_actor": "CLIENT",
+      "supporting_actors": [
+        "TGT"
+      ],
+      "trigger": "POST /api/restores。",
+      "preconditions": [
+        "有效 Bearer key；已有仓库和空目标目录，规范化路径不重叠。"
+      ],
+      "success": "作业成功，result 包含 destination；恢复内容通过大小与 SHA-256 校验且已同步。",
+      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "includes": [
+        "UC-06"
+      ],
       "extension_points": [],
       "extends": null,
       "parent": null,
-      "requirements": ["FR-08", "FR-12", "FR-14"],
-      "nfr": ["NFR-05", "NFR-06", "NFR-11"],
-      "business_rules": ["同一路径在不同快照中的版本必须可区分。"],
-      "notes": "浏览清单不要求下载全部内容 pack。 Web 控制台与 curl 使用同一 HTTP API；流程中的人工选择也可由客户端参数表达。",
+      "requirements": [
+        "FR-05",
+        "FR-06"
+      ],
+      "nfr": [
+        "NFR-01",
+        "NFR-02",
+        "NFR-03",
+        "NFR-05",
+        "NFR-06"
+      ],
+      "business_rules": [
+        "使用 create_new 避免覆盖已有路径。",
+        "当前不恢复权限、修改时间、符号链接；不自动清理失败输出。"
+      ],
+      "notes": "操作通过当前 bak 的公开接口完成。",
       "basic_flow": [
-        {"id": "B1", "actor": "USR", "action": "选择任务和快照时间点。"},
-        {"id": "B2", "actor": "系统", "action": "执行 UC-14 并读取快照清单。"},
-        {"id": "B3", "actor": "系统", "action": "显示目录树、路径、大小、时间和可用状态。"},
-        {"id": "B4", "actor": "USR", "action": "浏览目录或搜索文件。"},
-        {"id": "B5", "actor": "系统", "action": "返回匹配项目并允许形成恢复选择集。"}
+        {
+          "id": "B1",
+          "actor": "CLIENT",
+          "action": "客户端提交 repository、backup_id 和 destination。"
+        },
+        {
+          "id": "B2",
+          "actor": "系统",
+          "action": "系统校验请求、持久化 queued 作业并返回 202 和 Location。"
+        },
+        {
+          "id": "B3",
+          "actor": "系统",
+          "action": "worker 领取作业，验证空目标并读取指定备份元数据。"
+        },
+        {
+          "id": "B4",
+          "actor": "系统",
+          "action": "系统验证全部条目路径后创建目录和文件，解压并检查大小与 SHA-256。"
+        },
+        {
+          "id": "B5",
+          "actor": "系统",
+          "action": "系统同步恢复文件与目录，持久化成功结果，客户端查询作业结果。"
+        }
       ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B2", "condition": "目标离线但存在本地缓存索引", "steps": ["系统显示缓存内容和更新时间，但禁用恢复。"]}
-      ],
+      "alternative_flows": [],
       "exception_flows": [
-        {"id": "E1", "from": "B2", "condition": "清单损坏或无法认证", "steps": ["系统拒绝展示该快照为可恢复并建议执行校验。"]},
-        {"id": "E2", "from": "B4", "condition": "查询表达式无效", "steps": ["系统保留当前列表并提示修正查询。"]}
+        {
+          "id": "E1",
+          "from": "B3",
+          "condition": "目标被占用或路径重叠",
+          "steps": [
+            "作业失败，error.code=400；已有目标内容保持不变。"
+          ]
+        },
+        {
+          "id": "E2",
+          "from": "B3-B4",
+          "condition": "备份缺失、元数据非法或载荷损坏",
+          "steps": [
+            "缺失备份报 404，损坏数据失败；失败可能留下部分输出。"
+          ]
+        }
       ]
     },
     {
       "id": "UC-06",
-      "name": "Restore data",
+      "name": "Query durable job result",
       "kind": "main",
-      "priority": "Must",
-      "goal": "将指定快照中的文件或目录安全恢复到原位置或自定义位置。",
-      "primary_actor": "USR",
-      "supporting_actors": ["TGT"],
-      "trigger": "用户选择快照内容并点击恢复，或通过已认证 HTTP API 提交恢复请求。",
-      "preconditions": ["服务器可连接，外部请求携带有效 Bearer secret key。", "所选快照存在。", "恢复位置可写且有足够空间。"],
-      "success": "成功项内容与快照一致，生成可追溯恢复报告。",
-      "failure": "失败项保持原目标文件不变，临时明文被清理并记录原因。",
-      "includes": ["UC-14", "UC-18"],
-      "extension_points": ["Restore target has conflicts"],
+      "priority": "高",
+      "goal": "查询已接受作业的状态、结果或错误。",
+      "primary_actor": "CLIENT",
+      "supporting_actors": [],
+      "trigger": "GET /api/jobs/{job_id}。",
+      "preconditions": [
+        "有效 Bearer key；客户端持有作业编号。"
+      ],
+      "success": "HTTP 200 返回持久化作业；终态包含 result 或 error。",
+      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "includes": [],
+      "extension_points": [],
       "extends": null,
       "parent": null,
-      "requirements": ["FR-08", "FR-12", "FR-14", "FR-15"],
-      "nfr": ["NFR-01", "NFR-02", "NFR-05", "NFR-11", "NFR-12"],
-      "business_rules": ["默认不覆盖现有文件。", "认证通过前不得提交最终恢复文件。"],
-      "notes": "恢复按块头自动选择解密和解压算法。 Web 控制台与 curl 使用同一 HTTP API；流程中的人工选择也可由客户端参数表达。",
+      "requirements": [
+        "FR-02",
+        "FR-06"
+      ],
+      "nfr": [
+        "NFR-03",
+        "NFR-04",
+        "NFR-05"
+      ],
+      "business_rules": [],
+      "notes": "作业失败时查询本身仍为 HTTP 200，error.code 是操作错误。没有进度或取消接口；客户端断开不取消已提交作业，重试 POST 会创建新作业。",
       "basic_flow": [
-        {"id": "B1", "actor": "USR", "action": "选择快照内容、恢复位置和默认冲突策略。"},
-        {"id": "B2", "actor": "系统", "action": "执行 UC-14 并计算所需 pack 范围。"},
-        {"id": "B3", "actor": "系统", "action": "检查恢复空间、权限和路径冲突。"},
-        {"id": "B4", "actor": "系统", "action": "读取所需块，认证解密并解压到临时文件。"},
-        {"id": "B5", "actor": "系统", "action": "执行 UC-18 校验恢复内容。"},
-        {"id": "B6", "actor": "系统", "action": "原子放置成功文件并生成恢复报告。"}
+        {
+          "id": "B1",
+          "actor": "CLIENT",
+          "action": "客户端访问接受响应的 Location。"
+        },
+        {
+          "id": "B2",
+          "actor": "系统",
+          "action": "系统认证并读取 jobs.sqlite3 中的作业。"
+        },
+        {
+          "id": "B3",
+          "actor": "系统",
+          "action": "系统返回 queued/running/succeeded/failed 及 result/error，客户端可继续轮询。"
+        }
       ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B3", "condition": "发现目标路径冲突", "steps": ["转入 UC-17；处理后返回 B4。"]},
-        {"id": "A2", "from": "B1", "condition": "用户选择恢复到原路径", "steps": ["系统检查原路径可用性后继续 B2。"]}
-      ],
+      "alternative_flows": [],
       "exception_flows": [
-        {"id": "E1", "from": "B4-B5", "condition": "认证、解压或哈希校验失败", "steps": ["系统删除对应临时文件并将项目标记失败。", "其他独立项目可按策略继续。"]},
-        {"id": "E2", "from": "B3-B4", "condition": "空间不足、权限失败或目标离线", "steps": ["系统安全停止相关项目并保留原文件。"]}
+        {
+          "id": "E1",
+          "from": "B2",
+          "condition": "作业不存在",
+          "steps": [
+            "返回 HTTP 404 JSON 错误。"
+          ]
+        },
+        {
+          "id": "E2",
+          "from": "B2",
+          "condition": "作业数据库读取失败",
+          "steps": [
+            "返回 HTTP 500 JSON 错误。"
+          ]
+        }
       ]
     },
     {
       "id": "UC-07",
-      "name": "Manage retention policies",
+      "name": "Stop and restart service",
       "kind": "main",
-      "priority": "Should",
-      "goal": "按照策略删除过期快照并安全回收无引用内容。",
-      "primary_actor": "USR",
-      "supporting_actors": ["TGT"],
-      "trigger": "用户修改保留数量，或备份成功后系统自动评估。",
-      "preconditions": ["服务器可连接，外部请求携带有效 Bearer secret key。", "任务和仓库可访问。"],
-      "success": "保留快照符合策略，所有剩余引用仍完整。",
-      "failure": "系统停止清理且不删除引用状态未知的对象。",
-      "includes": ["UC-14"],
-      "extension_points": [],
-      "extends": null,
-      "parent": null,
-      "requirements": ["FR-10", "FR-12"],
-      "nfr": ["NFR-01", "NFR-02", "NFR-05"],
-      "business_rules": ["只有不再被任何保留快照引用的块才可回收。"],
-      "notes": "自动清理沿用已经确认的策略；手动清理先展示影响摘要。 Web 控制台与 curl 使用同一 HTTP API；流程中的人工选择也可由客户端参数表达。",
-      "basic_flow": [
-        {"id": "B1", "actor": "USR/系统", "action": "触发保留策略评估。"},
-        {"id": "B2", "actor": "系统", "action": "执行 UC-14 并读取快照引用关系。"},
-        {"id": "B3", "actor": "系统", "action": "计算保留和过期快照及预计释放空间。"},
-        {"id": "B4", "actor": "USR", "action": "在手动模式下确认清理摘要。"},
-        {"id": "B5", "actor": "系统", "action": "删除过期清单并回收无引用块，随后复核引用完整性。"}
-      ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B3", "condition": "没有过期快照", "steps": ["系统记录无需清理并结束。"]}
-      ],
-      "exception_flows": [
-        {"id": "E1", "from": "B2-B5", "condition": "引用计算、删除或复核失败", "steps": ["系统保守停止，记录已完成操作和未处理对象。"]},
-        {"id": "E2", "from": "B4", "condition": "用户取消确认", "steps": ["系统不修改仓库并结束。"]}
-      ]
-    },
-    {
-      "id": "UC-08",
-      "name": "Export diagnostics",
-      "kind": "main",
-      "priority": "Should",
-      "goal": "生成不包含用户文件内容和密钥的脱敏诊断包。",
-      "primary_actor": "USR",
+      "priority": "高",
+      "goal": "正常关闭时保留排队工作，异常退出后安全恢复作业状态。",
+      "primary_actor": "CLIENT",
       "supporting_actors": [],
-      "trigger": "用户在设置或错误详情中选择导出诊断包。",
-      "preconditions": ["服务器可连接，外部请求携带有效 Bearer secret key。", "应用存在可读取的配置摘要或运行记录。"],
-      "success": "指定位置生成可供故障分析的诊断包。",
-      "failure": "未生成不完整或未确认脱敏的诊断包。",
+      "trigger": "Ctrl-C、SIGTERM 或服务退出后重启。",
+      "preconditions": [
+        "同一工作目录只运行一个服务实例。"
+      ],
+      "success": "终态历史保留；queued 作业继续执行；中断 running 作业失败且不重放。",
+      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
       "includes": [],
       "extension_points": [],
       "extends": null,
       "parent": null,
-      "requirements": ["FR-09", "FR-12"],
-      "nfr": ["NFR-03", "NFR-08", "NFR-11"],
-      "business_rules": ["文件内容、口令、主密钥和可复用认证材料始终排除。", "API secret key 和 Authorization header 必须从诊断包中移除。"],
-      "notes": "用户可以选择时间范围并预览包含的数据类别。 Web 控制台与 curl 使用同一 HTTP API；流程中的人工选择也可由客户端参数表达。",
+      "requirements": [
+        "FR-07",
+        "FR-06"
+      ],
+      "nfr": [
+        "NFR-03",
+        "NFR-05",
+        "NFR-07"
+      ],
+      "business_rules": [],
+      "notes": "SIGKILL 回归验证进程中断；不等于断电或文件系统崩溃验证。已中断操作不自动重试。",
       "basic_flow": [
-        {"id": "B1", "actor": "USR", "action": "选择诊断时间范围和输出位置。"},
-        {"id": "B2", "actor": "系统", "action": "汇总应用版本、配置摘要、运行记录和日志。"},
-        {"id": "B3", "actor": "系统", "action": "执行脱敏并展示将包含的数据类别。"},
-        {"id": "B4", "actor": "USR", "action": "确认导出。"},
-        {"id": "B5", "actor": "系统", "action": "生成压缩包并报告保存位置。"}
+        {
+          "id": "B1",
+          "actor": "CLIENT",
+          "action": "操作方发送关闭信号或重启已退出服务。"
+        },
+        {
+          "id": "B2",
+          "actor": "系统",
+          "action": "正常关闭停止接收请求和领取新作业，等待活动操作完成并持久化结果。"
+        },
+        {
+          "id": "B3",
+          "actor": "系统",
+          "action": "重启时系统把遗留 running 作业标为 failed，错误码 500 和中断说明。"
+        },
+        {
+          "id": "B4",
+          "actor": "系统",
+          "action": "系统启动 worker 按 FIFO 继续 queued 作业，客户端查询历史。"
+        }
       ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B3", "condition": "用户取消某类诊断数据", "steps": ["系统排除该类别后返回 B3。"]}
-      ],
+      "alternative_flows": [],
       "exception_flows": [
-        {"id": "E1", "from": "B2-B3", "condition": "字段无法确认脱敏", "steps": ["系统默认排除该字段并记录类别级提示。"]},
-        {"id": "E2", "from": "B5", "condition": "输出路径不可写", "steps": ["系统不保留半成品并要求重新选择位置。"]}
-      ]
-    },
-    {
-      "id": "UC-09",
-      "name": "Configure data protection",
-      "kind": "supporting",
-      "priority": "Must",
-      "goal": "为任务选择加密、解锁、压缩和打包预设。",
-      "primary_actor": "USR",
-      "supporting_actors": [],
-      "trigger": "UC-01 进入数据保护配置步骤。",
-      "preconditions": ["服务器可连接，外部请求携带有效 Bearer secret key。", "用户正在创建或编辑任务。"],
-      "success": "保存有效且可恢复的数据保护配置；启用加密时生成口令保护的文本密钥文件。",
-      "failure": "不保存无效口令、不可用算法或未完整写入的密钥文件。",
-      "includes": [],
-      "extension_points": [],
-      "extends": null,
-      "parent": null,
-      "requirements": ["FR-14", "FR-15", "FR-12"],
-      "nfr": ["NFR-03", "NFR-11", "NFR-12"],
-      "business_rules": ["口令不直接作为内容密钥。", "密钥文件不得包含口令或明文主密钥。", "恢复端按块头自动识别算法。"],
-      "notes": "被 UC-01 包含；文本密钥文件采用版本化 JSON，并以 Base64 表示二进制字段。 Web 控制台与 curl 使用同一 HTTP API；流程中的人工选择也可由客户端参数表达。",
-      "basic_flow": [
-        {"id": "B1", "actor": "USR", "action": "选择不加密或使用口令保护的文本密钥文件。"},
-        {"id": "B2", "actor": "系统", "action": "需要加密时生成随机 256 位主密钥，并要求用户设置口令和密钥文件保存位置。"},
-        {"id": "B3", "actor": "USR", "action": "选择压缩和本地/远程打包预设。"},
-        {"id": "B4", "actor": "系统", "action": "使用 Argon2id 派生保护密钥，以认证加密封装主密钥。"},
-        {"id": "B5", "actor": "系统", "action": "原子写入版本化 JSON 密钥文件，其中保存 KDF 参数、盐、随机数、密文主密钥和密钥标识。"},
-        {"id": "B6", "actor": "USR", "action": "确认算法摘要、密钥丢失风险和数据保护配置。"}
-      ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B1", "condition": "用户选择不加密", "steps": ["系统不生成密钥文件，记录无加密配置后继续 B3。"]},
-        {"id": "A2", "from": "B2", "condition": "用户选择已有密钥文件", "steps": ["系统验证文件格式和密钥标识，验证成功后继续 B3。"]}
-      ],
-      "exception_flows": [
-        {"id": "E1", "from": "B2", "condition": "口令不符合要求或两次输入不一致", "steps": ["系统拒绝确认并要求重新输入。"]},
-        {"id": "E2", "from": "B5", "condition": "密钥文件路径不可写或原子写入失败", "steps": ["系统清理临时文件并拒绝启用加密配置。"]},
-        {"id": "E3", "from": "A2", "condition": "已有密钥文件损坏或与仓库不匹配", "steps": ["系统拒绝使用该文件并保留当前配置页面。"]}
-      ]
-    },
-    {
-      "id": "UC-10",
-      "name": "Configure and preview file filters",
-      "kind": "supporting",
-      "priority": "Must",
-      "goal": "建立可解释的有序筛选规则，并在保存前预览实际匹配范围。",
-      "primary_actor": "USR",
-      "supporting_actors": ["SRC"],
-      "trigger": "UC-01 进入文件筛选配置步骤。",
-      "preconditions": ["服务器可连接，外部请求携带有效 Bearer secret key。", "任务至少有一个备份源。"],
-      "success": "保存已编译、版本化且预览通过的筛选规则集。",
-      "failure": "无效或不可执行规则不会启用。",
-      "includes": [],
-      "extension_points": [],
-      "extends": null,
-      "parent": null,
-      "requirements": ["FR-16", "FR-12"],
-      "nfr": ["NFR-04", "NFR-05", "NFR-13"],
-      "business_rules": ["最后一个匹配规则决定包含或排除。", "预览和正式扫描使用同一引擎。"],
-      "notes": "支持 glob、正则、UID/GID、时间、扩展名、大小和对象类型。 Web 控制台与 curl 使用同一 HTTP API；流程中的人工选择也可由客户端参数表达。",
-      "basic_flow": [
-        {"id": "B1", "actor": "USR", "action": "添加或调整 include/exclude 规则及条件。"},
-        {"id": "B2", "actor": "系统", "action": "编译规则并标出语法或平台能力问题。"},
-        {"id": "B3", "actor": "USR", "action": "请求预览匹配结果。"},
-        {"id": "B4", "actor": "系统", "action": "扫描样本并展示包含/排除数量、大小和决定规则。"},
-        {"id": "B5", "actor": "USR", "action": "确认规则集。"}
-      ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B4", "condition": "预览期间文件发生变化", "steps": ["系统将结果标为估算并显示扫描时间。"]}
-      ],
-      "exception_flows": [
-        {"id": "E1", "from": "B2", "condition": "glob 或正则无效", "steps": ["系统标出错误位置并禁用确认。"]},
-        {"id": "E2", "from": "B2", "condition": "用户、组或创建时间属性不可用", "steps": ["系统显示数值 ID 或拒绝不受支持的条件。"]}
-      ]
-    },
-    {
-      "id": "UC-11",
-      "name": "Validate task configuration",
-      "kind": "included",
-      "priority": "Must",
-      "goal": "在启用任务前确认配置完整、路径安全且目标能力满足要求。",
-      "primary_actor": "系统",
-      "supporting_actors": ["SRC", "TGT"],
-      "trigger": "UC-01 请求保存任务。",
-      "preconditions": ["配置字段已填写。"],
-      "success": "返回可持久化的规范化配置和警告列表。",
-      "failure": "返回字段级错误，任务不启用。",
-      "includes": [],
-      "extension_points": [],
-      "extends": null,
-      "parent": null,
-      "requirements": ["FR-01", "FR-02", "FR-03", "FR-16"],
-      "nfr": ["NFR-01", "NFR-05"],
-      "business_rules": ["源与目标危险嵌套属于阻断错误。"],
-      "notes": "被 UC-01 包含。",
-      "basic_flow": [
-        {"id": "B1", "actor": "系统", "action": "验证必填字段、计划和规则版本。"},
-        {"id": "B2", "actor": "系统", "action": "规范化路径并检查源、目标关系。"},
-        {"id": "B3", "actor": "系统", "action": "探测目标读写和所需能力。"},
-        {"id": "B4", "actor": "系统", "action": "返回成功及非阻断警告。"}
-      ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B3", "condition": "目标暂时离线但配置格式有效", "steps": ["系统返回警告并允许保存为停用状态。"]}
-      ],
-      "exception_flows": [
-        {"id": "E1", "from": "B1-B3", "condition": "字段无效、路径危险或目标能力不满足", "steps": ["系统返回定位明确的阻断错误。"]}
-      ]
-    },
-    {
-      "id": "UC-12",
-      "name": "Scan and filter source files",
-      "kind": "included",
-      "priority": "Must",
-      "goal": "得到符合规则、元数据一致且可供快照构建的文件集合。",
-      "primary_actor": "系统",
-      "supporting_actors": ["SRC"],
-      "trigger": "UC-02 开始扫描阶段。",
-      "preconditions": ["源路径存在，筛选规则已经编译。"],
-      "success": "输出文件集合、元数据和扫描统计。",
-      "failure": "输出明确的失败或跳过项目，不伪造完整扫描。",
-      "includes": [],
-      "extension_points": [],
-      "extends": null,
-      "parent": null,
-      "requirements": ["FR-05", "FR-06", "FR-16"],
-      "nfr": ["NFR-04", "NFR-08", "NFR-13"],
-      "business_rules": ["相对时间以运行开始时间为基准。", "特殊文件默认排除。"],
-      "notes": "被 UC-02 包含。",
-      "basic_flow": [
-        {"id": "B1", "actor": "系统", "action": "记录运行开始时间和规则版本。"},
-        {"id": "B2", "actor": "系统", "action": "遍历源文件树并读取必要元数据。"},
-        {"id": "B3", "actor": "系统", "action": "按顺序执行筛选规则并记录最终决定规则。"},
-        {"id": "B4", "actor": "系统", "action": "识别相对上次快照新增或变化的内容。"},
-        {"id": "B5", "actor": "系统", "action": "返回文件集合和累计统计。"}
-      ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B2", "condition": "遇到符号链接或硬链接", "steps": ["系统按任务策略保存链接关系或明确降级。"]}
-      ],
-      "exception_flows": [
-        {"id": "E1", "from": "B2", "condition": "单文件无权限或读取期间变化", "steps": ["系统按策略重试一次或跳过并记录。"]}
-      ]
-    },
-    {
-      "id": "UC-13",
-      "name": "Build and commit snapshot",
-      "kind": "included",
-      "priority": "Must",
-      "goal": "把变化内容安全转换为对象和清单，并以原子方式提交快照。",
-      "primary_actor": "系统",
-      "supporting_actors": ["TGT"],
-      "trigger": "UC-02 获得扫描结果。",
-      "preconditions": ["扫描结果有效，目标仓库可写。"],
-      "success": "所有引用对象完整写入后提交不可变快照。",
-      "failure": "未完成数据不可见为成功快照，旧快照不受影响。",
-      "includes": [],
-      "extension_points": [],
-      "extends": null,
-      "parent": null,
-      "requirements": ["FR-04", "FR-05", "FR-13", "FR-14", "FR-15"],
-      "nfr": ["NFR-01", "NFR-02", "NFR-04", "NFR-10", "NFR-11", "NFR-12"],
-      "business_rules": ["处理顺序为分块、块级压缩、可选加密、聚合 pack。"],
-      "notes": "被 UC-02 包含。",
-      "basic_flow": [
-        {"id": "B1", "actor": "系统", "action": "对变化文件执行内容定义分块并计算键控对象 ID。"},
-        {"id": "B2", "actor": "系统", "action": "复用已存在对象，对新块独立压缩并按配置认证加密。"},
-        {"id": "B3", "actor": "系统", "action": "把块聚合进临时不可变 pack 并写入目标。"},
-        {"id": "B4", "actor": "系统", "action": "生成版本化快照清单和索引；启用加密时保护元数据。"},
-        {"id": "B5", "actor": "系统", "action": "验证全部引用可读取后原子提交快照。"}
-      ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B2", "condition": "块已存在", "steps": ["系统复用对象引用，不重复写入内容。"]}
-      ],
-      "exception_flows": [
-        {"id": "E1", "from": "B2-B5", "condition": "写入、上传或认证失败", "steps": ["系统停止提交并保留旧快照。", "临时对象由清理流程回收。"]}
-      ]
-    },
-    {
-      "id": "UC-14",
-      "name": "Access backup repository",
-      "kind": "included",
-      "priority": "Must",
-      "goal": "通过统一接口安全访问本地或远程备份仓库。",
-      "primary_actor": "系统",
-      "supporting_actors": ["TGT"],
-      "trigger": "浏览、校验、恢复或保留管理需要读取仓库。",
-      "preconditions": ["任务包含目标配置。"],
-      "success": "返回通过版本和能力检查的仓库会话。",
-      "failure": "拒绝访问未知格式、错误目标或不可用仓库。",
-      "includes": [],
-      "extension_points": ["Repository is encrypted"],
-      "extends": null,
-      "parent": null,
-      "requirements": ["FR-07", "FR-08", "FR-10", "FR-13", "FR-14"],
-      "nfr": ["NFR-01", "NFR-10", "NFR-12"],
-      "business_rules": ["未知必需算法或格式版本必须明确拒绝读取。"],
-      "notes": "UC-14L 与 UC-14R 是该用例的特化。",
-      "basic_flow": [
-        {"id": "B1", "actor": "系统", "action": "根据任务目标选择仓库适配器。"},
-        {"id": "B2", "actor": "系统", "action": "读取仓库头并校验身份、格式版本和能力。"},
-        {"id": "B3", "actor": "系统", "action": "仓库加密时进入 UC-15。"},
-        {"id": "B4", "actor": "系统", "action": "返回受权限约束的仓库会话。"}
-      ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B1", "condition": "目标为本地存储", "steps": ["执行 UC-14L。"]},
-        {"id": "A2", "from": "B1", "condition": "目标为 WebDAV/S3", "steps": ["执行 UC-14R。"]}
-      ],
-      "exception_flows": [
-        {"id": "E1", "from": "B2", "condition": "仓库身份、格式或能力检查失败", "steps": ["系统拒绝建立会话并返回具体原因。"]}
-      ]
-    },
-    {
-      "id": "UC-14L",
-      "name": "Access local repository",
-      "kind": "specialization",
-      "priority": "Must",
-      "goal": "通过本地文件系统语义访问备份仓库。",
-      "primary_actor": "系统",
-      "supporting_actors": ["LOCAL"],
-      "trigger": "UC-14 选择本地目标适配器。",
-      "preconditions": ["目标路径已经挂载。"],
-      "success": "返回支持原子重命名和范围读取的本地仓库会话。",
-      "failure": "路径错误、离线或权限不足时不建立会话。",
-      "includes": [],
-      "extension_points": [],
-      "extends": null,
-      "parent": "UC-14",
-      "requirements": ["FR-02", "FR-07", "FR-08"],
-      "nfr": ["NFR-01", "NFR-04"],
-      "business_rules": ["必须核对目标身份，避免写入错误挂载点。"],
-      "notes": "特化 UC-14。",
-      "basic_flow": [
-        {"id": "B1", "actor": "系统", "action": "解析并规范化本地目标路径。"},
-        {"id": "B2", "actor": "系统", "action": "核对挂载点身份、权限和可用空间。"},
-        {"id": "B3", "actor": "系统", "action": "打开仓库并声明本地能力。"}
-      ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B2", "condition": "只读访问即可满足调用方", "steps": ["系统以只读模式建立会话。"]}
-      ],
-      "exception_flows": [
-        {"id": "E1", "from": "B2", "condition": "目标未挂载或身份不匹配", "steps": ["系统拒绝回退到同路径的其他卷。"]}
-      ]
-    },
-    {
-      "id": "UC-14R",
-      "name": "Access remote repository",
-      "kind": "specialization",
-      "priority": "Should",
-      "goal": "通过 WebDAV 或 S3 适配器访问远程备份仓库。",
-      "primary_actor": "系统",
-      "supporting_actors": ["REMOTE"],
-      "trigger": "UC-14 选择远程目标适配器。",
-      "preconditions": ["远程目标配置和凭据存在。"],
-      "success": "返回具有已探测远端能力的仓库会话。",
-      "failure": "认证、网络或能力检查失败时不建立可写会话。",
-      "includes": [],
-      "extension_points": [],
-      "extends": null,
-      "parent": "UC-14",
-      "requirements": ["FR-13"],
-      "nfr": ["NFR-03", "NFR-10", "NFR-12"],
-      "business_rules": ["网络重试必须有界，未完成上传不能成为已提交快照。"],
-      "notes": "特化 UC-14；本地备份闭环稳定后的候选扩展，按实际接入需求决定共享接口。",
-      "basic_flow": [
-        {"id": "B1", "actor": "系统", "action": "加载目标端点和凭据引用。"},
-        {"id": "B2", "actor": "系统", "action": "连接远端并完成身份验证。"},
-        {"id": "B3", "actor": "系统", "action": "探测范围读取、条件写入和列举能力。"},
-        {"id": "B4", "actor": "系统", "action": "建立带超时和重试策略的仓库会话。"}
-      ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B3", "condition": "远端缺少可选能力", "steps": ["系统选择安全兼容路径并记录性能警告。"]}
-      ],
-      "exception_flows": [
-        {"id": "E1", "from": "B2-B3", "condition": "认证失败、超时或必需能力缺失", "steps": ["系统执行有界重试后返回失败。"]}
-      ]
-    },
-    {
-      "id": "UC-15",
-      "name": "Unlock encrypted repository with text key file",
-      "kind": "extending",
-      "priority": "Must",
-      "goal": "读取口令保护的文本密钥文件，验证口令并获得仓库主密钥。",
-      "primary_actor": "USR",
-      "supporting_actors": [],
-      "trigger": "UC-14 在扩展点“仓库已加密”发现需要解锁。",
-      "preconditions": ["服务器可连接，外部请求携带有效 Bearer secret key。", "用户可以访问与仓库匹配的文本密钥文件。", "仓库头包含密钥标识。"],
-      "success": "主密钥仅在受控内存中可用于当前仓库会话。",
-      "failure": "不建立解密会话，不输出任何未经认证的数据。",
-      "includes": [],
-      "extension_points": [],
-      "extends": {"base": "UC-14", "point": "Repository is encrypted", "condition": "Repository is encrypted"},
-      "parent": null,
-      "requirements": ["FR-14", "FR-12"],
-      "nfr": ["NFR-03", "NFR-11", "NFR-12"],
-      "business_rules": ["密钥和口令不得进入日志或诊断包。", "口令和明文主密钥不得写入密钥文件。", "API secret key 仅控制 HTTP 访问，不用于派生仓库加密密钥。"],
-      "notes": "密钥文件为版本化 JSON；认证失败不区分错误口令和被篡改密钥材料。 Web 控制台与 curl 使用同一 HTTP API；流程中的人工选择也可由客户端参数表达。",
-      "basic_flow": [
-        {"id": "B1", "actor": "系统", "action": "定位任务配置引用的文本密钥文件。"},
-        {"id": "B2", "actor": "系统", "action": "读取并验证 JSON 版本、KDF 参数、盐、随机数、密文主密钥和密钥标识。"},
-        {"id": "B3", "actor": "USR", "action": "输入密钥文件口令。"},
-        {"id": "B4", "actor": "系统", "action": "使用 Argon2id 派生保护密钥并认证解包主密钥。"},
-        {"id": "B5", "actor": "系统", "action": "比对密钥文件与仓库头中的密钥标识。"},
-        {"id": "B6", "actor": "系统", "action": "返回仅供当前仓库会话使用的主密钥句柄。"}
-      ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B1", "condition": "配置引用的密钥文件已移动", "steps": ["系统请求用户重新选择密钥文件；选择后返回 B2。"]}
-      ],
-      "exception_flows": [
-        {"id": "E1", "from": "B2", "condition": "密钥文件字段缺失、格式损坏或版本不受支持", "steps": ["系统拒绝解锁并报告密钥文件不可用。"]},
-        {"id": "E2", "from": "B4", "condition": "口令错误或认证失败", "steps": ["系统清除临时密钥材料并返回统一解锁失败。"]},
-        {"id": "E3", "from": "B5", "condition": "密钥标识与仓库不匹配", "steps": ["系统清除主密钥并要求选择正确的密钥文件。"]}
-      ]
-    },
-    {
-      "id": "UC-16",
-      "name": "Cancel backup",
-      "kind": "extending",
-      "priority": "Must",
-      "goal": "用户安全终止正在运行的备份而不损坏仓库。",
-      "primary_actor": "USR",
-      "supporting_actors": [],
-      "trigger": "用户在 UC-02 的扩展点“备份运行中”选择取消。",
-      "preconditions": ["服务器可连接，外部请求携带有效 Bearer secret key。", "备份运行处于可取消阶段。"],
-      "success": "运行标记取消，未提交数据被安全处理，旧快照保持可用。",
-      "failure": "若无法立即取消，系统明确显示正在完成不可中断的原子步骤。",
-      "includes": [],
-      "extension_points": [],
-      "extends": {"base": "UC-02", "point": "Backup is running", "condition": "Backup is running"},
-      "parent": null,
-      "requirements": ["FR-06", "FR-12"],
-      "nfr": ["NFR-01", "NFR-05", "NFR-08"],
-      "business_rules": ["取消不能把部分写入标记为成功快照。"],
-      "notes": "取消为协作式，原子提交临界区不可中断。 Web 控制台与 curl 使用同一 HTTP API；流程中的人工选择也可由客户端参数表达。",
-      "basic_flow": [
-        {"id": "B1", "actor": "USR", "action": "请求取消当前运行。"},
-        {"id": "B2", "actor": "系统", "action": "记录取消请求并停止调度新的扫描和写入工作。"},
-        {"id": "B3", "actor": "系统", "action": "等待活动块到达安全边界并关闭临时 pack。"},
-        {"id": "B4", "actor": "系统", "action": "标记运行取消，释放锁并通知用户。"}
-      ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B2", "condition": "运行正处于原子提交临界区", "steps": ["系统完成或回滚提交后再继续 B4。"]}
-      ],
-      "exception_flows": [
-        {"id": "E1", "from": "B3", "condition": "临时数据清理失败", "steps": ["系统仍标记取消，并登记待恢复清理项。"]}
-      ]
-    },
-    {
-      "id": "UC-17",
-      "name": "Resolve restore conflicts",
-      "kind": "extending",
-      "priority": "Must",
-      "goal": "在目标已存在文件时按用户选择安全处理冲突。",
-      "primary_actor": "USR",
-      "supporting_actors": [],
-      "trigger": "UC-06 在扩展点“恢复目标存在冲突”发现一个或多个冲突。",
-      "preconditions": ["服务器可连接，外部请求携带有效 Bearer secret key。", "系统已计算冲突列表。"],
-      "success": "为每个冲突得到跳过、重命名或覆盖策略。",
-      "failure": "没有确认策略的文件不会覆盖目标。",
-      "includes": [],
-      "extension_points": [],
-      "extends": {"base": "UC-06", "point": "Restore target has conflicts", "condition": "Restore target has conflicts"},
-      "parent": null,
-      "requirements": ["FR-08", "FR-12"],
-      "nfr": ["NFR-01", "NFR-05", "NFR-06"],
-      "business_rules": ["默认策略为跳过，不默认覆盖。"],
-      "notes": "策略可应用于单项或本次恢复中的全部冲突。 Web 控制台与 curl 使用同一 HTTP API；流程中的人工选择也可由客户端参数表达。",
-      "basic_flow": [
-        {"id": "B1", "actor": "系统", "action": "展示冲突路径、现有文件和快照版本摘要。"},
-        {"id": "B2", "actor": "USR", "action": "选择跳过、自动重命名或覆盖。"},
-        {"id": "B3", "actor": "系统", "action": "覆盖操作时再次展示影响并请求确认。"},
-        {"id": "B4", "actor": "USR", "action": "确认冲突策略。"},
-        {"id": "B5", "actor": "系统", "action": "返回逐项策略给 UC-06。"}
-      ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B2", "condition": "用户选择应用到全部", "steps": ["系统把相同策略应用到剩余同类冲突。"]}
-      ],
-      "exception_flows": [
-        {"id": "E1", "from": "B4", "condition": "用户取消", "steps": ["系统对未决定项目使用跳过并返回 UC-06。"]}
-      ]
-    },
-    {
-      "id": "UC-18",
-      "name": "Verify restored data",
-      "kind": "included",
-      "priority": "Must",
-      "goal": "在最终放置前确认恢复内容与快照清单一致。",
-      "primary_actor": "系统",
-      "supporting_actors": [],
-      "trigger": "UC-06 完成一个临时恢复文件。",
-      "preconditions": ["临时文件写入完成且快照清单可用。"],
-      "success": "内容哈希和必要元数据满足恢复要求。",
-      "failure": "不放置校验失败的文件并删除对应临时明文。",
-      "includes": [],
-      "extension_points": [],
-      "extends": null,
-      "parent": null,
-      "requirements": ["FR-08"],
-      "nfr": ["NFR-01", "NFR-02", "NFR-11"],
-      "business_rules": ["认证成功不能替代最终文件内容哈希核对。"],
-      "notes": "被 UC-06 包含。",
-      "basic_flow": [
-        {"id": "B1", "actor": "系统", "action": "计算临时文件内容哈希。"},
-        {"id": "B2", "actor": "系统", "action": "与快照清单中的哈希和长度比较。"},
-        {"id": "B3", "actor": "系统", "action": "检查可恢复的权限、时间和链接元数据。"},
-        {"id": "B4", "actor": "系统", "action": "返回校验成功给 UC-06。"}
-      ],
-      "alternative_flows": [
-        {"id": "A1", "from": "B3", "condition": "目标文件系统不支持部分元数据", "steps": ["系统记录明确降级警告并允许内容恢复。"]}
-      ],
-      "exception_flows": [
-        {"id": "E1", "from": "B2", "condition": "哈希或长度不一致", "steps": ["系统删除临时文件并返回校验失败。"]}
+        {
+          "id": "E1",
+          "from": "B2",
+          "condition": "SIGKILL 或异常退出无法完成正常关闭",
+          "steps": [
+            "下次启动采用中断恢复；操作外部副作用可能仍在。"
+          ]
+        },
+        {
+          "id": "E2",
+          "from": "B2-B3",
+          "condition": "worker、结果写入或恢复数据库失败",
+          "steps": [
+            "服务失败退出，明确输出原因。"
+          ]
+        }
       ]
     }
   ]

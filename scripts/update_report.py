@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import statistics
 from collections.abc import Iterable, Sequence
+from datetime import datetime
 from pathlib import Path
+from shutil import copy2
 from typing import Any
 
 from docx import Document
@@ -29,28 +33,7 @@ GENERATED_DIR = ROOT / "docs" / "report" / "generated"
 GENERATED_CONTENT_WIDTH_CM = 14.0
 BODY_FONT_SIZE_PT = 10.5
 TABLE_FONT_SIZE_PT = 10.5
-FUNCTIONAL_REQUIREMENTS = (
-    ("FR-01", "管理备份任务", "创建、编辑、启停和删除任务；删除任务不默认删除备份数据。"),
-    ("FR-02", "配置源与目标", "支持多个本地源；拒绝危险嵌套或不可写目标。"),
-    ("FR-03", "计划执行", "同一服务器进程支持手动、每日和每周计划；浏览器关闭后仍可执行。"),
-    ("FR-04", "生成快照", "成功运行产生唯一、不可变且原子提交的快照。"),
-    ("FR-05", "增量存储", "只写入新增或变化内容，未变化内容复用。"),
-    ("FR-06", "进度与取消", "展示阶段、文件数和字节数；取消结果明确。"),
-    ("FR-07", "完整性校验", "重新计算内容哈希并定位缺失或损坏对象。"),
-    ("FR-08", "浏览与恢复", "按快照浏览并恢复，默认不覆盖已有文件。"),
-    ("FR-09", "历史与日志", "记录运行时间、结果、统计和脱敏错误摘要。"),
-    ("FR-10", "保留策略", "保留最近 N 个快照，安全清理无引用内容。"),
-    ("FR-11", "通知", "成功、失败或需要操作时发送可配置通知。"),
-    ("FR-12", "HTTP API", "Web 控制台与 curl 共用 Bearer secret key 认证的 API，返回统一 JSON。"),
-    ("FR-13", "远程目标", "本地闭环稳定后，按实际需要接入 WebDAV 或 S3 兼容存储。"),
-    (
-        "FR-14",
-        "加密与解密",
-        "支持无加密或口令保护的文本密钥文件；认证失败不输出文件。",
-    ),
-    ("FR-15", "打包与压缩", "块级压缩及可选加密后聚合 pack。"),
-    ("FR-16", "文件筛选", "按路径、用户/组、时间、类型和大小筛选并预览。"),
-)
+VERIFICATION_PATH = ROOT / "docs" / "report" / "verification.json"
 
 
 def _find_section_cell(document: DocumentType, title: str) -> _Cell:
@@ -377,29 +360,34 @@ def _add_use_case(
     _use_case_table(document, anchor, metadata, events)
 
 
-def _draw_roadmap(path: Path) -> None:
+def _draw_workflow(path: Path) -> None:
     font = ImageFont.load_default(size=25)
-    canvas = Image.new("RGB", (1800, 520), "white")
+    canvas = Image.new("RGB", (1800, 430), "white")
     draw = ImageDraw.Draw(canvas)
     labels = (
-        "Architecture\nprobe",
-        "Filtering and\nbackup",
-        "Compression,\nencryption, restore",
-        "Incremental backup\nand retention",
-        "Web management\nworkflow",
-        "macOS release",
+        "HTTP request\n202 + job ID",
+        "Durable FIFO\njob queue",
+        "Stream / hash\nZstd / sync",
+        "Commit backup\nmetadata",
+        "List published\nbackups",
+        "Restore / verify\nsync / result",
     )
-    for index, label in enumerate(labels):
+    for index, text in enumerate(labels):
         x = 40 + index * 292
         draw.rounded_rectangle(
-            (x, 180, x + 245, 300), radius=18, outline="#2563EB", width=4, fill="#EAF2FF"
+            (x, 100, x + 245, 220), radius=18, outline="#2563EB", width=4, fill="#EAF2FF"
         )
         draw.multiline_text(
-            (x + 122, 240), label, font=font, fill="#172033", anchor="mm", align="center"
+            (x + 122, 160), text, font=font, fill="#172033", anchor="mm", align="center"
         )
         if index:
-            draw.line((x - 47, 240, x, 240), fill="#61708A", width=5)
-    draw.text((1050, 390), "Candidate extensions: WebDAV / S3", font=font, fill="#6D28D9")
+            draw.line((x - 47, 160, x, 160), fill="#61708A", width=5)
+    draw.text(
+        (40, 310),
+        "Implemented local full-backup workflow; no scheduling or incremental reuse",
+        font=font,
+        fill="#172033",
+    )
     canvas.save(path)
 
 
@@ -407,203 +395,197 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        f"文档版本：{model['version']}（需求分析阶段）    更新日期：{model['updated']}",
+        f"文档版本：{model['version']}（当前实现）    更新日期：{model['updated']}",
     )
     _heading(document, anchor, "1. 任务概述")
     _heading(document, anchor, "1.1 引言", 2)
     _paragraph(
         document,
         anchor,
-        "本项目设计并实现一款以 macOS 为首发平台的个人数据备份软件。"
-        "软件通过可计划执行、可校验、可浏览历史且可恢复的快照，解决手工复制容易遗漏、"
-        "重复占用空间且无法确认恢复可靠性的问题。",
+        "bak 是面向个人用户的本地文件备份软件。当前提供全量备份、已发布备份列表和完整恢复，"
+        "通过流式 Zstd 压缩、原始大小与 SHA-256 "
+        "校验验证恢复结果，并以持久化作业提供可查询的执行状态。",
     )
     _heading(document, anchor, "1.2 综合描述", 2)
     _paragraph(
         document,
         anchor,
-        "产品只发布一个 Rust 可执行文件 data-backup，启动后根据工作目录中的 config.json "
-        "运行 Web 服务器。内置 Web 控制台与 curl 等自动化客户端使用相同的 HTTP API，"
-        "通过 secret key 认证。服务器、接口类型与后续备份和调度逻辑位于同一 package 和进程。",
+        "产品发布单一 Rust 可执行文件 bak，读取工作目录中的 "
+        "config.json，运行 axum/Tokio HTTP 服务。"
+        "用户和自动化脚本通过 curl 等 HTTP 客户端调用 Bearer 认证接口。后台 worker 顺序执行作业；"
+        "当前没有 Web 控制台、计划调度、增量备份或仓库加密。"
+        "本报告描述已实现行为，不把未来目标列为当前能力。",
     )
-    _paragraph(
-        document,
-        anchor,
-        "当前已经实现启动参数、配置验证、HTTP 服务、内置控制台、API 认证和状态查询。"
-        "备份、恢复、计划调度、持久化、压缩与加密均未实现；下列功能及详细用例描述目标需求，"
-        "不表示已经具备相应业务能力。WebDAV 和 S3 是本地闭环稳定后的候选扩展。",
-    )
-    for text in (
-        "管理多个备份任务及计划。",
-        "预览文件筛选规则。",
-        "选择压缩、加密与打包预设。",
-        "生成、校验、浏览和恢复增量快照。",
-        "记录状态、历史、通知和脱敏诊断信息。",
-    ):
-        _paragraph(document, anchor, text, bullet=True)
-    _heading(document, anchor, "1.3 运行环境", 2)
+    _heading(document, anchor, "1.3 运行环境与限制", 2)
     _table(
         document,
         anchor,
-        ("项目", "需求"),
+        ("项目", "当前条件"),
         (
-            ("平台", "Apple Silicon 或 Intel Mac；首发 macOS"),
-            ("内存", "建议 8 GiB；使用流式 I/O"),
-            ("存储", "本地磁盘或已挂载外部存储"),
-            ("管理入口", "浏览器访问内置控制台；curl 等客户端调用 HTTP API"),
-            ("网络", "本地默认绑定 loopback；候选远程目标需要网络连接"),
+            (
+                "平台",
+                "程序采用 Rust；备份与恢复执行当前支持 Unix，"
+                "实际验证平台为 macOS。非 Unix 操作返回 501。",
+            ),
+            ("存储", "已有源、仓库和恢复目标目录；SQLite 使用本地文件系统。"),
+            ("部署", "同一工作目录仅运行一个服务实例；HTTP 默认示例监听 loopback。"),
+            ("客户端", "curl 或自动化 HTTP 客户端；无独立业务 CLI 或图形控制台。"),
+            ("数据范围", "普通文件、目录和空目录；不支持源内符号链接、权限或修改时间恢复。"),
         ),
         (2.8, 11.2),
     )
     _heading(document, anchor, "2. 功能需求")
-    _heading(document, anchor, "2.1 功能划分", 2)
+    _heading(document, anchor, "2.1 已实现功能", 2)
     _table(
         document,
         anchor,
-        ("编号", "名称", "需求及验收摘要"),
-        FUNCTIONAL_REQUIREMENTS,
+        ("编号", "名称", "行为与验收摘要"),
+        ((r["id"], r["name"], r["description"]) for r in model["functional_requirements"]),
         (1.6, 2.6, 9.8),
     )
     _heading(document, anchor, "2.2 系统用例", 2, page_break=True)
     _paragraph(
         document,
         anchor,
-        "模型采用一张系统总览和两张专题细图。include 箭头指向被包含用例，"
-        "extend 箭头指向基础用例，空心三角箭头表示泛化。Web 控制台用户与自动化客户端"
-        "共享“管理操作方”角色，均通过已认证 HTTP API 完成相同操作。",
+        "用例围绕当前公开操作组织。自动化客户端与个人用户通过相同 HTTP 接口操作；"
+        "创建备份和恢复均先接受持久化作业，再通过作业查询获得完成结果。"
+        "include 表示完成流程中的结果查询。",
     )
-    figure_widths = {
-        "overview": GENERATED_CONTENT_WIDTH_CM,
-        "configuration-execution": GENERATED_CONTENT_WIDTH_CM,
-        "restore-maintenance": GENERATED_CONTENT_WIDTH_CM,
-    }
     for figure, diagram in enumerate(model["diagrams"], 1):
         _picture(
             document,
             anchor,
             GENERATED_DIR / f"use-case-{diagram['id']}.png",
             f"图 {figure}  {diagram['title']}",
-            width=figure_widths[diagram["id"]],
+            width=GENERATED_CONTENT_WIDTH_CM,
         )
     for index, case in enumerate(model["use_cases"], 1):
         _add_use_case(document, anchor, model, case, index)
     _heading(document, anchor, "2.3 功能需求追踪矩阵", 2, page_break=True)
     cases = case_map(model)
-    trace_rows = []
-    for number in range(1, 17):
-        requirement = f"FR-{number:02d}"
-        covered = [case["id"] for case in model["use_cases"] if requirement in case["requirements"]]
-        trace_rows.append((requirement, _names(covered, cases)))
-    _table(document, anchor, ("功能需求", "覆盖用例"), trace_rows, (2.5, 11.5))
-    _heading(document, anchor, "3. 外部接口需求")
-    _heading(document, anchor, "3.1 用户界面", 2)
-    _paragraph(
-        document,
-        anchor,
-        "当前 Web 控制台支持输入 secret key 并查询服务器状态。后续扩展概览、任务向导、"
-        "任务详情、运行历史、快照浏览、恢复向导和设置；危险操作需要确认。"
-        "控制台与 curl 调用相同 API，服务器返回 JSON；不提供独立业务 CLI。",
-    )
-    _heading(document, anchor, "3.2 软件与硬件接口", 2)
-    _paragraph(
-        document,
-        anchor,
-        "当前 HTTP 服务使用 Axum 与 Tokio。GET / 返回内嵌 HTML 与 JavaScript；所有 /api/ "
-        "请求使用 Authorization: Bearer <secret_key>。未来业务通过普通 Rust 调用在同进程内协作，"
-        "通过文件系统访问源与本地仓库；无进程间 IPC。",
-    )
     _table(
         document,
         anchor,
-        ("当前接口", "行为"),
+        ("功能需求", "覆盖用例"),
         (
-            ("GET /", "公开获取 Web 控制台；页面内存保存 key，刷新、关闭或 Disconnect 后清除。"),
             (
-                "GET /api/status",
-                '{"status":"ok","package_version":"0.1.0","backup_available":false}；必须认证。',
+                r["id"],
+                _names(
+                    [c["id"] for c in model["use_cases"] if r["id"] in c["requirements"]], cases
+                ),
+            )
+            for r in model["functional_requirements"]
+        ),
+        (2.5, 11.5),
+    )
+    _heading(document, anchor, "3. 外部接口与使用")
+    _heading(document, anchor, "3.1 HTTP 接口", 2)
+    _table(
+        document,
+        anchor,
+        ("接口", "行为"),
+        (
+            ("GET /", "公开文本 bak is running；不是 Web 控制台。"),
+            ("GET /api/status", '认证后返回 {"version":"0.1.0"}；GET 路由也支持 HEAD。'),
+            (
+                "POST /api/backups",
+                "JSON: source、repository；入库后返回 202、Location 和 queued 作业。",
             ),
             (
-                "认证与错误",
-                "缺失、错误或重复 Authorization header 返回 401；已认证的未知 API 返回 JSON 404。",
+                "GET /api/backups?repository=PATH",
+                "返回 backups 摘要数组；created_at 降序、同时间 backup_id 升序。",
+            ),
+            (
+                "POST /api/restores",
+                "JSON: repository、backup_id、destination；返回 202 和持久化作业。",
+            ),
+            (
+                "GET /api/jobs/{job_id}",
+                "已有作业返回 200，状态为 queued/running/succeeded/failed；不存在返回 404。",
             ),
         ),
-        (3.3, 10.7),
+        (5.0, 9.0),
     )
-    _heading(document, anchor, "3.3 启动参数与配置手册", 2)
+    _paragraph(
+        document,
+        anchor,
+        "所有 /api/ 请求使用 Authorization: Bearer <secret_key>。接受响应包含 job_id、kind、state、"
+        "result、error；成功备份结果为 backup_id，"
+        "成功恢复结果为 destination。失败作业查询仍返回 HTTP 200，"
+        "error.code 表示操作错误。请求错误返回相应 HTTP 状态和统一 error.code/error.message JSON；"
+        "JSON 请求上限 2 MiB，非法输入 400，未认证 401，过大 413，媒体类型不支持 415。",
+    )
+    _heading(document, anchor, "3.2 启动与配置", 2)
     _table(
         document,
         anchor,
-        ("启动 flag", "用途"),
+        ("参数或字段", "说明"),
         (
-            ("--version / -v", "显示软件版本后退出，不读取配置或启动服务器。"),
-            ("--help / -h", "显示帮助、配置手册及示例后退出，不读取配置或启动服务器。"),
-            ("--working-directory / -d <PATH>", "设置进程工作目录，自动读取目录下的 config.json。"),
+            ("--help / -h；--version / -v", "打印帮助或版本后退出。"),
+            ("--working-directory / -d <PATH>", "指定已有工作目录；相对请求路径以该目录解析。"),
+            ("listen", "IP:port，例如 127.0.0.1:8080；配置仅在启动时读取。"),
+            ("secret_key", "必需且非空；用于 API 认证，与备份加密无关。"),
+            (
+                "web_ui",
+                "对象包含 enabled、archive_url、directory；界面尚未实现，保持 enabled=false。",
+            ),
+            ("logging", "废弃字段；出现此字段启动失败，应删除。作业历史固定存入 SQLite。"),
         ),
         (5.4, 8.6),
     )
     _paragraph(
         document,
         anchor,
-        "默认使用启动时的当前目录；相对 -d 路径以启动目录解析，之后的相对路径以新工作目录解析。"
-        "支持 --working-directory=<PATH>，含空格的路径需加引号。程序没有业务子命令。"
-        "未知参数或缺少目录参数以退出码 2 报错；工作目录或配置无效、端口占用时以非零状态退出。",
+        "示例：mkdir -p working-directory-example/source working-directory-example/repository；"
+        "cargo run -- -d working-directory-example。示例配置含公开测试 key，实际使用应更换。"
+        "启动错误输出诊断并非零退出；当前 config 允许其他未知字段，不应声称拒绝所有未知字段。",
     )
+    _heading(document, anchor, "3.3 持久化与操作生命周期", 2)
+    _paragraph(
+        document,
+        anchor,
+        "工作目录 jobs.sqlite3 保存 FIFO 队列与终态历史；"
+        "仓库 repository.sqlite3 保存备份头与有序条目。"
+        "backups/<backup_id>/ 镜像保存源相对路径，"
+        "文件保留原名但内容为 Zstd 压缩数据。空目录有独立条目。"
+        "压缩文件与目录同步后，元数据事务一次提交；只有提交的头记录定义已发布备份。",
+    )
+    _paragraph(
+        document,
+        anchor,
+        "恢复要求已有空目标且不与仓库重叠，预先校验全部条目路径，再以 "
+        "create_new 写入并验证解压大小和 SHA-256。"
+        "正常关闭停止接收请求与领取作业，完成活动操作并留下 "
+        "queued 作业。重启将遗留 running 标为失败，"
+        "不自动重放，再继续 queued 作业。客户端断开不取消已提交作业，重试 POST 会产生新作业。",
+    )
+    _heading(document, anchor, "4. 非功能约束")
     _table(
         document,
         anchor,
-        ("config.json 字段", "要求"),
-        (
-            ("listen", "必需；IP:port，例如 127.0.0.1:8080 或 [::1]:8080。"),
-            ("secret_key", "必需；非空、无空格的可见 ASCII 字符，正式使用时随机生成。"),
-        ),
-        (3.3, 10.7),
+        ("编号", "名称", "约束"),
+        ((r["id"], r["name"], r["description"]) for r in model["nonfunctional_requirements"]),
+        (1.8, 2.6, 9.6),
     )
     _paragraph(
         document,
         anchor,
-        '示例配置：{"listen":"127.0.0.1:8080","secret_key":"example-local-test-key"}。'
-        "配置仅在启动时读取，修改后需重启；拒绝缺失字段和未知字段，诊断不输出 key。"
-        "原 DATA_BACKUP_CONFIG 不再使用，旧 data-backup.json 改为工作目录中的 config.json。"
-        "Ctrl-C 或 SIGTERM 停止接收连接并等待当前 HTTP 请求结束。",
+        "SQLite 使用 WAL、synchronous=FULL、外键、5 秒 busy timeout 和最多 4 个连接。"
+        "事务分别覆盖单个数据库，外部文件与作业库、仓库库不共享事务；"
+        "失败可留下未发布目录或部分恢复输出。"
+        "不检测备份期间的源修改、不自动清理、不导入旧 JSON manifest/JSONL。HTTP 没有内置 TLS。",
+    )
+    _heading(document, anchor, "5. 当前闭环与后续展望")
+    _draw_workflow(GENERATED_DIR / "implemented-workflow.png")
+    _picture(
+        document, anchor, GENERATED_DIR / "implemented-workflow.png", "图 4  当前全量备份与恢复闭环"
     )
     _paragraph(
         document,
         anchor,
-        "仓库提供 working-directory-example/config.json，可运行 cargo run -- -d "
-        "working-directory-example。示例 key 为公开本地测试值；该目录仅跟踪 config.json，"
-        "其他测试文件与运行产物由 .gitignore 忽略，自用 config.json 也默认忽略。",
+        "下一阶段优先处理文件一致性与失败清理。Web 控制台、非 Unix 目录同步、权限与时间恢复、调度、"
+        "增量、保留策略、筛选、加密和远程存储属于后续展望，当前均不作为已实现功能验收。",
     )
-    _paragraph(
-        document,
-        anchor,
-        "API 调用示例：curl --fail-with-body -H 'Authorization: Bearer example-local-test-key' "
-        "http://127.0.0.1:8080/api/status。正式配置应更换为随机 key。",
-    )
-    _heading(document, anchor, "4. 其它非功能性需求")
-    _heading(document, anchor, "4.1 性能与可靠性", 2)
-    _paragraph(
-        document,
-        anchor,
-        "扫描、匹配、压缩和加密使用有界并发与流式 I/O；写入临时区域并原子提交，"
-        "中断不得破坏已提交快照。",
-    )
-    _heading(document, anchor, "4.2 安全性", 2)
-    _paragraph(
-        document,
-        anchor,
-        "当前 API 以 secret key 控制访问，key 不进入 URL、响应或诊断；HTTP 无内置 TLS，"
-        "远程访问应使用 HTTPS 反向代理。API secret key 不用于备份加密。"
-        "目标仓库设计使用随机主密钥、内存困难 KDF 和认证加密；错误口令、篡改或截断不得产生"
-        "最终文件，日志和诊断包不得包含口令、主密钥或可复用认证材料。仓库加密待实现。",
-    )
-    _heading(document, anchor, "5. 项目规划")
-    _paragraph(
-        document,
-        anchor,
-        "项目由一人敏捷开发，按小批量持续交付推进，不设置固定日历期限。每个迭代形成可运行增量并满足完成定义后再拉取下一目标。",
-    )
-    _draw_roadmap(GENERATED_DIR / "delivery-roadmap.png")
-    _picture(document, anchor, GENERATED_DIR / "delivery-roadmap.png", "图 4  单人敏捷交付路线")
 
 
 def _design_trace(diagram: SystemDiagram) -> str:
@@ -683,9 +665,9 @@ def _populate_system_design(
     _paragraph(
         document,
         anchor,
-        "本章在需求模型基础上说明开发环境、系统构件边界、静态类关系和关键动态交互。"
-        "当前为单一 Rust package 与服务器二进制，已实现配置启动、Web 控制台、认证与状态 API。"
-        "容器与模块图对应当前架构；领域概念及备份业务时序描述待实现目标，不要求预建抽象框架。",
+        "本章对应当前 bak 代码，"
+        "说明单一服务进程、模块职责、实际结构体与枚举、数据库和关键动态交互。"
+        "报告中的类图是 Rust 类型和模块的静态表达，不要求新增运行时类或抽象框架。",
     )
     _heading(document, anchor, "1. 开发环境和工具")
     _table(
@@ -693,29 +675,37 @@ def _populate_system_design(
         anchor,
         ("类别", "选择与用途"),
         (
-            ("开发平台", "macOS、Apple Silicon arm64、zsh 与 Apple Command Line Tools。"),
-            ("编程语言", "Rust 1.98.0、2024 edition；Python 3.13 仅用于文档生成。"),
-            ("构建工具", "Cargo 单一 package、Cargo.lock；uv 管理 Python 文档工具。"),
-            ("调试工具", "LLDB、RUST_BACKTRACE 与 tracing 结构化诊断。"),
             (
-                "第三方库",
-                "Axum 0.8.9、Tokio 1.53.2、serde、serde_json、thiserror、"
-                "tracing、tracing-subscriber。",
+                "开发平台",
+                "macOS / Apple Silicon；Rust 1.98.0、2024 edition，Python >=3.13 文档工具。",
+            ),
+            (
+                "构建与依赖",
+                "Cargo 与 Cargo.lock；uv 管理文档依赖；"
+                "axum、Tokio、SQLx/SQLite、Zstd、SHA-256、serde。",
             ),
             (
                 "版本控制",
-                "jj 与 Git colocated、GitHub 和 gh；短期 bookmark、PR、审查和 Squash Merge。",
+                "Git、GitHub 与 gh；main 为唯一长期分支，短分支和草稿 PR，默认 squash merge。",
             ),
             (
-                "性能分析",
-                "samply、cargo-flamegraph、Xcode Instruments、/usr/bin/time；"
-                "profiling profile 保留调试符号。",
+                "测试",
+                "cargo test、Proptest、Reqwest；"
+                "真实文件系统、SQLite 和独立服务进程；Python unittest 验证文档。",
             ),
             (
-                "集成与部署",
-                "scripts/check.py 本地 CI；cargo build --release 后人工验收，暂不配置 CD。",
+                "静态分析",
+                "Clippy（拒绝警告）、Ruff、BasedPyright；scripts/check.py 提供统一检查入口。",
             ),
-            ("Web 控制台", "HTML 与 JavaScript 通过 include_str! 内嵌，无独立前端服务或桌面壳。"),
+            (
+                "性能与内存",
+                "优化且保留符号的 profiling 构建；time、RSS 采样、Instruments "
+                "Time Profiler / Allocations / Leaks。",
+            ),
+            (
+                "文档",
+                "结构化模型、D2 0.9.0 / ELK、python-docx、Pillow；修改模型后统一生成图表与报告。",
+            ),
         ),
         (3.2, 10.8),
     )
@@ -779,13 +769,181 @@ def _populate_system_design(
         )
     _heading(document, anchor, "5. 设计边界")
     for boundary in (
-        "部署只发布 data-backup；控制台、HTTP API、后续备份与调度位于同一服务器进程。",
-        "业务类图仅表达概念与约束，按实际行为增加模块，多个调用方共享稳定模式后再引入抽象。",
-        "压缩、加密、打包、仓库格式与持久化尚需技术验证；读取端应明确处理格式和算法版本。",
-        "文本密钥文件只保存认证加密后的主密钥及 KDF 参数，不保存口令或明文主密钥。",
-        "当前仅有认证状态 API；全部备份业务待实现，WebDAV 与 S3 属于候选扩展。",
+        "一个 bak 进程；HTTP、worker 和阻塞文件操作通过普通 Rust 调用与 Tokio 协作。",
+        "API 只经 JobManager 门面访问业务；私有模块不为测试暴露。",
+        "本地镜像文件格式已实现；Zstd 与 SHA-256 元数据有格式版本，旧 JSON manifest 不读取或迁移。",
+        "作业和仓库分属两个数据库；元数据提交与作业终态提交之间存在独立失败边界。",
+        "当前无 Web 控制台、调度、取消、增量或加密；未验证断电行为和非 Unix 操作执行。",
     ):
         _paragraph(document, anchor, boundary, bullet=True)
+
+
+def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
+    _heading(document, anchor, "1. 测试目标与环境")
+    _paragraph(
+        document,
+        anchor,
+        "验证公开接口、数据正确性、模块协作和生命周期，并建立单机性能与内存分析基线。"
+        "测试范围限于当前已实现的本地全量备份与恢复，不以测试数量或短时无故障替代可靠性结论。",
+    )
+    _heading(document, anchor, "2. 测试类型与方法")
+    _table(
+        document,
+        anchor,
+        ("类型", "方法与覆盖"),
+        (
+            ("单元测试", "路径重叠等纯逻辑及输入边界检查；测试级别按职责判断，不按文件位置判断。"),
+            (
+                "组件集成测试",
+                "内联测试使用真实文件系统、SQLite、Zstd "
+                "和 SHA-256，验证备份、恢复、仓库和作业协作。",
+            ),
+            (
+                "应用集成 / 端到端测试",
+                "tests/server.rs 运行实际二进制，以 HTTP "
+                "验证认证、完整闭环、历史、响应、SIGTERM 与 SIGKILL 恢复。",
+            ),
+            (
+                "属性测试",
+                "Proptest 是生成输入的技术，可用于不同测试级别；组件属性 "
+                "32 例、HTTP 属性 8 例，固定种子、缩减与回归重放。",
+            ),
+            (
+                "性能测试",
+                "优化构建；预热后按三类数据集测三轮，"
+                "记录作业耗时、吞吐、压缩大小、HTTP 延迟和峰值内存。",
+            ),
+            (
+                "稳定性测试",
+                "约 10 分钟重复备份、列表、恢复与内容比对，"
+                "采样状态查询与 RSS，最后重启查询终态历史。",
+            ),
+            (
+                "健壮性与恢复测试",
+                "非法路径、占用目标、损坏载荷、元数据错误、数据库失败、正常关闭与强制退出；"
+                "不等同于断电测试。",
+            ),
+            (
+                "静态代码分析",
+                "Clippy 检查 Rust；Ruff 与 BasedPyright 检查 Python；记录退出码和真实检查结果。",
+            ),
+            (
+                "CPU 与内存分析",
+                "Instruments 分开采集 Time "
+                "Profiler、Allocations、Leaks；工具不可用或失败时记录原因。",
+            ),
+        ),
+        (3.3, 10.7),
+    )
+    _heading(document, anchor, "3. 功能与失败场景")
+    _table(
+        document,
+        anchor,
+        ("场景", "预期与证据"),
+        (
+            (
+                "备份 → 列表 → 重启 → 恢复",
+                "路径、目录和字节一致；源与载荷不变；只列出发布元数据；成功历史跨重启保留。",
+            ),
+            (
+                "占用恢复目标",
+                "作业失败、错误码 400；目标、源、仓库不变；生成文件和空目录，失败结果跨重启保留。",
+            ),
+            ("压缩边界与路径", "0/1 字节、缓冲区边界、多块内容、Unicode 与空目录正确恢复。"),
+            (
+                "路径与完整性错误",
+                "恢复写入前拒绝危险元数据路径；大小、哈希或压缩数据不一致不能报告成功。",
+            ),
+            ("SIGTERM", "活动作业完成，queued 留给下一次启动；HTTP 在活动操作期间响应。"),
+            (
+                "SIGKILL",
+                "重启将 interrupted running 标为 "
+                "failed/500，queued 继续、已完成结果不变、中断作业不重放。",
+            ),
+        ),
+        (4.2, 9.8),
+    )
+    _heading(document, anchor, "4. 实际执行与工具分析结果")
+    if not VERIFICATION_PATH.exists():
+        _paragraph(document, anchor, "尚无本次验证记录；不能将计划或模板示例作为通过证据。")
+        return
+    evidence = json.loads(VERIFICATION_PATH.read_text())
+    _paragraph(
+        document,
+        anchor,
+        f"记录日期：{evidence['recorded_at']}；环境：{evidence['environment']}；"
+        f"被测生产源码树：{evidence['production_revision']}。完整命令与指标见 verification.json。",
+    )
+    _table(
+        document,
+        anchor,
+        ("检查", "结果"),
+        ((row["command"], row["result"]) for row in evidence.get("checks", [])),
+        (8.0, 6.0),
+    )
+    _heading(document, anchor, "4.1 性能基线", 2)
+    _paragraph(
+        document,
+        anchor,
+        "每类数据先预热一次再测三轮；端到端作业耗时包括入队、轮询和文件/目录同步。"
+        "数据生成与正确性比对在计时外。采集带状态查询和 RSS 采样开销，缓存未清空；不是纯算法基准。",
+    )
+    rows = []
+    for item in evidence.get("performance", []):
+        size = item["source_bytes"] / (1024 * 1024)
+        backup = statistics.median(run["backup_seconds"] for run in item["runs"])
+        restore = statistics.median(run["restore_seconds"] for run in item["runs"])
+        rows.append(
+            (
+                item["dataset"],
+                f"{size:.2f} MiB",
+                f"{backup:.3f} / {restore:.3f} s",
+                f"{size / backup:.1f} / {size / restore:.1f} MiB/s",
+                f"{item['sampled_peak_rss_bytes'] / (1024 * 1024):.1f} MiB",
+            )
+        )
+    _table(
+        document,
+        anchor,
+        ("数据集", "源大小", "备份/恢复中位耗时", "备份/恢复吞吐", "采样峰值 RSS"),
+        rows,
+        (2.6, 2.0, 3.2, 3.8, 2.4),
+    )
+    _heading(document, anchor, "4.2 稳定性观察", 2)
+    stable = evidence.get("stability", {})
+    if stable:
+        _paragraph(
+            document,
+            anchor,
+            f"持续 {stable['duration_seconds']:.1f} 秒，"
+            f"完成 {stable['cycles']} 个备份/列表/恢复循环；"
+            f"内容一致性 {stable['correctness']}，重启历史检查 {stable['restart_history']}。"
+            f"HTTP 状态查询 P95 为 {stable['http_status_latency']['p95_ms']:.2f} ms，"
+            f"峰值采样 RSS 为 {stable['sampled_peak_rss_bytes'] / (1024 * 1024):.1f} MiB。",
+        )
+    _heading(document, anchor, "4.3 Instruments CPU 与内存分析", 2)
+    signing = evidence.get("instrument_signing_diagnosis", {})
+    if signing:
+        _paragraph(document, anchor, f"采集故障复核：{signing['cause']}修正方式：{signing['fix']}")
+    for item in evidence.get("instruments", []):
+        _paragraph(
+            document,
+            anchor,
+            f"{item['template']}：{item['status']}。"
+            f"{item.get('analysis', item.get('error', '原始 trace 已保存。'))}",
+        )
+    _heading(document, anchor, "4.4 正常进程内存快照", 2)
+    memory = evidence.get("memory_analysis", {})
+    _paragraph(document, anchor, memory.get("analysis", "尚未取得正常进程内存快照。"))
+    _heading(document, anchor, "5. 结果分析与限制")
+    for text in evidence.get("findings", []) + evidence.get("limitations", []):
+        _paragraph(document, anchor, text, bullet=True)
+    _paragraph(
+        document,
+        anchor,
+        "只有实际执行成功的场景标为通过。当前无讨论确定的性能合格线；单机短时观察不证明长期稳定性、"
+        "无泄漏或断电安全。工具失败或采样范围不足需保留记录。生产代码优化和发现的问题另行跟踪。",
+    )
 
 
 def synchronize_report(report_path: Path = REPORT_PATH) -> None:
@@ -815,11 +973,24 @@ def synchronize_report(report_path: Path = REPORT_PATH) -> None:
     design_anchor = design_cell.add_paragraph()
     _populate_system_design(document, design_anchor, design_model)
     design_anchor._element.getparent().remove(design_anchor._element)
+    test_cell = _find_section_cell(document, "软件测试报告（20分）")
+    test_title = _find_cell_paragraph(test_cell, "软件测试报告（20分）")
+    _clear_after_paragraph(test_cell, test_title)
+    test_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for run in test_title.runs:
+        _font_run(run, size=16, bold=True)
+    test_anchor = test_cell.add_paragraph()
+    _populate_tests(document, test_anchor)
+    test_anchor._element.getparent().remove(test_anchor._element)
     document.save(str(report_path))
 
 
 def main() -> None:
     """Synchronize D2 diagrams and the existing report through one entry point."""
+    if REPORT_PATH.exists():
+        backup = ROOT / "target" / "report-backups" / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        backup.mkdir(parents=True)
+        copy2(REPORT_PATH, backup / REPORT_PATH.name)
     synchronize_report()
 
 

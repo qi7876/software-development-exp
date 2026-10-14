@@ -4,71 +4,75 @@ direction: down
 (** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
 (** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
 (** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
-diagram: "Single-server Containers: Current Architecture and\nExtension Boundaries" {
+diagram: "bak: Runtime and Local Storage" {
   style.font-size: 44
   style.fill: white
   style.stroke: transparent
-  package_0: "External clients" {
+  package_0: "Clients" {
     style.font-size: 36
     style.fill: white
-    Browser: "<<client>>\nBrowser / web console" {
-      shape: rectangle
+    Client: "<<HTTP client>>\nUsers / curl" {
+      shape: person
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    Curl: "<<client>>\ncurl / automation scripts" {
+  }
+  package_1: "Single server process" {
+    style.font-size: 36
+    style.fill: white
+    Server: "<<implemented>>\nbak\naxum + Tokio + SQLx" {
       shape: rectangle
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
   }
-  package_1: "Application runtime" {
+  package_2: "Working directory" {
     style.font-size: 36
     style.fill: white
-    Server: "<<single server process>>\ndata-backup\nAxum + Tokio\nConsole / API / planned\nbackup and scheduling" {
-      shape: rectangle
-      style.stroke: "#2563EB"
-      style.fill: "#EFF6FF"
-    }
-  }
-  package_2: "Server working directory" {
-    style.font-size: 36
-    style.fill: white
-    Config: "<<startup configuration>>\nconfig.json" {
+    Config: "<<startup input>>\nconfig.json" {
       shape: stored_data
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    Meta: "<<planned>>\nSQLite metadata" {
+    Jobs: "<<durable queue and\nhistory>>\njobs.sqlite3" {
       shape: cylinder
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
   }
-  package_3: "Backup storage (planned)" {
+  package_3: "Local filesystem" {
     style.font-size: 36
     style.fill: white
-    Source: "<<planned>>\nSource file system" {
+    Source: "<<regular files and\ndirectories>>\nSource directory" {
       shape: stored_data
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    Local: "<<planned>>\nLocal backup repository" {
+    Dest: "<<verified output>>\nEmpty restore directory" {
       shape: stored_data
-      style.stroke: "#2563EB"
-      style.fill: "#EFF6FF"
-    }
-    Remote: "<<candidate extension>>\nWebDAV / S3" {
-      shape: cloud
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
   }
-  package_0.Browser -> package_1.Server: "GET / console; /api/ + Bearer key"
-  package_0.Curl -> package_1.Server: "HTTP API + Bearer key / JSON"
-  package_1.Server -> package_2.Config: "Read listen / secret_key at startup"
-  package_1.Server -> package_2.Meta: "Tasks / runs / indexes" {style.stroke-dash: 5}
-  package_1.Server -> package_3.Source: "Stream source data" {style.stroke-dash: 5}
-  package_1.Server -> package_3.Local: "Snapshots / verification / restoration" {style.stroke-dash: 5}
-  package_1.Server -> package_3.Remote: "Planned remote repository access" {style.stroke-dash: 5}
+  package_4: "Local repository" {
+    style.font-size: 36
+    style.fill: white
+    Repo: "<<published metadata>>\nrepository.sqlite3" {
+      shape: cylinder
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Files: "<<mirrored Zstd files>>\nbackups/<backup_id>/" {
+      shape: stored_data
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+  }
+  package_0.Client -> package_1.Server: "HTTP + Bearer / JSON"
+  package_1.Server -> package_2.Config: "Read at startup"
+  package_1.Server -> package_2.Jobs: "Queue / claim / complete / recover"
+  package_1.Server -> package_3.Source: "Stream input"
+  package_1.Server -> package_4.Repo: "Publish / list / read metadata"
+  package_1.Server -> package_4.Files: "Write compressed / read payloads"
+  package_1.Server -> package_3.Dest: "Restore and synchronize"
 }

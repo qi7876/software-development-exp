@@ -4,77 +4,80 @@ direction: down
 (** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
 (** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
 (** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
-diagram: "Startup and HTTP Interface: Logical Classes\n(Implemented)" {
+diagram: "Facade, Modules and Data Access" {
   style.font-size: 44
   style.fill: white
   style.stroke: transparent
-  package_0: "Startup" {
+  package_0: "HTTP and lifecycle" {
     style.font-size: 36
     style.fill: white
-    Arguments: "<<enum>>\nArguments" {
+    Server: "<<module>>\nserver" {
       shape: class
-      "Help"
-      "Version"
-      "Serve { working_directory: PathBuf }"
-      "parse(args)": "Result<Arguments, String>"
+      "+ serve(config, jobs)": "Result"
     }
-    Config: "<<struct>>\nConfig" {
+    API: "<<module>>\nserver::api" {
       shape: class
-      "listen": "SocketAddr"
-      "secret_key": "String"
-      "load(path)": "Result<Config, ConfigError>"
-      "validate()": "Result<(), ConfigError>"
-    }
-    ConfigError: "<<enum>>\nConfigError" {
-      shape: class
-      "Read { path, source }"
-      "Parse { path, line, column }"
-      "SecretKey"
-    }
-    Startup: "<<module>>\nmain.rs" {
-      shape: class
-      "main()": "ExitCode"
-      "run(working_directory)": "Result<(), Error>"
+      "+ router(jobs, key)": "Router"
     }
   }
-  package_1: "HTTP service" {
+  package_1: "Jobs and operations" {
     style.font-size: 36
     style.fill: white
-    HTTP: "<<module>>\nserver.rs" {
+    Manager: "<<struct>>\nJobManager" {
       shape: class
-      "router(config)": "Router"
-      "authenticate(request, next)": "Response"
-      "console()": "Html"
-      "status()": "Json<Status>"
+      "- pool": "SqlitePool"
+      "- working_directory": "PathBuf"
+      "- wake": "Arc<Notify>"
+      "+ submit(request)": "JobInfo"
+      "+ get_job(id)": "Option<JobInfo>"
+      "+ list_backups(path)": "Vec<RepoBackupInfo>"
+      "+ run_worker(stop)": "Result"
+      "+ close()": "Void"
     }
-    Status: "<<struct>>\nStatus" {
+    Backup: "<<module>>\nbackup" {
       shape: class
-      "status": "str = ok"
-      "package_version": "str"
-      "backup_available": "bool = false"
+      "+ run(source, repository, backup_id)": "Result"
+    }
+    Restore: "<<module>>\nrestore" {
+      shape: class
+      "+ run(repository, backup_id, destination)": "Result"
+    }
+    Repo: "<<module>>\nrepository" {
+      shape: class
+      "+ Manifest::read(path, id)": "Manifest"
+      "+ Manifest::write()": "Result"
+      "+ list(path)": "Vec<RepoBackupInfo>"
     }
   }
-  package_0.Startup -> package_0.Arguments: "Parse" {
+  package_0.Server -> package_0.API: "router" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }
-  package_0.Startup -> package_0.Config: "Read" {
+  package_0.Server -> package_1.Manager: "supervise worker" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }
-  package_0.Config -> package_0.ConfigError: "Return on failure" {
+  package_0.API -> package_1.Manager: "facade calls" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }
-  package_0.Startup -> package_1.HTTP: "Build router and run" {
+  package_1.Manager -> package_1.Backup: "blocking execution" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }
-  package_1.HTTP -> package_0.Config: "Get authentication key" {
+  package_1.Manager -> package_1.Restore: "blocking execution" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }
-  package_1.HTTP -> package_1.Status: "Serialize JSON" {
+  package_1.Manager -> package_1.Repo: "listing" {
+    target-arrowhead.shape: arrow
+    style.stroke-dash: 5
+  }
+  package_1.Backup -> package_1.Repo: "write metadata" {
+    target-arrowhead.shape: arrow
+    style.stroke-dash: 5
+  }
+  package_1.Restore -> package_1.Repo: "read metadata" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }

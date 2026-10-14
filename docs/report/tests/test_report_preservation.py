@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from shutil import copy2
 
@@ -41,6 +42,22 @@ def _protected_prefix(path: Path) -> tuple[bytes, ...]:
     raise AssertionError("requirements section marker is missing")
 
 
+def _protected_document(path: Path) -> bytes:
+    """Mask generated chapter content and compare everything else in the Word body."""
+    body = deepcopy(Document(str(path)).element.body)
+    chapter_titles = {"需求分析说明书（10分）", "系统设计文档（20分）", "软件测试报告（20分）"}
+    for cell in body.iter():
+        if cell.tag != "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc":
+            continue
+        for index, child in enumerate(list(cell)):
+            text = "".join(node.text or "" for node in child.iter() if node.tag.endswith("}t"))
+            if text.strip() in chapter_titles:
+                for generated in list(cell)[index:]:
+                    cell.remove(generated)
+                break
+    return body.xml.encode()
+
+
 class ReportPreservationTests(unittest.TestCase):
     def test_sync_preserves_cover_and_front_matter(self) -> None:
         if not REPORT_PATH.is_file():
@@ -49,8 +66,23 @@ class ReportPreservationTests(unittest.TestCase):
             temporary_report = Path(directory) / "report.docx"
             copy2(REPORT_PATH, temporary_report)
             before = _protected_prefix(temporary_report)
+            document_before = _protected_document(temporary_report)
             synchronize_report(temporary_report)
             self.assertEqual(_protected_prefix(temporary_report), before)
+            self.assertEqual(_protected_document(temporary_report), document_before)
+            document = Document(str(temporary_report))
+            text = "\n".join(
+                node.text or "" for node in document.element.iter() if node.tag.endswith("}t")
+            )
+            for required in [
+                "单元测试",
+                "组件集成测试",
+                "稳定性测试",
+                "静态代码分析",
+                "Instruments",
+            ]:
+                self.assertIn(required, text)
+            self.assertNotIn("backup_available=false", text)
 
 
 if __name__ == "__main__":
