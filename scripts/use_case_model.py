@@ -8,7 +8,12 @@ from typing import Any, NotRequired, TypedDict, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = ROOT / "docs" / "report" / "use-cases.yaml"
-FR_IDS = {f"FR-{index:02d}" for index in range(1, 17)}
+
+
+class Requirement(TypedDict):
+    id: str
+    name: str
+    description: str
 
 
 class Actor(TypedDict):
@@ -74,6 +79,8 @@ class Model(TypedDict):
     updated: str
     author: str
     system: str
+    functional_requirements: list[Requirement]
+    nonfunctional_requirements: list[Requirement]
     actors: list[Actor]
     diagrams: list[Diagram]
     use_cases: list[UseCase]
@@ -102,8 +109,20 @@ def validate_model(model: Model) -> None:
     diagrams = model.get("diagrams", [])
     case_ids = [case.get("id", "") for case in cases]
     actor_ids = [actor.get("id", "") for actor in actors]
-    if len(cases) != 20 or len(case_ids) != len(set(case_ids)):
-        raise ValueError("the model must contain exactly 20 unique use cases")
+    if not cases or len(case_ids) != len(set(case_ids)):
+        raise ValueError("the model must contain unique use cases")
+    requirement_ids: dict[str, set[str]] = {}
+    for field in ["functional_requirements", "nonfunctional_requirements"]:
+        requirements = model.get(field, [])
+        ids = [requirement["id"] for requirement in requirements]
+        if not ids or len(ids) != len(set(ids)):
+            raise ValueError(f"{field}: expected unique requirements")
+        for requirement in requirements:
+            for key in ["id", "name", "description"]:
+                _require_text(cast(dict[str, Any], requirement), key, field)
+        requirement_ids[field] = set(ids)
+    fr_ids = requirement_ids["functional_requirements"]
+    nfr_ids = requirement_ids["nonfunctional_requirements"]
     if len(actor_ids) != len(set(actor_ids)):
         raise ValueError("actor IDs must be unique")
     case_by_id = {case["id"]: case for case in cases}
@@ -156,11 +175,14 @@ def validate_model(model: Model) -> None:
                 if branch["id"] != f"{prefix}{index}" or not branch["from"] or not branch["steps"]:
                     raise ValueError(f"{owner}: malformed branch {branch['id']}")
         covered.update(case["requirements"])
-    unknown_requirements = covered - FR_IDS
+        unknown_nfr = set(case["nfr"]) - nfr_ids
+        if unknown_nfr:
+            raise ValueError(f"{owner}: unknown nonfunctional requirements: {sorted(unknown_nfr)}")
+    unknown_requirements = covered - fr_ids
     if unknown_requirements:
         raise ValueError(f"unknown functional requirements: {sorted(unknown_requirements)}")
-    if covered != FR_IDS:
-        raise ValueError(f"uncovered functional requirements: {sorted(FR_IDS - covered)}")
+    if covered != fr_ids:
+        raise ValueError(f"uncovered functional requirements: {sorted(fr_ids - covered)}")
     for actor in actors:
         parent = actor.get("parent")
         if parent is not None and parent not in actor_id_set:

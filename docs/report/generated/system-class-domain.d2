@@ -4,110 +4,66 @@ direction: down
 (** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
 (** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
 (** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
-diagram: "Backup Domain: Conceptual Classes (Planned)" {
+diagram: "Job and Repository Data Types" {
   style.font-size: 44
   style.fill: white
   style.stroke: transparent
-  package_0: "Backup domain (planned)" {
+  package_0: "Job data" {
     style.font-size: 36
     style.fill: white
-    BackupTask: "<<aggregate root>>\nBackup task" {
+    JobInfo: "<<struct>>\nJobInfo" {
       shape: class
-      "+ taskId": "TaskId"
-      "+ enabled": "Boolean"
-      "+ schedule": "ScheduleConfig"
-      "+ protection": "ProtectionConfig"
-      "+ retention": "RetentionPolicy"
-      "+ repository": "RepositoryConfig"
-      "+ validate()": "ValidationResult"
+      "+ job_id": "String"
+      "+ request": "JobRequest"
+      "+ state": "JobState"
     }
-    SourceSpec: "<<value object>>\nData source" {
+    JobRequest: "<<enum>>\nJobRequest" {
       shape: class
-      "+ rootPath": "Path"
-      "+ symlinkPolicy": "SymlinkPolicy"
+      "+ Backup { source, repository }"
+      "+ Restore { repository, backup_id, destination }"
     }
-    FilterRule: "<<configuration>>\nFilter rule" {
+    JobState: "<<enum>>\nJobState" {
       shape: class
-      "+ mode": "IncludeOrExclude"
-      "+ order": "NonNegativeInt"
-      "+ condition": "FilterCondition"
-    }
-    BackupRun: "<<entity>>\nBackup run" {
-      shape: class
-      "+ runId": "RunId"
-      "+ status": "RunStatus"
-      "+ cancel()": "CancelResult"
-    }
-    Snapshot: "<<aggregate root>>\nSnapshot" {
-      shape: class
-      "+ snapshotId": "SnapshotId"
-      "+ manifestHash": "Digest"
-      "+ commit()": "Void"
-    }
-    FileEntry: "<<entity>>\nFile entry" {
-      shape: class
-      "+ relativePath": "Path"
-      "+ size": "UInt64"
-    }
-    ChunkRef: "<<value object>>\nChunk reference" {
-      shape: class
-      "+ digest": "Digest"
-      "+ packId": "PackId"
-      "+ range": "OffsetAndLength"
-      "+ codec / cipher": "AlgorithmId"
-    }
-    RestoreRequest: "<<entity>>\nRestore request" {
-      shape: class
-      "+ snapshotId": "SnapshotId"
-      "+ selectedPaths": "Path[]"
-      "+ targetRoot": "Path"
-      "+ conflictPolicy": "ConflictPolicy"
-    }
-    RestoreResult: "<<value object>>\nRestore result" {
-      shape: class
-      "+ status": "RestoreStatus"
-      "+ restored": "UInt64"
-      "+ skipped": "UInt64"
-      "+ failed": "UInt64"
+      "+ Queued"
+      "+ Running"
+      "+ Succeeded": "JobResult"
+      "+ Failed": "JobError"
     }
   }
-  package_0.BackupTask <- package_0.SourceSpec: "Defines sources" {
+  package_1: "Repository data" {
+    style.font-size: 36
+    style.fill: white
+    Manifest: "<<struct>>\nManifest" {
+      shape: class
+      "+ backup_id": "String"
+      "+ created_at": "String"
+      "+ format_version": "u32"
+      "+ entries": "Vec<ManifestEntry>"
+    }
+    Entry: "<<enum>>\nManifestEntry" {
+      shape: class
+      "+ File { path, original_size, checksum }"
+      "+ Directory { path }"
+    }
+    Summary: "<<struct>>\nRepoBackupInfo" {
+      shape: class
+      "+ backup_id": "String"
+      "+ created_at": "String"
+    }
+  }
+  package_0.JobInfo <- package_0.JobRequest: "request" {
     source-arrowhead.label: "1"
-    target-arrowhead.label: "1..*"
-    source-arrowhead.shape: diamond
-    source-arrowhead.style.filled: true
-  }
-  package_0.BackupTask <- package_0.BackupRun: "Creates runs" {
-    source-arrowhead.label: "1"
-    target-arrowhead.label: "0..*"
-    source-arrowhead.shape: diamond
-    source-arrowhead.style.filled: false
-  }
-  package_0.BackupRun -- package_0.Snapshot: "Creates on success" {
-    source-arrowhead.label: "1"
-    target-arrowhead.label: "0..1"
-  }
-  package_0.Snapshot <- package_0.FileEntry: "Manifest" {
-    source-arrowhead.label: "1"
-    target-arrowhead.label: "0..*"
-    source-arrowhead.shape: diamond
-    source-arrowhead.style.filled: true
-  }
-  package_0.FileEntry <- package_0.ChunkRef: "Content references" {
-    source-arrowhead.label: "1"
-    target-arrowhead.label: "0..*"
-    source-arrowhead.shape: diamond
-    source-arrowhead.style.filled: true
-  }
-  package_0.RestoreRequest -- package_0.Snapshot: "Selects" {
-    source-arrowhead.label: "0..*"
     target-arrowhead.label: "1"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
   }
-  package_0.RestoreRequest -- package_0.RestoreResult: "Produces" {
+  package_0.JobInfo <- package_0.JobState: "state" {
     source-arrowhead.label: "1"
-    target-arrowhead.label: "0..1"
+    target-arrowhead.label: "1"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
   }
-  package_0.BackupTask <- package_0.FilterRule: "Ordered filter rules" {
+  package_1.Manifest <- package_1.Entry: "ordered entries" {
     source-arrowhead.label: "1"
     target-arrowhead.label: "0..*"
     source-arrowhead.shape: diamond

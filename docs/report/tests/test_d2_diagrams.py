@@ -62,11 +62,12 @@ class D2DiagramTests(unittest.TestCase):
                 for element in diagram["elements"]:
                     self.assertTrue(any(element["name"] in value for value in text))
                     for attribute in element["attributes"]:
+                        member = attribute.strip().removeprefix("+ ").removeprefix("- ")
                         if "{" in attribute:
-                            self.assertIn(attribute, text)
+                            self.assertIn(member, text)
                         else:
                             name, separator, member_type = attribute.partition(":")
-                            self.assertIn(name.strip().removeprefix("+ "), text)
+                            self.assertIn(name.strip().removeprefix("+ ").removeprefix("- "), text)
                             if separator:
                                 self.assertIn(member_type.strip(), text)
                     for operation in element["operations"]:
