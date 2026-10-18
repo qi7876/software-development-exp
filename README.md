@@ -115,10 +115,11 @@ The next work is file consistency and cleanup after failed or interrupted operat
 
 ## TODOs
 
+- Hybrid full-backup storage: group small files into independently compressed `tar.zst` packs and compress large files individually. Close a pack when its accumulated uncompressed file size reaches a target; close the final pack at end of traversal even if it is below target. Keep each file within one pack, allow the last file to exceed the target, and impose a file-count limit for empty or tiny files. Large files do not close a pending pack. Stream pack contents without buffering the whole pack in memory. Record file locations, original sizes, SHA-256 checksums, and empty directories in backup metadata; restore each pack in one pass. Choose size and count thresholds using representative data; 32 MiB is an initial candidate, not a fixed requirement. This is a future format change; current backups remain unchanged.
 - Web console, controlled by `web_ui.enabled`, after the core local workflow is complete.
 - Directory synchronization support for non-Unix backup and restore execution.
 - Permissions, modification times, symbolic links, and other advanced restore capabilities.
-- Scheduled jobs, incremental backups, retention policies, file filtering, and repository encryption. Consider WebDAV / S3 after the local workflow is stable. Mobile clients, real-time synchronization, and multi-user collaboration are outside the current scope.
+- Scheduled jobs, retention policies, file filtering, and repository encryption. Consider WebDAV / S3 after the local workflow is stable. Incremental backups are not planned. Mobile clients, real-time synchronization, and multi-user collaboration are outside the current scope.
 
 ## License
 
