@@ -17,10 +17,10 @@ struct AppState {
     secret_key: String,
 }
 
-pub fn router(jobs: JobManager, secret_key: String) -> Router {
+pub fn router(jobs: JobManager, secret_key: String, web_ui_enabled: bool) -> Router {
     let state = AppState { jobs, secret_key };
     Router::new()
-        .route("/", get(|| async { "bak is running" }))
+        .merge(super::ui::router(web_ui_enabled))
         .route(
             "/api/status",
             get(|| async { Json(json!({"version": env!("CARGO_PKG_VERSION")})) }),
@@ -28,6 +28,7 @@ pub fn router(jobs: JobManager, secret_key: String) -> Router {
         .route("/api/backups", get(list_backups).post(start_backup))
         .route("/api/restores", post(start_restore))
         .route("/api/jobs/{job_id}", get(get_job))
+        .route("/api/jobs", get(list_jobs))
         .fallback(|| async { JobError::new(StatusCode::NOT_FOUND, "route not found") })
         .method_not_allowed_fallback(|| async {
             JobError::new(StatusCode::METHOD_NOT_ALLOWED, "method not allowed")
@@ -209,6 +210,51 @@ async fn get_job(State(state): State<AppState>, request: Request) -> Result<Resp
     Ok(Json(job.to_json()?).into_response())
 }
 
+async fn list_jobs(State(state): State<AppState>, request: Request) -> Result<Response, JobError> {
+    let mut limit = None;
+    let mut before = None;
+    for (key, value) in url::form_urlencoded::parse(request.uri().query().unwrap_or("").as_bytes())
+    {
+        match key.as_ref() {
+            "limit" if limit.is_none() => {
+                limit = Some(
+                    value
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|value| (1..=100).contains(value))
+                        .ok_or_else(|| {
+                            JobError::new(
+                                StatusCode::BAD_REQUEST,
+                                "limit must be between 1 and 100",
+                            )
+                        })?,
+                );
+            }
+            "before" if before.is_none() => {
+                before = Some(
+                    value
+                        .parse::<i64>()
+                        .ok()
+                        .filter(|value| *value > 0)
+                        .ok_or_else(|| {
+                            JobError::new(
+                                StatusCode::BAD_REQUEST,
+                                "before must be a positive integer cursor",
+                            )
+                        })?,
+                );
+            }
+            _ => {
+                return Err(JobError::new(
+                    StatusCode::BAD_REQUEST,
+                    "unknown or duplicate job listing parameter",
+                ));
+            }
+        }
+    }
+    Ok(Json(state.jobs.list_jobs(limit.unwrap_or(20), before).await?).into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,9 +293,40 @@ mod tests {
     {
         let directory = TestDirectory::new()?;
         let jobs = JobManager::open(directory.path().to_owned()).await?;
-        let app = router(jobs.clone(), "test-key".into());
+        let app = router(jobs.clone(), "test-key".into(), false);
         let cases = [
             ("GET", "/api/status", "", "", "", 401),
+            ("GET", "/api/jobs", "", "", "", 401),
+            ("GET", "/api/jobs?limit=0", "Bearer test-key", "", "", 400),
+            ("GET", "/api/jobs?limit=101", "Bearer test-key", "", "", 400),
+            ("GET", "/api/jobs?limit=abc", "Bearer test-key", "", "", 400),
+            ("GET", "/api/jobs?before=-1", "Bearer test-key", "", "", 400),
+            ("GET", "/api/jobs?before=0", "Bearer test-key", "", "", 400),
+            (
+                "GET",
+                "/api/jobs?before=9223372036854775808",
+                "Bearer test-key",
+                "",
+                "",
+                400,
+            ),
+            (
+                "GET",
+                "/api/jobs?limit=1&limit=2",
+                "Bearer test-key",
+                "",
+                "",
+                400,
+            ),
+            (
+                "GET",
+                "/api/jobs?before=1&before=2",
+                "Bearer test-key",
+                "",
+                "",
+                400,
+            ),
+            ("GET", "/api/jobs?unknown=1", "Bearer test-key", "", "", 400),
             ("GET", "/api", "", "", "", 401),
             ("GET", "/api/", "", "", "", 404),
             ("GET", "/api/unknown", "", "", "", 401),
@@ -383,10 +460,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn embedded_console_is_optional_and_api_stays_authenticated() -> Result<(), Box<dyn Error>>
+    {
+        let directory = TestDirectory::new()?;
+        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        for enabled in [false, true] {
+            let app = router(jobs.clone(), "test-key".into(), enabled);
+            let response = app
+                .clone()
+                .oneshot(request("GET", "/", "", "", vec![])?)
+                .await?;
+            assert_eq!(response.status(), StatusCode::OK);
+            let content_type = response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .ok_or("missing content type")?
+                .to_str()?
+                .to_owned();
+            let body =
+                String::from_utf8(to_bytes(response.into_body(), usize::MAX).await?.to_vec())?;
+            if enabled {
+                assert!(content_type.starts_with("text/html"));
+                assert!(body.contains("/ui/app.js"));
+                assert!(!body.contains("test-key"));
+            } else {
+                assert_eq!(body, "bak is running");
+            }
+            for (path, expected_type) in [
+                ("/ui/app.js", "text/javascript"),
+                ("/ui/styles.css", "text/css"),
+                ("/ui/favicon.svg", "image/svg+xml"),
+            ] {
+                let response = app
+                    .clone()
+                    .oneshot(request("GET", path, "", "", vec![])?)
+                    .await?;
+                assert_eq!(
+                    response.status(),
+                    if enabled {
+                        StatusCode::OK
+                    } else {
+                        StatusCode::NOT_FOUND
+                    }
+                );
+                if enabled {
+                    assert!(
+                        response.headers()[header::CONTENT_TYPE]
+                            .to_str()?
+                            .starts_with(expected_type)
+                    );
+                    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+                    assert!(
+                        response.headers()["content-security-policy"]
+                            .to_str()?
+                            .contains("frame-ancestors 'none'")
+                    );
+                }
+            }
+            let response = app
+                .oneshot(request("GET", "/api/jobs", "", "", vec![])?)
+                .await?;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
+        jobs.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn oversized_json_and_head_requests() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
         let jobs = JobManager::open(directory.path().to_owned()).await?;
-        let app = router(jobs.clone(), "test-key".into());
+        let app = router(jobs.clone(), "test-key".into(), false);
         let response = app
             .clone()
             .oneshot(request(
@@ -442,7 +586,7 @@ mod tests {
         let directory = TestDirectory::new()?;
         let jobs = JobManager::open(directory.path().to_owned()).await?;
         jobs.close().await;
-        let app = router(jobs, "test-key".into());
+        let app = router(jobs, "test-key".into(), false);
         let response = app
             .oneshot(request(
                 "POST",

@@ -1,6 +1,6 @@
 # Course Report Materials
 
-These materials describe the current `bak` implementation. The requirements, logical design, and software test report cover the local full-backup workflow: service configuration, authenticated HTTP operations, durable FIFO jobs, published backup listing, verified restore, graceful shutdown, and interrupted-job recovery. Unimplemented features appear only in a short outlook.
+These materials describe the local full-backup milestone before the embedded browser console was added. The requirements, logical design, and software test report cover service configuration, authenticated HTTP operations, durable FIFO jobs, published backup listing, verified restore, graceful shutdown, and interrupted-job recovery. The console and paginated task-history API are documented in the current root README and maintained architecture views; these course models and recorded measurements have not been regenerated for that change.
 
 The project's maintained architecture views are [C1](../architecture/system-context.md) and [C2](../architecture/containers.md). See the root [README](../../README.md) for usage and development. Course class and sequence diagrams express the existing Rust types, modules, and interactions; they do not prescribe additional classes, services, or frameworks.
 

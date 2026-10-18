@@ -2,6 +2,8 @@
 
 `bak` runs as a single Rust binary. axum serves HTTP on Tokio; a supervised background worker executes one backup or restore at a time. SQLx provides async SQLite access. Blocking operation code runs through Tokio's blocking task pool, allowing the HTTP service to answer status and job queries during execution.
 
+When `web_ui.enabled` is true, axum serves HTML, CSS, and JavaScript embedded at compile time. There is no frontend build or runtime asset download. Public console assets call the same authenticated API as other clients; the key stays in page memory. The console polls task history every three seconds. The history API pages by SQLite insertion sequence, returns request paths and recorded timestamps, and uses string cursors to preserve integer precision in JavaScript. State changes are read afresh on each page request. Browser content is rendered as text, and the assets carry a restrictive content security policy.
+
 The service reads configuration from the working directory and owns `jobs.sqlite3` there. HTTP handlers commit jobs to SQLite before acknowledging them with HTTP 202 and a Location header. SQLite is the authoritative FIFO queue and history; a Tokio notification wakes the worker, without owning any job data. The worker atomically claims the oldest queued job, commits its running state, executes without holding a database transaction, and commits the outcome. A database constraint allows only one running job.
 
 ```text

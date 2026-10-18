@@ -324,3 +324,6 @@ jobs.sqlite3-shm
 repository.sqlite3
 repository.sqlite3-wal
 repository.sqlite3-shm
+
+# Optional browser-test dependencies
+/web/node_modules/

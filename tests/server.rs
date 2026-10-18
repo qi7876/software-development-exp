@@ -453,6 +453,61 @@ async fn occupied_destination_is_preserved(
 }
 
 #[tokio::test]
+async fn job_history_paginates_without_duplicates_and_survives_restart() -> TestResult {
+    let mut server = TestServer::start().await?;
+    assert_eq!(
+        server.get("/api/jobs").await?,
+        json!({"jobs": [], "next_cursor": null})
+    );
+    let mut ids = Vec::new();
+    for source in ["missing-first", "missing-second", "missing-third"] {
+        let id = server
+            .submit(
+                "/api/backups",
+                json!({"source": source, "repository": "repo with space"}),
+            )
+            .await?;
+        server.wait_job(&id, false).await?;
+        ids.push(id);
+    }
+    let first = server.get("/api/jobs?limit=2").await?;
+    assert_eq!(first["jobs"][0]["job_id"], ids[2]);
+    assert_eq!(first["jobs"][1]["job_id"], ids[1]);
+    let item = &first["jobs"][0];
+    assert_eq!(
+        item["request"],
+        json!({"kind": "Backup", "source": "missing-third", "repository": "repo with space"})
+    );
+    assert!(item["queued_at"].is_i64());
+    assert!(item["started_at"].as_i64() >= item["queued_at"].as_i64());
+    assert!(item["finished_at"].as_i64() >= item["started_at"].as_i64());
+    assert_eq!(item["state"], "failed");
+    assert!(
+        item["error"]["message"]
+            .as_str()
+            .ok_or("missing error")?
+            .contains("missing-third")
+    );
+    let cursor = first["next_cursor"].as_str().ok_or("missing cursor")?;
+    let new_id = server.backup().await?;
+    server.wait_job(&new_id, false).await?;
+    let second = server
+        .get(&format!("/api/jobs?limit=2&before={cursor}"))
+        .await?;
+    assert_eq!(second["jobs"].as_array().ok_or("missing jobs")?.len(), 1);
+    assert_eq!(second["jobs"][0]["job_id"], ids[0]);
+    assert!(second["next_cursor"].is_null());
+    let history = server.get("/api/jobs").await?;
+    assert_eq!(
+        history["jobs"].as_array().ok_or("missing history")?.len(),
+        4
+    );
+    server.restart().await?;
+    assert_eq!(server.get("/api/jobs").await?, history);
+    server.stop().await
+}
+
+#[tokio::test]
 async fn startup_authentication_and_failed_job_reporting() -> TestResult {
     let mut server = TestServer::start().await?;
     let response = server.client.get(server.url("/api/status")).send().await?;

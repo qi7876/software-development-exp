@@ -101,6 +101,44 @@ impl JobManager {
             .map_err(|error| JobError::internal(format!("backup listing task failed: {error}")))?
     }
 
+    pub(crate) async fn list_jobs(
+        &self,
+        limit: u32,
+        before: Option<i64>,
+    ) -> Result<Value, JobError> {
+        let mut rows =
+            sqlx::query("SELECT * FROM jobs WHERE sequence < ? ORDER BY sequence DESC LIMIT ?")
+                .bind(before.unwrap_or(i64::MAX))
+                .bind(i64::from(limit) + 1)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|error| JobError::internal(format!("cannot list jobs: {error}")))?;
+        let has_more = rows.len() > limit as usize;
+        rows.truncate(limit as usize);
+        let mut entries = Vec::with_capacity(rows.len());
+        let mut cursor = None;
+        for row in rows {
+            cursor = Some(row.try_get::<i64, _>("sequence")?);
+            let queued_at = row.try_get::<i64, _>("queued_at")?;
+            let started_at = row.try_get::<Option<i64>, _>("started_at")?;
+            let finished_at = row.try_get::<Option<i64>, _>("finished_at")?;
+            let job = JobInfo::from_row(row)?;
+            let mut entry = job.to_json()?;
+            entry["request"] = serde_json::to_value(&job.request)?;
+            entry["queued_at"] = json!(queued_at);
+            entry["started_at"] = json!(started_at);
+            entry["finished_at"] = json!(finished_at);
+            entries.push(entry);
+        }
+        // Strings avoid losing SQLite integer precision in browser clients.
+        let next_cursor = if has_more {
+            cursor.map(|value| value.to_string())
+        } else {
+            None
+        };
+        Ok(json!({"jobs": entries, "next_cursor": next_cursor}))
+    }
+
     async fn claim(&self) -> Result<Option<JobInfo>, JobError> {
         let row = sqlx::query("UPDATE jobs SET state = 'running', started_at = ? WHERE sequence = (SELECT sequence FROM jobs WHERE state = 'queued' ORDER BY sequence LIMIT 1) AND state = 'queued' RETURNING *")
             .bind(timestamp()?).fetch_optional(&self.pool).await

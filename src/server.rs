@@ -1,4 +1,5 @@
 mod api;
+mod ui;
 use crate::{config::Config, jobs::JobManager};
 use std::error::Error;
 use tokio::sync::watch;
@@ -12,16 +13,19 @@ pub(crate) async fn serve(config: Config, jobs: JobManager) -> Result<(), Box<dy
     let worker_jobs = jobs.clone();
     let worker_stop = stop.subscribe();
     let mut worker = tokio::spawn(async move { worker_jobs.run_worker(worker_stop).await });
-    let server = axum::serve(listener, api::router(jobs.clone(), config.secret_key))
-        .with_graceful_shutdown(async move {
-            // Sender closure also means the owner has stopped the service.
-            while !*server_stop.borrow() {
-                if server_stop.changed().await.is_err() {
-                    break;
-                }
+    let server = axum::serve(
+        listener,
+        api::router(jobs.clone(), config.secret_key, config.web_ui.enabled),
+    )
+    .with_graceful_shutdown(async move {
+        // Sender closure also means the owner has stopped the service.
+        while !*server_stop.borrow() {
+            if server_stop.changed().await.is_err() {
+                break;
             }
-        })
-        .into_future();
+        }
+    })
+    .into_future();
     tokio::pin!(server);
     let mut worker_finished = false;
     let mut server_finished = false;

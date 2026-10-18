@@ -1,13 +1,13 @@
 # bak
 
-`bak` is a cross-platform file backup manager for individual users, designed to provide reliable, verifiable local backups that can be restored. A single binary runs an axum HTTP service on Tokio. Users interact with it through curl using a Bearer secret key; a web console is planned for later.
+`bak` is a file backup manager for individual users, designed to provide reliable, verifiable local backups that can be restored. A single binary runs an axum HTTP service on Tokio and includes a browser console. Users access backups, restores, and durable task history through the console or curl using a Bearer secret key. The current MVP supports backup and restore execution on Unix.
 
 ## Development and usage
 
 Install the Rust toolchain specified in `rust-toolchain.toml`. Install uv to run the complete local checks.
 
 ```shell
-mkdir -p working-directory-example/source working-directory-example/repository
+mkdir -p working-directory-example/source working-directory-example/repository working-directory-example/restored
 cargo run -- -d working-directory-example
 curl -H 'Authorization: Bearer example-local-test-key' http://127.0.0.1:8080/api/status
 uv run scripts/check.py
@@ -15,17 +15,43 @@ uv run scripts/check.py
 
 Specify an existing working directory containing `config.json`. Supported command-line options are `--help` / `-h`, `--version` / `-v`, and `--working-directory` / `-d`.
 
-Configuration contains `listen`, a nonempty `secret_key`, and `web_ui` settings; see [the example](working-directory-example/config.json). Keep `web_ui.enabled` false while the console is unimplemented. Relative request paths and the web UI directory resolve against the working directory. The former `logging` section must be removed: supplying it prevents startup with an explanation. SQLite job history replaces optional JSONL logs.
+Configuration contains `listen`, a nonempty `secret_key`, and optional `web_ui` settings; see [the example](working-directory-example/config.json). Set `web_ui.enabled` to true to serve the embedded console; omission defaults to false. The example enables it. No asset downloads, frontend build, or separate web server are needed. The obsolete `web_ui.archive_url` and `web_ui.directory` fields are accepted but ignored. Relative request paths resolve against the working directory. The former `logging` section must be removed: supplying it prevents startup with an explanation. SQLite job history replaces optional JSONL logs.
+
+## Browser console
+
+With the example service running, open <http://127.0.0.1:8080/> and enter `example-local-test-key` (replace the example key in your own configuration). The console is available without authentication; all data and operation APIs still require the key. The browser keeps the key only in page memory, clears the password input after connection, and does not use cookies or browser storage. Reloading or disconnecting requires entering it again; already submitted tasks continue on the server.
+
+1. Put files in `working-directory-example/source`. In the console, create a backup with source `source` and repository `repository`.
+2. Watch the task record until it succeeds. The repository list refreshes after backup completion; an existing repository can also be loaded directly by path.
+3. Choose a backup, click restore, and enter `restored`, an existing empty directory. Check the task result and restored contents.
+
+All paths refer to the device running bak, including when the browser is on another device. Source, repository, and restore destination directories must exist. No OS directory picker or automatic directory creation is provided. Source and repository must not overlap; restore destination must be empty and outside the repository. Symlinks and special files in the source are unsupported. Keep source files unchanged during a backup. Failed or interrupted restores can leave partial output.
+
+Task records update every three seconds, show server-side errors, and paginate through persisted history. Counters for active and failed tasks cover the current page, not all history. The UI shows task states rather than byte progress. Requests that lose their response are not automatically resubmitted: inspect history before retrying. The MVP is intended for a trusted local deployment; it has no built-in HTTPS or separate user accounts.
+
+Browser assets live in `web/` and are embedded at Rust compile time; rebuild after editing them. Node.js 20 or later is needed only for the optional browser checks:
+
+```shell
+npm --prefix web ci
+# Install the matching browser once, or use BAK_BROWSER_CHANNEL=chrome with installed Chrome:
+cd web
+npx playwright install chromium
+cd ..
+uv run scripts/check.py --web-ui
+```
+
+The browser check launches a disposable real service and verifies authentication, backup/restore content and empty directories, preservation of an occupied destination, durable history after page reload, pagination, text-safe rendering of paths/errors, network recovery, disconnect/reconnect, and mobile-width layout.
 
 ## HTTP API
 
-API routes require `Authorization: Bearer <secret_key>`. `GET /` returns a public service message; `GET /api/status` returns the version. GET routes also support HEAD.
+API routes require `Authorization: Bearer <secret_key>`. `GET /` returns the console when enabled, otherwise a public service message; `GET /api/status` returns the version. GET routes also support HEAD.
 
 | Request | Behavior |
 | --- | --- |
 | `POST /api/backups` | Accept JSON with `source` and `repository`; return HTTP 202 after durably queuing a job. |
 | `POST /api/restores` | Accept JSON with `repository`, `backup_id`, and `destination`; return HTTP 202 after durably queuing a job. |
 | `GET /api/jobs/{job_id}` | Return HTTP 200 with the stored job, or HTTP 404 if it does not exist. |
+| `GET /api/jobs?limit=20&before=CURSOR` | Return newest jobs first in `{"jobs":[...],"next_cursor":null}`; omit `before` for the first page. |
 | `GET /api/backups?repository=PATH` | Return HTTP 200 with published backup summaries in `{"backups":[...]}`. |
 
 ```shell
@@ -41,6 +67,8 @@ curl -H 'Authorization: Bearer example-local-test-key' \
 Accepted responses include `Location: /api/jobs/{job_id}` and a job with fields `job_id`, `kind`, `state`, `result`, and `error`. States are `queued`, `running`, `succeeded`, and `failed`. Pending jobs have null result/error; completed jobs contain either a result or an error. POST no longer waits for execution. A failed job query still returns HTTP 200: its `error.code` describes the operation failure. Successful backup jobs contain `{"backup_id":"..."}` in `result`; successful restore jobs contain `{"destination":"..."}`. Both have a null error. Backup and restore execution currently support Unix platforms; on other platforms they fail with code 501 before creating output contents.
 
 Request errors use `{"error":{"code":400,"message":"..."}}` with the corresponding HTTP status. JSON bodies are limited to 2 MiB; `application/json` and `application/*+json` are accepted. Invalid or missing fields return 400, oversized bodies 413, unsupported media types 415, and missing or invalid authentication 401 with `WWW-Authenticate: Bearer`. There is no cancellation endpoint.
+
+Job listing defaults to 20 entries and accepts limits from 1 to 100. Pass the returned string `next_cursor` as `before`; null means no older entries. Cursors use insertion order, so new jobs do not shift older pages; task states can still change between requests. Each entry includes the usual job fields plus `request` (original paths and request kind), `queued_at`, `started_at`, and `finished_at`. Times are Unix milliseconds; start/finish times are null until recorded. Unknown, duplicate, or invalid listing parameters return 400. Existing submission and individual-job responses are unchanged.
 
 ## Persistence and operation lifecycle
 
@@ -70,6 +98,7 @@ src/
   server.rs        HTTP listener, worker supervision, and graceful shutdown
   server/
     api.rs         Private HTTP routing, authentication, validation, and JSON responses
+    ui.rs          Optional embedded console assets and browser security headers
   jobs.rs          Job manager facade, durable FIFO lifecycle, and the background worker
   jobs/
     backup.rs      Full backup traversal, compression, and synchronization
@@ -80,12 +109,13 @@ src/
   test_support.rs  Temporary directories for tests
 tests/
   server.rs        Application integration tests through the compiled binary and HTTP
+web/               Embedded HTML, CSS, and JavaScript; optional Playwright browser checks
 ```
 
 ## Current status and acceptance criteria
 
 Command-line parsing, configuration, authenticated HTTP routing, JSON error responses, durable background jobs,
-restart recovery, repository metadata storage and listing, and Unix full backup and restore execution are implemented.
+restart recovery, repository metadata storage and listing, Unix full backup and restore execution, and an embedded browser console with paginated task history are implemented.
 
 Backup jobs require existing source and repository directories. Equal or nested paths are rejected after resolving symlinks.
 Recursive source discovery is implemented, including empty directories. Symlinks and other unsupported types inside source are rejected.
@@ -97,7 +127,7 @@ Proptest generates directory trees, occupied destinations, integrity mismatches,
 
 For the course report and diagram checks, run `uv run scripts/check.py --report`. On macOS with Instruments, `uv run scripts/analyze_backup.py` measures real backup/restore workflows, runs a ten-minute stability sample, and records CPU, allocation, and leak traces using the optimized `profiling` build. This analysis is separate from routine CI. See [report materials and evidence](docs/report/README.md) for datasets, reproduction commands, and measurement limits.
 
-There is no web console, progress reporting, or cancellation.
+There is no byte-level progress reporting or cancellation.
 
 The current milestone is a minimal end-to-end workflow for local full backups and restores, with these acceptance criteria:
 
@@ -105,8 +135,9 @@ The current milestone is a minimal end-to-end workflow for local full backups an
 - Return a durable job ID immediately, execute one operation at a time, and retain queryable outcomes across restart.
 - Publish complete repository metadata transactionally after the referenced file contents are durable.
 - Restore into a separate empty directory and compare relative paths, entry types, and contents. Report clear failures and interruptions while preserving source files and existing successful backups.
+- Complete backup, repository browsing, restore, and task-history queries from the embedded console, with visible failures and no persisted browser credentials.
 
-The next work is file consistency and cleanup after failed or interrupted operations. Verify each step before continuing.
+This closes the local MVP workflow. The next reliability priorities are source-file consistency and cleanup after failed or interrupted operations. See the [MVP follow-up assessment](docs/mvp.md) for priorities and current boundaries.
 
 ## Documentation
 
@@ -116,7 +147,9 @@ The next work is file consistency and cleanup after failed or interrupted operat
 ## TODOs
 
 - Hybrid full-backup storage: group small files into independently compressed `tar.zst` packs and compress large files individually. Close a pack when its accumulated uncompressed file size reaches a target; close the final pack at end of traversal even if it is below target. Keep each file within one pack, allow the last file to exceed the target, and impose a file-count limit for empty or tiny files. Large files do not close a pending pack. Stream pack contents without buffering the whole pack in memory. Record file locations, original sizes, SHA-256 checksums, and empty directories in backup metadata; restore each pack in one pass. Choose size and count thresholds using representative data; 32 MiB is an initial candidate, not a fixed requirement. This is a future format change; current backups remain unchanged.
-- Web console, controlled by `web_ui.enabled`, after the core local workflow is complete.
+- Source-change detection and a documented consistency policy; failed/interrupted-operation cleanup and orphan reconciliation.
+- Repository verification without restoring, and recovery of repository metadata from a redundant copy or a per-backup manifest.
+- UI directory browsing, saved repository shortcuts, byte/file progress, and safe task cancellation, as separate follow-ups.
 - Directory synchronization support for non-Unix backup and restore execution.
 - Permissions, modification times, symbolic links, and other advanced restore capabilities.
 - Scheduled jobs, retention policies, file filtering, and repository encryption. Consider WebDAV / S3 after the local workflow is stable. Incremental backups are not planned. Mobile clients, real-time synchronization, and multi-user collaboration are outside the current scope.
