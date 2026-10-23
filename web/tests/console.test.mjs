@@ -115,13 +115,21 @@ test(
         errors.push(entry.text());
     });
     await page.goto(url);
+    assert.equal(await page.locator("main > .view:visible").count(), 1);
+    assert.equal(
+      await page.locator(".topbar, .page-heading, .stats").count(),
+      0,
+    );
     assert.equal(await page.locator("#source").isDisabled(), true);
+    await page.locator("#open-connection").click();
     await page.locator("#secret").fill("wrong-key");
     await page.locator("#connect-button").click();
     await page.locator("#connection-message.error").waitFor();
     assert.equal(await page.locator("#source").isDisabled(), true);
 
     async function connect() {
+      if (!(await page.locator("#connection-dialog").isVisible()))
+        await page.locator("#open-connection").click();
       await page.locator("#secret").fill(secret);
       await page.locator("#connect-button").click();
       await page.waitForFunction(
@@ -131,15 +139,41 @@ test(
       await page.waitForFunction(
         () => !document.getElementById("refresh-jobs").disabled,
       );
+      assert.equal(await page.locator("#connection-dialog").isVisible(), false);
+    }
+    async function view(name) {
+      await page.locator(`nav a[href="#${name}"]`).click();
+      await page.locator(`#${name}`).waitFor();
+      assert.equal(await page.locator("main > .view:visible").count(), 1);
+      assert.equal(
+        await page
+          .locator(`nav a[href="#${name}"]`)
+          .getAttribute("aria-current"),
+        "page",
+      );
     }
     await connect();
     await page.locator("#source").fill("source");
     await page.locator("#backup-repository").fill("repo with space");
+    await view("repository");
+    await page.goBack();
+    await page.locator("#backup").waitFor();
+    assert.equal(await page.locator("#source").inputValue(), "source");
+    assert.equal(
+      await page.locator("#backup-repository").inputValue(),
+      "repo with space",
+    );
     await page.locator("#backup-button").click();
+    await page.locator("#backup-job-link").click();
     await page.locator(".job .badge.succeeded").waitFor();
+    await page.getByRole("button", { name: "查看备份", exact: true }).click();
     await page.locator(".backup-row button").waitFor();
-    assert.equal(await page.locator("#backup-count").textContent(), "1");
+    assert.equal(
+      await page.locator("#repository-label").textContent(),
+      "1 份备份",
+    );
 
+    await view("repository");
     await page.locator(".backup-row button").click();
     await page.locator("#destination").fill("occupied");
     await page.locator("#restore-button").click();
@@ -149,6 +183,7 @@ test(
       "keep me",
     );
 
+    await view("repository");
     await page.locator(".backup-row button").click();
     await page.locator("#destination").fill("restored");
     await page.locator("#restore-button").click();
@@ -158,6 +193,16 @@ test(
     assert.deepEqual(
       await tree(join(directory, "restored")),
       await tree(join(directory, "source")),
+    );
+    assert.equal(await page.locator("#jobs").isVisible(), true);
+    await page.locator(".job summary").first().click();
+    await page.locator("#refresh-jobs").click();
+    await page.waitForFunction(
+      () => !document.getElementById("refresh-jobs").disabled,
+    );
+    assert.equal(
+      await page.locator(".job details").first().getAttribute("open"),
+      "",
     );
 
     if (process.env.BAK_UI_SCREENSHOT) {
@@ -241,12 +286,15 @@ test(
       () => document.getElementById("jobs-message").textContent === "",
     );
 
+    await view("repository");
     await page.locator("#repository-path").fill("missing-repository");
     await page.locator("#repository-button").click();
     await page.locator("#repository-message.error").waitFor();
     assert.equal(await page.locator(".backup-row").count(), 0);
 
     await page.setViewportSize({ width: 390, height: 844 });
+    await view("backup");
+    await view("repository");
     assert.equal(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
@@ -257,6 +305,7 @@ test(
     assert.equal(await page.locator(".job").count(), 0);
     assert.equal(await page.locator("#source").isDisabled(), true);
     await connect();
+    await view("jobs");
     await page.waitForFunction(
       () => document.querySelectorAll(".job").length === 20,
     );
