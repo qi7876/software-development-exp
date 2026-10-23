@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
-    <title>bak · 本地备份</title>
+    <title>bak · 创建备份</title>
     <link rel="icon" href="/ui/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/ui/styles.css" />
     <script src="/ui/app.js" defer></script>
@@ -12,151 +12,91 @@
   <body>
     <a class="skip-link" href="#main">跳转到主要内容</a>
     <aside class="sidebar">
-      <a class="brand" href="#main" aria-label="bak 首页"
-        ><span class="brand-mark" aria-hidden="true">b</span>bak<span
-          class="brand-dot"
-          >.</span
-        ></a
+      <a class="brand" href="#backup" aria-label="bak 首页"
+        ><span class="brand-mark" aria-hidden="true">b</span><span>bak</span></a
       >
-      <p class="brand-description">给重要文件，多一份安心。</p>
-      <span class="nav-label">工作空间</span>
       <nav aria-label="主导航">
-        <a href="#backup"><span aria-hidden="true">↗</span> 创建备份</a>
-        <a href="#repository"><span aria-hidden="true">▤</span> 备份仓库</a>
-        <a href="#jobs"><span aria-hidden="true">◷</span> 任务记录</a>
+        <a href="#backup" aria-current="page">创建备份</a>
+        <a href="#repository">备份仓库</a>
+        <a href="#jobs">任务记录</a>
       </nav>
-      <div class="sidebar-note">
-        <span class="small-dot" aria-hidden="true"></span> 本地存储 · 全量备份
-        <p>文件留在运行 bak 的设备上。</p>
-      </div>
-    </aside>
-
-    <div class="workspace">
-      <header class="topbar">
-        <span>个人备份工作空间</span>
-        <div class="connection-status">
+      <section class="connection-panel" aria-label="服务连接">
+        <div class="connection-status" role="status">
           <span
             id="connection-dot"
-            class="small-dot muted"
+            class="status-indicator muted"
             aria-hidden="true"
           ></span
-          ><span id="connection-state">未连接</span
-          ><span id="version" class="version"></span>
+          ><span id="connection-state">未连接</span><span id="version"></span>
         </div>
-      </header>
-      <main id="main">
-        <div class="page-heading">
-          <div>
-            <p class="eyebrow">LOCAL BACKUP, PEACE OF MIND</p>
-            <h1>重要的文件，值得多一份备份。</h1>
-            <p class="muted-text">备份到本地仓库，在需要时校验并恢复。</p>
-          </div>
-          <span class="local-tag">本地优先</span>
-        </div>
+        <p id="connection-host" class="connection-host"></p>
+        <button id="open-connection" class="secondary" type="button">
+          连接服务
+        </button>
+        <button id="disconnect-button" class="secondary" type="button" hidden>
+          断开连接
+        </button>
+      </section>
+    </aside>
 
-        <section class="connection-card" aria-labelledby="connection-title">
-          <div>
-            <h2 id="connection-title">连接你的备份服务</h2>
-            <p id="connection-description">
-              输入配置中的访问密钥。密钥仅保留在当前页面内存中。
-            </p>
-          </div>
-          <form id="connect-form">
-            <label class="sr-only" for="secret">访问密钥</label
-            ><input
-              id="secret"
-              name="secret"
-              type="password"
-              placeholder="输入访问密钥"
-              autocomplete="off"
-              required
-            /><button id="connect-button" type="submit">
-              连接服务 <span aria-hidden="true">→</span>
-            </button>
-          </form>
-          <button id="disconnect-button" class="secondary" type="button" hidden>
-            断开连接
-          </button>
-          <p id="connection-message" class="message" role="status"></p>
-        </section>
-
-        <div class="stats" aria-label="当前视图概览">
-          <div class="stat">
-            <span>仓库备份</span><strong id="backup-count">—</strong
-            ><small>当前已载入的仓库</small>
-          </div>
-          <div class="stat">
-            <span>进行中的任务</span><strong id="active-count">—</strong
-            ><small>当前任务页 · 排队或执行中</small>
-          </div>
-          <div class="stat">
-            <span>需要关注</span><strong id="failed-count">—</strong
-            ><small>当前任务页 · 失败的任务</small>
-          </div>
-        </div>
-
-        <section id="backup" class="panel" aria-labelledby="backup-title">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">01 / BACK UP</p>
-              <h2 id="backup-title">创建一份新备份</h2>
-            </div>
-            <span class="subtle-tag">全量 · Zstd 压缩</span>
-          </div>
+    <main id="main" tabindex="-1">
+      <section id="backup" class="view" aria-labelledby="backup-title">
+        <h1 id="backup-title" tabindex="-1">创建备份</h1>
+        <form id="backup-form" class="panel">
           <p class="section-description">
-            路径属于运行 bak
-            的设备。源目录和仓库需提前创建，备份期间请保持源文件不变。
+            路径均属于运行 bak 的设备，相对路径基于服务工作目录。
           </p>
-          <form id="backup-form">
-            <fieldset data-connected disabled>
-              <div class="form-grid">
-                <div>
-                  <label for="source">源目录</label
-                  ><input
-                    id="source"
-                    name="source"
-                    placeholder="例如 /Users/me/Documents"
-                    required
-                  />
-                  <p class="field-help">
-                    要保护的文件夹，包含其子目录和空目录。
-                  </p>
-                </div>
-                <div>
-                  <label for="backup-repository">备份仓库</label
-                  ><input
-                    id="backup-repository"
-                    name="repository"
-                    placeholder="例如 /Volumes/Backup/my-repo"
-                    required
-                  />
-                  <p class="field-help">使用独立目录，不能与源目录相互包含。</p>
-                </div>
+          <fieldset data-connected disabled>
+            <div class="form-grid">
+              <div>
+                <label for="source">源目录</label
+                ><input
+                  id="source"
+                  name="source"
+                  placeholder="/Users/me/Documents"
+                  aria-describedby="source-help"
+                  required
+                />
+                <p id="source-help" class="field-help">
+                  目录需已存在。备份期间请保持文件不变。
+                </p>
               </div>
-              <div class="form-footer">
-                <span class="muted-text"
-                  >每次备份独立保存，不覆盖之前的版本。</span
-                ><button id="backup-button" type="submit">
-                  创建备份 <span aria-hidden="true">↗</span>
-                </button>
+              <div>
+                <label for="backup-repository">备份仓库</label
+                ><input
+                  id="backup-repository"
+                  name="repository"
+                  placeholder="/Volumes/Backup/repository"
+                  aria-describedby="backup-repository-help"
+                  required
+                />
+                <p id="backup-repository-help" class="field-help">
+                  目录需已存在，且不能与源目录相互包含。
+                </p>
               </div>
-            </fieldset>
-            <p id="backup-message" class="message" role="status"></p>
-          </form>
-        </section>
-
-        <section
-          id="repository"
-          class="panel"
-          aria-labelledby="repository-title"
-        >
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">02 / RESTORE</p>
-              <h2 id="repository-title">浏览与恢复</h2>
             </div>
-            <span id="repository-label" class="subtle-tag">尚未载入仓库</span>
-          </div>
+            <div class="form-actions">
+              <button id="backup-button" type="submit">创建备份</button>
+            </div>
+          </fieldset>
+          <p id="backup-message" class="message" role="status"></p>
+          <a id="backup-job-link" class="action-link" href="#jobs" hidden
+            >查看任务</a
+          >
+        </form>
+      </section>
+
+      <section
+        id="repository"
+        class="view"
+        aria-labelledby="repository-title"
+        hidden
+      >
+        <div class="view-heading">
+          <h1 id="repository-title" tabindex="-1">备份仓库</h1>
+          <span id="repository-label" class="view-meta">尚未载入仓库</span>
+        </div>
+        <div class="panel">
           <form id="repository-form">
             <fieldset class="inline-form" data-connected disabled>
               <div class="grow">
@@ -164,7 +104,8 @@
                 ><input
                   id="repository-path"
                   name="repository"
-                  placeholder="输入已有备份仓库的路径"
+                  placeholder="输入已有仓库的路径"
+                  aria-describedby="repository-help"
                   required
                 />
               </div>
@@ -172,62 +113,81 @@
                 载入备份
               </button>
             </fieldset>
+            <p id="repository-help" class="field-help">
+              输入服务端目录路径，选择备份后可恢复到独立的空目录。
+            </p>
           </form>
           <p id="repository-message" class="message" role="status"></p>
           <div id="backup-list" class="backup-list">
-            <div class="empty-state">
-              <span class="empty-icon" aria-hidden="true">▤</span>
-              <h3>让每一份备份都有迹可循</h3>
-              <p>连接服务并载入仓库，即可查看历史备份和恢复文件。</p>
-            </div>
+            <div class="empty-state"><p>尚未载入仓库。</p></div>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section id="jobs" class="panel" aria-labelledby="jobs-title">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">03 / ACTIVITY</p>
-              <h2 id="jobs-title">任务记录</h2>
-            </div>
-            <button
-              id="refresh-jobs"
-              class="text-button"
-              type="button"
-              disabled
-            >
-              刷新记录 ↻
-            </button>
-          </div>
-          <p id="jobs-updated" class="section-description">
-            连接后自动更新，任务记录保存在服务端。
-          </p>
+      <section id="jobs" class="view" aria-labelledby="jobs-title" hidden>
+        <div class="view-heading">
+          <h1 id="jobs-title" tabindex="-1">任务记录</h1>
+          <button id="refresh-jobs" class="secondary" type="button" disabled>
+            刷新
+          </button>
+        </div>
+        <div class="panel">
+          <p id="jobs-updated" class="view-meta">连接后自动更新任务状态。</p>
           <p id="jobs-message" class="message" role="status"></p>
           <div id="job-list">
-            <div class="empty-state compact">
-              <h3>还没有载入任务</h3>
-              <p>备份和恢复的执行结果会显示在这里。</p>
-            </div>
+            <div class="empty-state"><p>尚未连接服务。</p></div>
           </div>
           <div class="pagination">
             <button id="previous-jobs" class="secondary" type="button" disabled>
-              ← 较新记录</button
+              较新记录</button
             ><span id="jobs-page">第 1 页</span
             ><button id="next-jobs" class="secondary" type="button" disabled>
-              较早记录 →
+              较早记录
             </button>
           </div>
-        </section>
-        <footer class="page-footer">
-          <span>bak · 本地文件备份</span
-          ><span>恢复时校验文件大小与 SHA-256</span>
-        </footer>
-      </main>
-    </div>
+        </div>
+      </section>
+      <noscript
+        ><p class="message error">请启用 JavaScript 以使用控制台。</p></noscript
+      >
+    </main>
+
+    <dialog id="connection-dialog" aria-labelledby="connection-title">
+      <form id="connect-form">
+        <div class="dialog-heading">
+          <h2 id="connection-title">连接服务</h2>
+          <button
+            id="close-connection"
+            class="icon-button"
+            type="button"
+            aria-label="关闭连接窗口"
+          >
+            ×
+          </button>
+        </div>
+        <label for="secret">访问密钥</label
+        ><input
+          id="secret"
+          name="secret"
+          type="password"
+          autocomplete="off"
+          aria-describedby="secret-help"
+          required
+        />
+        <p id="secret-help" class="field-help">
+          密钥仅保留在页面内存中，刷新后需要重新输入。
+        </p>
+        <p id="connection-message" class="message" role="status"></p>
+        <div class="dialog-actions">
+          <button id="connect-button" type="submit">连接</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog id="restore-dialog" aria-labelledby="restore-title">
       <form id="restore-form">
-        <div class="section-heading">
-          <h2 id="restore-title">恢复这份备份</h2>
+        <div class="dialog-heading">
+          <h2 id="restore-title">恢复备份</h2>
           <button
             id="close-restore"
             class="icon-button"
@@ -237,9 +197,6 @@
             ×
           </button>
         </div>
-        <p class="section-description">
-          将文件恢复到单独的空目录，原始文件和备份保持不变。
-        </p>
         <dl class="restore-summary">
           <dt>备份编号</dt>
           <dd id="restore-id"></dd>
@@ -250,11 +207,12 @@
         ><input
           id="destination"
           name="destination"
-          placeholder="已创建的空目录，例如 /Users/me/Restored"
+          placeholder="/Users/me/Restored"
+          aria-describedby="destination-help"
           required
         />
-        <p class="field-help">
-          请提前创建空目录，且不能与仓库相互包含。失败或中断可能留下部分恢复文件。
+        <p id="destination-help" class="field-help">
+          必须是已存在的空目录，且不能与仓库相互包含。失败或中断可能留下部分恢复文件。
         </p>
         <p id="restore-message" class="message" role="status"></p>
         <div class="dialog-actions">

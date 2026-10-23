@@ -1,6 +1,6 @@
 # Local MVP and follow-up priorities
 
-The MVP is a single-user service for a trusted local device: connect from the embedded browser console, back up an existing source directory to an existing independent repository, browse completed backups, restore into an existing empty directory, and inspect persisted task results. Backup and restore execution currently require Unix. The console supports desktop and mobile widths; paths always refer to the service device. There is no frontend deployment or runtime asset download.
+The MVP is a single-user service for a trusted local device: connect from the embedded browser console, back up an existing source directory to an existing independent repository, browse completed backups, restore into an existing empty directory, and inspect persisted task results. Backup and restore execution currently require Unix. The console supports wide desktop windows of at least 1200 CSS pixels; paths always refer to the service device. There is no frontend deployment or runtime asset download.
 
 The current format remains version 1 with individually compressed files and repository metadata in SQLite. Hybrid small-file packs remain future work. Incremental backup is not planned.
 

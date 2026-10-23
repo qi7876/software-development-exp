@@ -19,15 +19,15 @@ Configuration contains `listen`, a nonempty `secret_key`, and optional `web_ui` 
 
 ## Browser console
 
-With the example service running, open <http://127.0.0.1:8080/> and enter `example-local-test-key` (replace the example key in your own configuration). The console is available without authentication; all data and operation APIs still require the key. The browser keeps the key only in page memory, clears the password input after connection, and does not use cookies or browser storage. Reloading or disconnecting requires entering it again; already submitted tasks continue on the server.
+With the example service running, open <http://127.0.0.1:8080/>, click Connect in the sidebar, and enter `example-local-test-key` (replace the example key in your own configuration). Connection status and disconnect controls stay at the bottom of the sidebar. The console is available without authentication; all data and operation APIs still require the key. The browser keeps the key only in page memory, clears the password input after connection, and does not use cookies or browser storage. Reloading or disconnecting requires entering it again; already submitted tasks continue on the server.
 
 1. Put files in `working-directory-example/source`. In the console, create a backup with source `source` and repository `repository`.
-2. Watch the task record until it succeeds. The repository list refreshes after backup completion; an existing repository can also be loaded directly by path.
-3. Choose a backup, click restore, and enter `restored`, an existing empty directory. Check the task result and restored contents.
+2. Follow View task to the task records and wait for success. View backup opens the repository directly; an existing repository can also be loaded by path from the repository view.
+3. Choose a backup, click restore, and enter `restored`, an existing empty directory. Submission opens the task records. Check the result and restored contents.
 
 All paths refer to the device running bak, including when the browser is on another device. Source, repository, and restore destination directories must exist. No OS directory picker or automatic directory creation is provided. Source and repository must not overlap; restore destination must be empty and outside the repository. Symlinks and special files in the source are unsupported. Keep source files unchanged during a backup. Failed or interrupted restores can leave partial output.
 
-Task records update every three seconds, show server-side errors, and paginate through persisted history. Counters for active and failed tasks cover the current page, not all history. The UI shows task states rather than byte progress. Requests that lose their response are not automatically resubmitted: inspect history before retrying. The MVP is intended for a trusted local deployment; it has no built-in HTTPS or separate user accounts.
+The console supports wide desktop windows (at least 1200 CSS pixels). The three sidebar entries open separate views, preserve form inputs when switching, and support browser back/forward navigation. Task records update every three seconds, show server-side errors, and paginate through persisted history. Task IDs and execution timestamps expand under Details. A connection failure is also shown in the sidebar while the console keeps retrying; an invalid key reopens the connection dialog. The UI shows task states rather than byte progress. Requests that lose their response are not automatically resubmitted: inspect history before retrying. The MVP is intended for a trusted local deployment; it has no built-in HTTPS or separate user accounts.
 
 Browser assets live in `web/` and are embedded at Rust compile time; rebuild after editing them. Node.js 20 or later is needed only for the optional browser checks:
 
@@ -40,7 +40,7 @@ cd ..
 uv run scripts/check.py --web-ui
 ```
 
-The browser check launches a disposable real service and verifies authentication, backup/restore content and empty directories, preservation of an occupied destination, durable history after page reload, pagination, text-safe rendering of paths/errors, network recovery, disconnect/reconnect, and mobile-width layout.
+The browser check launches a disposable real service and verifies authentication, backup/restore content and empty directories, preservation of an occupied destination, durable history after page reload, pagination, text-safe rendering of paths/errors, network recovery, disconnect/reconnect, and desktop view navigation.
 
 ## HTTP API
 
