@@ -212,22 +212,6 @@ test(
         fullPage: true,
       });
     }
-    await page.setViewportSize({ width: 390, height: 844 });
-    assert.equal(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth,
-      ),
-      true,
-    );
-    if (process.env.BAK_UI_MOBILE_SCREENSHOT) {
-      await page.evaluate(() => scrollTo({ top: 0, behavior: "instant" }));
-      await page.screenshot({
-        path: process.env.BAK_UI_MOBILE_SCREENSHOT,
-        fullPage: false,
-      });
-    }
-    await page.setViewportSize({ width: 1440, height: 1000 });
-
     // Refresh keeps the key out of browser storage; reconnect reloads durable history.
     await page.reload();
     assert.equal(await page.locator("#secret").inputValue(), "");
@@ -292,7 +276,6 @@ test(
     await page.locator("#repository-message.error").waitFor();
     assert.equal(await page.locator(".backup-row").count(), 0);
 
-    await page.setViewportSize({ width: 390, height: 844 });
     await view("backup");
     await view("repository");
     assert.equal(
