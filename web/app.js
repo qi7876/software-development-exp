@@ -2,7 +2,11 @@
 
 const $ = (id) => document.getElementById(id);
 const state = {
-  key: "",
+  connection: null,
+  connections: [],
+  selectedUrl: null,
+  editingUrl: null,
+  connectionAttempt: null,
   session: new AbortController(),
   connected: false,
   timer: null,
@@ -23,7 +27,13 @@ const statuses = {
   succeeded: "已完成",
   failed: "失败",
 };
-const views = { backup: "创建备份", repository: "备份仓库", jobs: "任务记录" };
+const views = {
+  backup: "创建备份",
+  repository: "备份仓库",
+  jobs: "任务记录",
+  connections: "连接管理",
+};
+const storageKey = "bak.connections.v1";
 
 function showView(focus = false) {
   const requested = location.hash.slice(1);
@@ -51,22 +61,14 @@ document.querySelector(".skip-link").addEventListener("click", (event) => {
   event.preventDefault();
   $("main").focus();
 });
-$("connection-host").textContent = location.host;
+$("api-url").value = location.origin;
 showView();
 
 function openConnection() {
-  if (!$("connection-dialog").open) $("connection-dialog").showModal();
-  $("secret").focus();
+  navigate("connections");
 }
 
 $("open-connection").addEventListener("click", openConnection);
-$("close-connection").addEventListener("click", () =>
-  $("connection-dialog").close(),
-);
-$("connection-dialog").addEventListener("close", () => {
-  $("secret").value = "";
-  if (!state.connected && state.key) disconnect();
-});
 
 function message(id, text = "", error = false) {
   const element = $(id);
@@ -95,53 +97,70 @@ function date(value) {
   }).format(new Date(value));
 }
 
-async function api(path, options = {}) {
-  const session = state.session;
+async function requestApi(connection, path, options, signal) {
   let response;
   let body;
   try {
-    response = await fetch(path, {
+    response = await fetch(new URL(path, connection.url), {
       ...options,
       headers: {
-        Authorization: `Bearer ${state.key}`,
+        Authorization: `Bearer ${connection.key}`,
         ...(options.body ? { "Content-Type": "application/json" } : {}),
       },
-      signal: AbortSignal.any([session.signal, AbortSignal.timeout(15000)]),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
+      redirect: "error",
       cache: "no-store",
       credentials: "omit",
     });
     body = await response.json();
   } catch (error) {
-    if (session.signal.aborted)
-      throw new DOMException("连接已取消", "AbortError");
+    if (signal.aborted) throw new DOMException("连接已取消", "AbortError");
     throw new Error(
       options.method === "POST"
         ? "未收到完整的服务响应，任务可能已提交。请先刷新任务记录，确认后再重试。"
-        : "暂时无法连接服务，请检查服务是否运行。页面会继续尝试更新任务。",
+        : "无法连接 API，请检查地址、服务状态和跨域配置。HTTPS 页面应连接 HTTPS API。",
     );
   }
-  if (session.signal.aborted)
-    throw new DOMException("连接已取消", "AbortError");
+  if (signal.aborted) throw new DOMException("连接已取消", "AbortError");
   if (!response.ok) {
-    if (response.status === 401) {
-      disconnect();
-      openConnection();
-      message("connection-message", "访问密钥无效或已更改，请重新连接。", true);
-    }
-    throw new Error(body.error?.message || `请求失败（${response.status}）`);
+    const error = new Error(
+      response.status === 401
+        ? "访问密钥无效，请检查后重新连接。"
+        : body.error?.message || `请求失败（${response.status}）`,
+    );
+    error.status = response.status;
+    throw error;
   }
   return body;
+}
+
+async function api(path, options = {}) {
+  const session = state.session;
+  try {
+    return await requestApi(state.connection, path, options, session.signal);
+  } catch (error) {
+    if (session.signal.aborted)
+      throw new DOMException("连接已取消", "AbortError");
+    if (error.status === 401) {
+      const connection = state.connection;
+      resetSession();
+      if (connection) editConnection(connection);
+      openConnection();
+      message("connection-message", error.message, true);
+    }
+    throw error;
+  }
 }
 
 function report(id, error) {
   if (error.name !== "AbortError") message(id, error.message, true);
 }
 
-function disconnect() {
+function resetSession() {
   state.session.abort();
   state.session = new AbortController();
   clearTimeout(state.timer);
-  state.key = "";
+  state.connection = null;
   state.connected = false;
   state.jobsRequest++;
   state.repositoryRequest++;
@@ -153,13 +172,18 @@ function disconnect() {
   state.page = 0;
   state.displayedPage = 0;
   state.next = null;
-  $("secret").value = "";
-  $("open-connection").hidden = false;
   $("disconnect-button").hidden = true;
   $("connection-state").textContent = "未连接";
   $("connection-dot").classList.add("muted");
   $("connection-dot").classList.remove("error");
   $("version").textContent = "";
+  $("connection-name").textContent = "";
+  $("connection-host").textContent = "";
+  ["source", "backup-repository", "repository-path", "destination"].forEach(
+    (id) => {
+      $(id).value = "";
+    },
+  );
   document.querySelectorAll("[data-connected]").forEach((element) => {
     element.disabled = true;
   });
@@ -180,46 +204,257 @@ function disconnect() {
   $("job-list").replaceChildren(empty("尚未连接服务。"));
   delete $("job-list").dataset.snapshot;
   $("backup-list").replaceChildren(empty("尚未载入仓库。"));
+  renderConnections();
 }
 
-$("connect-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const key = $("secret").value;
-  disconnect();
-  state.key = key;
-  const session = state.session;
-  $("connect-button").disabled = true;
-  message("connection-message", "正在连接…");
+function normalizeUrl(value) {
+  const input = value.trim();
+  const url = new URL(input.includes("://") ? input : `http://${input}`);
+  if (
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(
+      "请输入 HTTP / HTTPS 地址和端口，不包含用户名、路径或查询参数。",
+    );
+  }
+  return url.origin;
+}
+
+function saveConnections() {
   try {
-    const status = await api("/api/status");
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        connections: state.connections,
+        selectedUrl: state.selectedUrl,
+      }),
+    );
+    message("storage-message");
+  } catch {
+    message(
+      "storage-message",
+      "浏览器无法保存连接，修改仅在当前页面有效。请检查浏览器存储设置。",
+      true,
+    );
+  }
+}
+
+function cancelConnectionAttempt() {
+  state.connectionAttempt?.abort();
+  state.connectionAttempt = null;
+  $("connect-button").disabled = false;
+}
+
+function resetEditor() {
+  state.editingUrl = null;
+  $("profile-name").value = "";
+  $("api-url").value = location.origin;
+  $("secret").value = "";
+  $("connection-form-title").textContent = "添加连接";
+  $("cancel-edit-connection").hidden = true;
+}
+
+function editConnection(connection) {
+  cancelConnectionAttempt();
+  state.editingUrl = connection.url;
+  $("profile-name").value = connection.name;
+  $("api-url").value = connection.url;
+  $("secret").value = connection.key;
+  $("connection-form-title").textContent = "编辑连接";
+  $("cancel-edit-connection").hidden = false;
+  message("connection-message");
+}
+
+function renderConnections() {
+  const list = $("connection-list");
+  list.replaceChildren();
+  if (!state.connections.length) {
+    list.append(empty("没有已保存的连接。请在下方添加。"));
+    return;
+  }
+  const table = node("table", "data-table connections-table");
+  table.append(node("caption", "sr-only", "已保存的 API 连接"));
+  const head = node("thead");
+  const header = node("tr");
+  for (const label of ["名称", "API 地址", "状态", "操作"]) {
+    const cell = node("th", "", label);
+    cell.scope = "col";
+    header.append(cell);
+  }
+  head.append(header);
+  const body = node("tbody");
+  for (const connection of state.connections) {
+    const row = node("tr", "connection-row");
+    const active = state.connection?.url === connection.url;
+    row.append(
+      node("td", "", connection.name),
+      node("td", "mono", connection.url),
+      node("td", "", active ? "当前连接" : "未连接"),
+    );
+    const actions = node("td", "connection-actions");
+    const connect = node("button", "secondary", "连接");
+    connect.type = "button";
+    connect.disabled = active;
+    connect.addEventListener("click", () => {
+      void connectProfile(connection);
+    });
+    const edit = node("button", "secondary", "编辑");
+    edit.type = "button";
+    edit.addEventListener("click", () => {
+      editConnection(connection);
+      $("profile-name").focus();
+    });
+    const remove = node("button", "secondary", "删除");
+    remove.type = "button";
+    remove.addEventListener("click", () => {
+      cancelConnectionAttempt();
+      if (active) resetSession();
+      state.connections = state.connections.filter(
+        (item) => item.url !== connection.url,
+      );
+      if (state.selectedUrl === connection.url) state.selectedUrl = null;
+      if (state.editingUrl === connection.url) resetEditor();
+      saveConnections();
+      message("connection-message", "连接已删除。");
+      renderConnections();
+    });
+    actions.append(connect, edit, remove);
+    row.append(actions);
+    body.append(row);
+  }
+  table.append(head, body);
+  list.append(table);
+}
+
+async function connectProfile(connection, save = false) {
+  cancelConnectionAttempt();
+  const attempt = new AbortController();
+  state.connectionAttempt = attempt;
+  const editingUrl = state.editingUrl;
+  $("connect-button").disabled = true;
+  message("connection-message", `正在验证 ${connection.url}…`);
+  try {
+    const status = await requestApi(
+      connection,
+      "/api/status",
+      {},
+      attempt.signal,
+    );
+    if (typeof status.version !== "string")
+      throw new Error("该地址未返回有效的 bak API 状态。");
+    if (attempt !== state.connectionAttempt) return;
+    if (save) {
+      state.connections = state.connections.filter(
+        (item) => item.url !== editingUrl && item.url !== connection.url,
+      );
+      state.connections.push(connection);
+      resetEditor();
+    }
+    resetSession();
+    state.connection = connection;
     state.connected = true;
-    $("secret").value = "";
-    $("open-connection").hidden = true;
+    state.selectedUrl = connection.url;
+    saveConnections();
     $("disconnect-button").hidden = false;
     $("connection-state").textContent = "已连接";
     $("connection-dot").classList.remove("muted");
+    $("connection-name").textContent = connection.name;
+    $("connection-host").textContent = connection.url;
     $("version").textContent = `v${status.version}`;
     document.querySelectorAll("[data-connected]").forEach((element) => {
       element.disabled = false;
     });
     $("refresh-jobs").disabled = false;
-    message("connection-message");
-    $("connection-dialog").close();
+    renderConnections();
+    message("connection-message", `已连接 ${connection.name}。`);
     await refreshJobs();
   } catch (error) {
-    if (session === state.session) {
-      state.key = "";
+    if (attempt === state.connectionAttempt)
       report("connection-message", error);
-    }
   } finally {
-    if (session === state.session || !state.key)
+    if (attempt === state.connectionAttempt) {
+      state.connectionAttempt = null;
       $("connect-button").disabled = false;
+    }
+  }
+}
+
+$("connect-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  try {
+    const url = normalizeUrl($("api-url").value);
+    const connection = {
+      name: $("profile-name").value.trim() || new URL(url).host,
+      url,
+      key: $("secret").value,
+    };
+    if (!connection.key) throw new Error("请输入访问密钥。");
+    if (
+      state.connections.some(
+        (item) => item.url === url && item.url !== state.editingUrl,
+      )
+    ) {
+      throw new Error("该地址已保存，请编辑已有连接。");
+    }
+    void connectProfile(connection, true);
+  } catch (error) {
+    report("connection-message", error);
   }
 });
-$("disconnect-button").addEventListener("click", () => {
-  disconnect();
-  $("open-connection").focus();
+$("cancel-edit-connection").addEventListener("click", () => {
+  cancelConnectionAttempt();
+  resetEditor();
+  message("connection-message");
 });
+$("disconnect-button").addEventListener("click", () => {
+  cancelConnectionAttempt();
+  resetSession();
+  state.selectedUrl = null;
+  saveConnections();
+  renderConnections();
+});
+
+function restoreConnections() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+    if (saved !== null) {
+      if (!Array.isArray(saved.connections))
+        throw new Error("invalid saved connections");
+      const urls = new Set();
+      for (const item of saved.connections) {
+        if (
+          typeof item.name !== "string" ||
+          typeof item.url !== "string" ||
+          typeof item.key !== "string" ||
+          !item.key ||
+          normalizeUrl(item.url) !== item.url ||
+          urls.has(item.url)
+        ) {
+          throw new Error("invalid saved connection");
+        }
+        urls.add(item.url);
+      }
+      state.connections = saved.connections;
+      state.selectedUrl = saved.selectedUrl;
+    }
+  } catch {
+    message(
+      "storage-message",
+      "无法读取浏览器中的连接配置，请重新添加连接。",
+      true,
+    );
+  }
+  renderConnections();
+  const selected = state.connections.find(
+    (item) => item.url === state.selectedUrl,
+  );
+  if (selected) void connectProfile(selected);
+}
 
 async function loadBackups(repository) {
   const request = ++state.repositoryRequest;
@@ -537,3 +772,5 @@ $("next-jobs").addEventListener("click", () => {
     void refreshJobs();
   }
 });
+
+restoreConnections();

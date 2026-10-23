@@ -2,7 +2,7 @@ use crate::jobs::{JobError, JobManager, JobRequest};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, FromRequest, Request, State, rejection::JsonRejection},
-    http::{StatusCode, header},
+    http::{Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -10,6 +10,7 @@ use axum::{
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::json;
 use std::path::PathBuf;
+use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Clone)]
 struct AppState {
@@ -35,6 +36,13 @@ pub fn router(jobs: JobManager, secret_key: String, web_ui_enabled: bool) -> Rou
         })
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
         .layer(middleware::from_fn_with_state(state.clone(), authorize))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([Method::GET, Method::HEAD, Method::POST])
+                .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+                .expose_headers([header::LOCATION]),
+        )
         .with_state(state)
 }
 
@@ -455,6 +463,56 @@ mod tests {
             json_body(response).await?,
             json!({"version": env!("CARGO_PKG_VERSION")})
         );
+        jobs.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cross_origin_preflight_and_authentication() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let app = router(jobs.clone(), "test-key".into(), false);
+        let preflight = Request::builder()
+            .method("OPTIONS")
+            .uri("/api/backups")
+            .header(header::ORIGIN, "http://127.0.0.1:9000")
+            .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+            .header(
+                header::ACCESS_CONTROL_REQUEST_HEADERS,
+                "authorization,content-type",
+            )
+            .body(Body::empty())?;
+        let response = app.clone().oneshot(preflight).await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+        assert!(
+            response.headers()[header::ACCESS_CONTROL_ALLOW_METHODS]
+                .to_str()?
+                .contains("POST")
+        );
+        let headers = response.headers()[header::ACCESS_CONTROL_ALLOW_HEADERS]
+            .to_str()?
+            .to_ascii_lowercase();
+        assert!(headers.contains("authorization"));
+        assert!(headers.contains("content-type"));
+        assert!(
+            !response
+                .headers()
+                .contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+        );
+        for (auth, expected) in [
+            ("Bearer test-key", StatusCode::OK),
+            ("Bearer wrong", StatusCode::UNAUTHORIZED),
+            ("", StatusCode::UNAUTHORIZED),
+        ] {
+            let mut request = request("GET", "/api/status", auth, "", vec![])?;
+            request
+                .headers_mut()
+                .insert(header::ORIGIN, "http://127.0.0.1:9000".parse()?);
+            let response = app.clone().oneshot(request).await?;
+            assert_eq!(response.status(), expected);
+            assert_eq!(response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+        }
         jobs.close().await;
         Ok(())
     }

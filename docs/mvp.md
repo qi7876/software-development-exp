@@ -1,6 +1,6 @@
 # Local MVP and follow-up priorities
 
-The MVP is a single-user service for a trusted local device: connect from the embedded browser console, back up an existing source directory to an existing independent repository, browse completed backups, restore into an existing empty directory, and inspect persisted task results. Backup and restore execution currently require Unix. The console supports wide desktop windows of at least 1200 CSS pixels; paths always refer to the service device. There is no frontend deployment or runtime asset download.
+The MVP is a single-user backup service: connect from the embedded browser console, back up an existing source directory to an existing independent repository, browse completed backups, restore into an existing empty directory, and inspect persisted task results. The console can select local or remote HTTP/HTTPS APIs and persists connection profiles and keys in browser storage. Switching verifies the target and clears old service data. Backup and restore execution currently require Unix. The console supports wide desktop windows of at least 1200 CSS pixels; paths always refer to the selected service device. There is no frontend deployment or runtime asset download.
 
 The current format remains version 1 with individually compressed files and repository metadata in SQLite. Hybrid small-file packs remain future work. Incremental backup is not planned.
 
@@ -15,7 +15,7 @@ The current format remains version 1 with individually compressed files and repo
 
 ## Usability after the core loop
 
-Directory entry remains manual because browser file pickers refer to the browser device, not necessarily the server. A server-side directory browser and explicit directory creation could reduce path mistakes; they need a clear filesystem-access boundary. Saved repository shortcuts can follow without storing the access key.
+Directory entry remains manual because browser file pickers refer to the browser device, not necessarily the server. A server-side directory browser and explicit directory creation could reduce path mistakes; they need a clear filesystem-access boundary. Saved repository shortcuts can follow, scoped to each API connection.
 
 Long-running jobs expose states but not byte/file progress or cancellation. Add observed progress first, then define cancellation semantics and output cleanup. Retrying an uncertain POST can create duplicate jobs; idempotent submission would make reconnect/retry behavior more predictable.
 

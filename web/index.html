@@ -29,9 +29,10 @@
           ></span
           ><span id="connection-state">未连接</span><span id="version"></span>
         </div>
+        <p id="connection-name" class="connection-name"></p>
         <p id="connection-host" class="connection-host"></p>
         <button id="open-connection" class="secondary" type="button">
-          连接服务
+          管理连接
         </button>
         <button id="disconnect-button" class="secondary" type="button" hidden>
           断开连接
@@ -147,42 +148,74 @@
           </div>
         </div>
       </section>
+      <section
+        id="connections"
+        class="view"
+        aria-labelledby="connections-title"
+        hidden
+      >
+        <h1 id="connections-title" tabindex="-1">连接管理</h1>
+        <div class="panel">
+          <h2>已保存的连接</h2>
+          <p id="storage-message" class="message" role="status"></p>
+          <div id="connection-list" class="connection-list"></div>
+        </div>
+        <form id="connect-form" class="panel connection-form">
+          <h2 id="connection-form-title">添加连接</h2>
+          <div class="form-grid">
+            <div>
+              <label for="profile-name">名称（可选）</label
+              ><input
+                id="profile-name"
+                name="name"
+                placeholder="例如：本机、家中服务器"
+              />
+            </div>
+            <div>
+              <label for="api-url">API 地址</label
+              ><input
+                id="api-url"
+                name="url"
+                placeholder="127.0.0.1:8080 或 https://backup.example.com"
+                aria-describedby="api-url-help"
+                required
+              />
+              <p id="api-url-help" class="field-help">
+                支持 HTTP / HTTPS；省略协议时使用 HTTP。
+              </p>
+            </div>
+            <div>
+              <label for="secret">访问密钥</label
+              ><input
+                id="secret"
+                name="secret"
+                type="password"
+                autocomplete="off"
+                aria-describedby="secret-help"
+                required
+              />
+              <p id="secret-help" class="field-help">
+                地址和密钥保存在当前浏览器中，可通过删除连接清除。
+              </p>
+            </div>
+          </div>
+          <p id="connection-message" class="message" role="status"></p>
+          <div class="form-actions">
+            <button
+              id="cancel-edit-connection"
+              class="secondary"
+              type="button"
+              hidden
+            >
+              取消编辑</button
+            ><button id="connect-button" type="submit">验证并保存</button>
+          </div>
+        </form>
+      </section>
       <noscript
         ><p class="message error">请启用 JavaScript 以使用控制台。</p></noscript
       >
     </main>
-
-    <dialog id="connection-dialog" aria-labelledby="connection-title">
-      <form id="connect-form">
-        <div class="dialog-heading">
-          <h2 id="connection-title">连接服务</h2>
-          <button
-            id="close-connection"
-            class="icon-button"
-            type="button"
-            aria-label="关闭连接窗口"
-          >
-            ×
-          </button>
-        </div>
-        <label for="secret">访问密钥</label
-        ><input
-          id="secret"
-          name="secret"
-          type="password"
-          autocomplete="off"
-          aria-describedby="secret-help"
-          required
-        />
-        <p id="secret-help" class="field-help">
-          密钥仅保留在页面内存中，刷新后需要重新输入。
-        </p>
-        <p id="connection-message" class="message" role="status"></p>
-        <div class="dialog-actions">
-          <button id="connect-button" type="submit">连接</button>
-        </div>
-      </form>
-    </dialog>
 
     <dialog id="restore-dialog" aria-labelledby="restore-title">
       <form id="restore-form">
