@@ -447,6 +447,12 @@ test(
     await save("远程备份", remote.url, "remote-api-key");
     await connected(remote.url);
     assert.equal((await stored()).connections.length, 2);
+    if (process.env.BAK_UI_SCREENSHOT) {
+      await page.screenshot({
+        path: process.env.BAK_UI_SCREENSHOT,
+        fullPage: true,
+      });
+    }
 
     await page.close();
     page = await context.newPage();
@@ -489,6 +495,25 @@ test(
     assert.equal(
       await page.locator("#connection-state").textContent(),
       "未连接",
+    );
+    await page.evaluate(() =>
+      localStorage.setItem("bak.connections.v1", "{broken"),
+    );
+    await page.reload();
+    await manager();
+    await page.locator("#storage-message.error").waitFor();
+    await page.evaluate(() => {
+      localStorage.removeItem("bak.connections.v1");
+      Storage.prototype.setItem = () => {
+        throw new DOMException("Storage blocked", "SecurityError");
+      };
+    });
+    await save("仅本次连接", local.url, secret);
+    await connected(local.url);
+    await page.locator("#storage-message.error").waitFor();
+    assert.equal(
+      await page.evaluate(() => localStorage.getItem("bak.connections.v1")),
+      null,
     );
     assert.deepEqual(errors, []);
   },

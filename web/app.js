@@ -126,7 +126,7 @@ async function requestApi(connection, path, options, signal) {
     const error = new Error(
       response.status === 401
         ? "访问密钥无效，请检查后重新连接。"
-        : body.error?.message || `请求失败（${response.status}）`,
+        : body?.error?.message || `请求失败（${response.status}）`,
     );
     error.status = response.status;
     throw error;
@@ -345,7 +345,7 @@ async function connectProfile(connection, save = false) {
       {},
       attempt.signal,
     );
-    if (typeof status.version !== "string")
+    if (!status || typeof status.version !== "string")
       throw new Error("该地址未返回有效的 bak API 状态。");
     if (attempt !== state.connectionAttempt) return;
     if (save) {
