@@ -1,3 +1,5 @@
+use super::repository::{ManifestEntryKind, UnixMetadata};
+
 use super::{
     JobError,
     filesystem::{get_absolute_directory_path, paths_overlap, sync_directory},
@@ -11,10 +13,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Debug, PartialEq, Eq)]
-enum BackupEntry {
-    File(PathBuf),
-    Directory(PathBuf),
+pub struct BackupEntry {
+    pub relative_path: PathBuf,
+    pub metadata: UnixMetadata,
+    pub kind: BackupEntryKind,
+}
+
+pub enum BackupEntryKind {
+    File,
+    Directory,
+    Symlink,
 }
 
 struct FileBackupResult {
@@ -22,9 +30,17 @@ struct FileBackupResult {
     checksum: String,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct BackupStats {
+    pub entries_created: i64,
+    pub skipped_unsupported: i64,
+    pub skipped_filtered: i64,
+}
+
 fn walk_directory(
     absolute_root: &Path,
     absolute_current: &Path,
+    backip_stats: &mut BackupStats,
     backup_entries: &mut Vec<BackupEntry>,
 ) -> Result<(), JobError> {
     let source_dir = std::fs::read_dir(absolute_current).map_err(|error| {
@@ -43,6 +59,10 @@ fn walk_directory(
                 ),
             )
         })?;
+
+        // TODO: filter
+        // backip_stats.skipped_filtered += 1;
+
         let absolute_file_path = file.path();
         let relative_file_path = absolute_file_path
             .strip_prefix(absolute_root)
@@ -66,34 +86,56 @@ fn walk_directory(
             )
         })?;
         if file_type.is_dir() {
-            backup_entries.push(BackupEntry::Directory(relative_file_path));
-            walk_directory(absolute_root, &absolute_file_path, backup_entries)?;
+            backip_stats.entries_created += 1;
+            backup_entries.push(BackupEntry {
+                relative_path: relative_file_path,
+                metadata: UnixMetadata::read(&absolute_file_path)?,
+                kind: BackupEntryKind::Directory,
+            });
+            walk_directory(
+                absolute_root,
+                &absolute_file_path,
+                backip_stats,
+                backup_entries,
+            )?;
         } else if file_type.is_file() {
-            backup_entries.push(BackupEntry::File(relative_file_path));
+            backip_stats.entries_created += 1;
+            backup_entries.push(BackupEntry {
+                relative_path: relative_file_path,
+                metadata: UnixMetadata::read(&absolute_file_path)?,
+                kind: BackupEntryKind::File,
+            });
         } else if file_type.is_symlink() {
-            return Err(JobError::new(
-                StatusCode::BAD_REQUEST,
-                format!("find symlink file: {}", relative_file_path.display()),
-            ));
+            backip_stats.entries_created += 1;
+            backup_entries.push(BackupEntry {
+                relative_path: relative_file_path,
+                metadata: UnixMetadata::read(&absolute_file_path)?,
+                kind: BackupEntryKind::Symlink,
+            });
         } else {
-            return Err(JobError::new(
-                StatusCode::BAD_REQUEST,
-                format!("unsupported file: {}", relative_file_path.display()),
-            ));
+            backip_stats.skipped_unsupported += 1;
         };
     }
     Ok(())
 }
 
 /// Returns paths relative to the source directory.
-fn path_traversal(absolute_source_path: &Path) -> Result<Vec<BackupEntry>, JobError> {
+fn path_traversal(
+    absolute_source_path: &Path,
+) -> Result<(BackupStats, Vec<BackupEntry>), JobError> {
+    let mut backup_stats = BackupStats {
+        entries_created: 0,
+        skipped_unsupported: 0,
+        skipped_filtered: 0,
+    };
     let mut backup_entries = Vec::<BackupEntry>::new();
     walk_directory(
         absolute_source_path,
         absolute_source_path,
+        &mut backup_stats,
         &mut backup_entries,
     )?;
-    Ok(backup_entries)
+    Ok((backup_stats, backup_entries))
 }
 
 fn backup_one_file(
@@ -193,29 +235,37 @@ fn backup_one_file(
 }
 
 fn backup_all_files(
-    backup_entries: &Vec<BackupEntry>,
+    backup_entries: Vec<BackupEntry>,
     absolute_source_path: &Path,
     absolute_backup_root_directory_path: &Path,
 ) -> Result<Vec<ManifestEntry>, JobError> {
     let mut manifest_entries = Vec::<ManifestEntry>::new();
     for backup_entry in backup_entries {
-        let manifest_entry = match backup_entry {
+        let BackupEntry {
+            relative_path,
+            metadata,
+            kind,
+        } = backup_entry;
+        let manifest_entry = match kind {
             // The parent directory is always created before writing files.
-            BackupEntry::File(relative_path) => {
-                let absolute_source_file_path = absolute_source_path.join(relative_path);
+            BackupEntryKind::File => {
+                let absolute_source_file_path = absolute_source_path.join(&relative_path);
                 let absolute_backup_file_path =
-                    absolute_backup_root_directory_path.join(relative_path);
+                    absolute_backup_root_directory_path.join(&relative_path);
                 let backup_result =
                     backup_one_file(&absolute_source_file_path, &absolute_backup_file_path)?;
-                ManifestEntry::File {
-                    path: relative_path.to_path_buf(),
-                    original_size: backup_result.original_size,
-                    checksum: backup_result.checksum,
+                ManifestEntry {
+                    relative_path,
+                    metadata,
+                    kind: ManifestEntryKind::File {
+                        original_size: backup_result.original_size,
+                        checksum: backup_result.checksum,
+                    },
                 }
             }
-            BackupEntry::Directory(relative_path) => {
+            BackupEntryKind::Directory => {
                 let absolute_backup_directory_path =
-                    absolute_backup_root_directory_path.join(relative_path);
+                    absolute_backup_root_directory_path.join(&relative_path);
                 std::fs::create_dir(&absolute_backup_directory_path).map_err(|error| {
                     JobError::new(
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -225,8 +275,25 @@ fn backup_all_files(
                         ),
                     )
                 })?;
-                ManifestEntry::Directory {
-                    path: relative_path.to_path_buf(),
+                ManifestEntry {
+                    relative_path,
+                    metadata,
+                    kind: ManifestEntryKind::Directory,
+                }
+            }
+            BackupEntryKind::Symlink => {
+                let absolute_source_file_path = absolute_source_path.join(&relative_path);
+                // Do not create a symlink file in backup path
+                let target = std::fs::read_link(&absolute_source_file_path).map_err(|error| {
+                    JobError::internal(format!(
+                        "cannot read symlink target for {}: {error}",
+                        absolute_source_file_path.display()
+                    ))
+                })?;
+                ManifestEntry {
+                    relative_path,
+                    metadata,
+                    kind: ManifestEntryKind::Symlink { target },
                 }
             }
         };
@@ -234,8 +301,13 @@ fn backup_all_files(
     }
 
     for manifest_entry in manifest_entries.iter().rev() {
-        if let ManifestEntry::Directory { path } = manifest_entry {
-            sync_directory(&absolute_backup_root_directory_path.join(path))?;
+        if let ManifestEntry {
+            relative_path,
+            metadata: _,
+            kind: ManifestEntryKind::Directory,
+        } = manifest_entry
+        {
+            sync_directory(&absolute_backup_root_directory_path.join(relative_path))?;
         }
     }
 
@@ -255,7 +327,8 @@ pub fn run(source: &Path, repository: &Path, backup_id: &str) -> Result<(), JobE
             ),
         ));
     }
-    let backup_entries = path_traversal(&absolute_source_path)?;
+    let root_metadata = UnixMetadata::read(&absolute_source_path)?;
+    let (backup_stats, backup_entries) = path_traversal(&absolute_source_path)?;
 
     #[cfg(not(unix))]
     sync_directory(&absolute_repository_path)?;
@@ -288,7 +361,7 @@ pub fn run(source: &Path, repository: &Path, backup_id: &str) -> Result<(), JobE
 
     let created_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
     let manifest_entries = backup_all_files(
-        &backup_entries,
+        backup_entries,
         &absolute_source_path,
         &absolute_backup_root_directory_path,
     )?;
@@ -298,13 +371,15 @@ pub fn run(source: &Path, repository: &Path, backup_id: &str) -> Result<(), JobE
     sync_directory(&absolute_repository_path)?;
 
     let manifest = Manifest {
-        format_version: 1,
+        format_version: 2,
         backup_id: backup_id.to_owned(),
         created_at,
         source: absolute_source_path,
         compression_algorithm: "zstd".to_string(),
         checksum_algorithm: "sha256".to_string(),
         entries: manifest_entries,
+        root_metadata,
+        backup_stats,
     };
     let handle = tokio::runtime::Handle::try_current()
         .map_err(|error| JobError::internal(format!("cannot access Tokio runtime: {error}")))?;
@@ -377,10 +452,23 @@ mod tests {
         std::fs::create_dir(&source)?;
         std::fs::write(&source_file, "hello")?;
         std::fs::create_dir(&source_empty)?;
-        let entries = path_traversal(&source)?;
+        let (stats, entries) = path_traversal(&source)?;
+        assert_eq!(stats.entries_created, entries.len() as i64);
+        assert_eq!(stats.skipped_unsupported, 0);
+        assert_eq!(stats.skipped_filtered, 0);
         assert_eq!(entries.len(), 2);
-        assert!(entries.contains(&BackupEntry::File(PathBuf::from("hello.txt"))));
-        assert!(entries.contains(&BackupEntry::Directory(PathBuf::from("empty"))));
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.relative_path == Path::new("hello.txt")
+                    && matches!(entry.kind, BackupEntryKind::File))
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.relative_path == Path::new("empty")
+                    && matches!(entry.kind, BackupEntryKind::Directory))
+        );
         Ok(())
     }
 
@@ -397,18 +485,41 @@ mod tests {
         std::fs::create_dir(&source_docs)?;
         std::fs::write(&source_docs_file, "readme")?;
         std::fs::create_dir(&source_empty)?;
-        let entries = path_traversal(&source)?;
+        let (stats, entries) = path_traversal(&source)?;
+        assert_eq!(stats.entries_created, entries.len() as i64);
+        assert_eq!(stats.skipped_unsupported, 0);
+        assert_eq!(stats.skipped_filtered, 0);
         assert_eq!(entries.len(), 4);
-        assert!(entries.contains(&BackupEntry::File(PathBuf::from("hello.txt"))));
-        assert!(entries.contains(&BackupEntry::Directory(PathBuf::from("empty"))));
-        assert!(entries.contains(&BackupEntry::Directory(PathBuf::from("docs"))));
-        assert!(entries.contains(&BackupEntry::File(PathBuf::from("docs/README.txt"))));
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.relative_path == Path::new("hello.txt")
+                    && matches!(entry.kind, BackupEntryKind::File))
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.relative_path == Path::new("empty")
+                    && matches!(entry.kind, BackupEntryKind::Directory))
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.relative_path == Path::new("docs")
+                    && matches!(entry.kind, BackupEntryKind::Directory))
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.relative_path == Path::new("docs/README.txt")
+                    && matches!(entry.kind, BackupEntryKind::File))
+        );
         Ok(())
     }
 
     #[cfg(unix)]
     #[test]
-    fn recursive_traversal_reject_symlinks() -> Result<(), Box<dyn Error>> {
+    fn recursive_traversal_preserves_symlinks() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
         let source = directory.path().join("source");
         let source_file = directory.path().join("source/hello.txt");
@@ -418,12 +529,16 @@ mod tests {
         std::fs::write(&source_file, "hello")?;
         std::fs::create_dir(&source_docs)?;
         std::os::unix::fs::symlink(&source_file, &alias)?;
-        let err = path_traversal(&source)
-            .err()
-            .ok_or("accepted symlink file")?;
-        assert_eq!(err.code, StatusCode::BAD_REQUEST);
-        assert!(err.message.contains("symlink"));
-        assert!(err.message.contains("docs/alias"));
+        let (stats, entries) = path_traversal(&source)?;
+        assert_eq!(stats.entries_created, 3);
+        assert_eq!(stats.skipped_unsupported, 0);
+        assert_eq!(stats.skipped_filtered, 0);
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.relative_path == Path::new("docs/alias")
+                    && matches!(entry.kind, BackupEntryKind::Symlink))
+        );
         Ok(())
     }
 
@@ -527,6 +642,26 @@ mod tests {
             std::fs::write(source.join(path), content)?;
         }
         assert!(!repository.join("backups").exists());
+        use std::os::unix::fs::PermissionsExt;
+        let timestamp =
+            std::time::UNIX_EPOCH + std::time::Duration::new(1_600_000_000, 123_456_789);
+        let mut expected_metadata = std::collections::BTreeMap::new();
+        for (relative, mode) in [
+            ("", 0o750),
+            ("hello.txt", 0o751),
+            ("dir1", 0o700),
+            ("dir1/hello.txt", 0o640),
+            ("empty", 0o755),
+        ] {
+            let path = source.join(relative);
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))?;
+            std::fs::File::open(&path)?.set_times(
+                std::fs::FileTimes::new()
+                    .set_accessed(timestamp)
+                    .set_modified(timestamp),
+            )?;
+            expected_metadata.insert(relative, serde_json::to_value(UnixMetadata::read(&path)?)?);
+        }
 
         let source_for_run = source.clone();
         let repository_for_run = repository.clone();
@@ -539,12 +674,26 @@ mod tests {
         let manifest = Manifest::read(&repository, "backup-001").await?;
         assert_eq!(manifest.backup_id, "backup-001");
         assert_eq!(manifest.source, std::fs::canonicalize(&source)?);
-        assert_eq!(manifest.format_version, 1);
+        assert_eq!(manifest.format_version, 2);
         assert_eq!(manifest.compression_algorithm, "zstd");
         assert_eq!(manifest.checksum_algorithm, "sha256");
         let created_at = chrono::DateTime::parse_from_rfc3339(&manifest.created_at)?;
         assert_eq!(created_at.offset().local_minus_utc(), 0);
         assert_eq!(manifest.entries.len(), 4);
+        assert_eq!(manifest.backup_stats.entries_created, 4);
+        assert_eq!(manifest.backup_stats.skipped_unsupported, 0);
+        assert_eq!(manifest.backup_stats.skipped_filtered, 0);
+        assert_eq!(
+            serde_json::to_value(&manifest.root_metadata)?,
+            expected_metadata[""]
+        );
+        for entry in &manifest.entries {
+            let relative = entry.relative_path.to_str().ok_or("invalid test path")?;
+            assert_eq!(
+                serde_json::to_value(&entry.metadata)?,
+                expected_metadata[relative]
+            );
+        }
 
         let backup_root = repository.join("backups/backup-001");
         for (relative_path, content) in files {
@@ -552,10 +701,14 @@ mod tests {
                 .entries
                 .iter()
                 .find_map(|entry| match entry {
-                    ManifestEntry::File {
-                        path,
-                        original_size,
-                        checksum,
+                    ManifestEntry {
+                        relative_path: path,
+                        kind:
+                            ManifestEntryKind::File {
+                                original_size,
+                                checksum,
+                            },
+                        ..
                     } if path.as_path() == Path::new(relative_path) => {
                         Some((*original_size, checksum))
                     }
@@ -572,7 +725,7 @@ mod tests {
         for relative_path in ["dir1", "empty"] {
             assert!(manifest.entries.iter().any(|entry| matches!(
                 entry,
-                ManifestEntry::Directory { path }
+                ManifestEntry { relative_path: path, kind: ManifestEntryKind::Directory, .. }
                     if path.as_path() == Path::new(relative_path)
             )));
             assert!(backup_root.join(relative_path).is_dir());
@@ -590,6 +743,106 @@ mod tests {
                 .transpose()?
                 .is_none()
         );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symlinks_are_metadata_only_and_unsupported_entries_are_counted()
+    -> Result<(), Box<dyn Error>> {
+        use std::os::unix::{fs::symlink, net::UnixListener};
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("s");
+        let repository = directory.path().join("r");
+        let outside = directory.path().join("outside");
+        std::fs::create_dir(&source)?;
+        std::fs::create_dir(&repository)?;
+        std::fs::create_dir(&outside)?;
+        std::fs::write(outside.join("secret"), b"not part of the backup")?;
+        std::fs::write(source.join("payload"), b"contents")?;
+        std::fs::create_dir(source.join("links"))?;
+        let targets = [
+            ("links/relative", PathBuf::from("./../payload")),
+            ("links/absolute", outside.clone()),
+            ("links/dangling", PathBuf::from("../missing")),
+            ("links/cycle", PathBuf::from("cycle")),
+            ("links/directory", PathBuf::from("..")),
+        ];
+        let mut expected_metadata = std::collections::BTreeMap::new();
+        for (relative, target) in &targets {
+            symlink(target, source.join(relative))?;
+            expected_metadata.insert(
+                *relative,
+                serde_json::to_value(UnixMetadata::read(&source.join(relative))?)?,
+            );
+        }
+        // A real socket exercises skipping without opening an unsupported entry.
+        let _listener = UnixListener::bind(source.join("sock"))?;
+        let outside_before = serde_json::to_value(UnixMetadata::read(&outside)?)?;
+        let source_for_run = source.clone();
+        let repository_for_run = repository.clone();
+        tokio::task::spawn_blocking(move || run(&source_for_run, &repository_for_run, "links"))
+            .await??;
+        let manifest = Manifest::read(&repository, "links").await?;
+        assert_eq!(manifest.entries.len(), 7);
+        assert_eq!(manifest.backup_stats.entries_created, 7);
+        assert_eq!(manifest.backup_stats.skipped_unsupported, 1);
+        assert_eq!(manifest.backup_stats.skipped_filtered, 0);
+        let backup_root = repository.join("backups/links");
+        for (relative, target) in &targets {
+            let entry = manifest
+                .entries
+                .iter()
+                .find(|entry| entry.relative_path == Path::new(relative))
+                .ok_or_else(|| format!("missing link {relative}"))?;
+            match &entry.kind {
+                ManifestEntryKind::Symlink { target: stored } => {
+                    assert_eq!(stored.as_os_str(), target.as_os_str());
+                }
+                _ => return Err(format!("incorrect type for {relative}").into()),
+            }
+            assert_eq!(
+                serde_json::to_value(&entry.metadata)?,
+                expected_metadata[relative]
+            );
+            assert_eq!(
+                std::fs::symlink_metadata(backup_root.join(relative))
+                    .err()
+                    .ok_or("created a symlink payload")?
+                    .kind(),
+                io::ErrorKind::NotFound
+            );
+            assert_eq!(
+                std::fs::read_link(source.join(relative))?.as_os_str(),
+                target.as_os_str()
+            );
+        }
+        assert!(!backup_root.join("sock").exists());
+        assert_eq!(std::fs::read_dir(backup_root.join("links"))?.count(), 0);
+        assert_eq!(
+            serde_json::to_value(UnixMetadata::read(&outside)?)?,
+            outside_before
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn empty_source_publishes_zero_counts() -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source");
+        let repository = directory.path().join("repository");
+        std::fs::create_dir(&source)?;
+        std::fs::create_dir(&repository)?;
+        let source_for_run = source.clone();
+        let repository_for_run = repository.clone();
+        tokio::task::spawn_blocking(move || run(&source_for_run, &repository_for_run, "empty"))
+            .await??;
+        let manifest = Manifest::read(&repository, "empty").await?;
+        assert!(manifest.entries.is_empty());
+        assert_eq!(manifest.backup_stats.entries_created, 0);
+        assert_eq!(manifest.backup_stats.skipped_unsupported, 0);
+        assert_eq!(manifest.backup_stats.skipped_filtered, 0);
         Ok(())
     }
 

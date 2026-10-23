@@ -1,14 +1,15 @@
 # Repository schema v2
 
-This is a breaking, SQL-first change. The schema is installed, but the Rust
-manifest model and its read/write bindings still use format v1. Backup publication
-and the existing backup/restore tests will fail until that implementation is
-updated. The SQL tests can run independently:
+The v2 model and SQL read/write bindings persist root and entry metadata,
+symbolic link targets, and statistics in one transaction. Backup collects these
+attributes before reading contents or descending into directories. Symbolic links
+have no payload in the repository: their original target is stored only in SQLite.
+Unsupported entry types are skipped and counted. Filtering is not implemented yet.
 
-```sh
-cargo test jobs::storage::tests
-cargo test v2_schema_enforces_metadata_and_entry_types
-```
+Ordinary file/directory content restore uses the v2 model. Applying saved metadata
+and recreating symbolic links remain unfinished; the current symlink restore branch
+still attempts to open a nonexistent payload. Passing content round-trip tests does
+not establish metadata or symlink restore support.
 
 Repository databases require `PRAGMA user_version = 2`; no migration is provided.
 Use a new repository for v2. Job queue tables remain at schema version 1 because
@@ -44,15 +45,18 @@ names, and checksums. SQL text uniqueness does not establish path equivalence.
 application before committing the existing single publication transaction. Root
 metadata, entries, and counts must all be bound in that transaction.
 
-## Remaining Rust work
+## Verification and remaining work
 
-- Extend `Manifest` with required root metadata and statistics, and extend entries
-  with metadata and the symlink target variant.
-- Update `Manifest::read` and `Manifest::write` to read/bind the new columns; existing
-  inserts intentionally fail rather than silently inventing source metadata.
-- Switch manifest validation, backup generation, and restore validation to format 2.
-- Add metadata/link collection and restoration, statistics, filtering, and API fields.
-- Update existing fixtures and round-trip tests to supply the required v2 fields.
+Run `cargo test jobs::backup::tests` for traversal, content integrity, root and entry
+metadata, metadata-only links (including dangling and cyclic links), unsupported
+type statistics, empty sources, and atomic metadata publication. The full test suite
+also exercises ordinary file/directory restore and HTTP lifecycle behavior.
+
+- Implement metadata and symlink restoration, including no-follow operations and
+  rejection of descendants beneath symlink entries before writing output.
+- Add filtering and expose backup statistics through job results and the UI as needed.
+- Add restore tests for metadata, links, ownership failures, and restrictive directory
+  permissions when those behaviors are implemented.
 
 The schema rejects old databases before querying their tables. It does not delete
 or upgrade any existing database or backup contents.
