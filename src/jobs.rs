@@ -1,5 +1,6 @@
 mod backup;
 mod filesystem;
+mod filter;
 mod repository;
 mod restore;
 mod storage;

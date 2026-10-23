@@ -1,12 +1,16 @@
+use crate::jobs::repository::ManifestEntryKind;
+
 use super::{
     JobError,
-    filesystem::{get_absolute_directory_path, paths_overlap, sync_directory},
+    filesystem::{get_absolute_directory_path, paths_overlap},
     repository::{Manifest, ManifestEntry},
 };
+use filetime::FileTime;
 use http::StatusCode;
 use sha2::{Digest, Sha256};
 use std::{
     io::{self, Read, Write},
+    os::unix::fs::{PermissionsExt, lchown},
     path::{Component, Path},
 };
 
@@ -124,21 +128,29 @@ fn restore_all_files(
     absolute_destination_path: &Path,
 ) -> Result<(), JobError> {
     for manifest_entry in manifest_entries {
-        validate_entry_path(match manifest_entry {
-            ManifestEntry::File { path, .. } => path,
-            ManifestEntry::Directory { path } => path,
+        validate_entry_path({
+            let ManifestEntry {
+                relative_path,
+                metadata: _,
+                kind: _,
+            } = manifest_entry;
+            relative_path
         })?;
     }
 
     for manifest_entry in manifest_entries {
-        match manifest_entry {
-            ManifestEntry::File {
-                path,
+        let ManifestEntry {
+            relative_path,
+            metadata,
+            kind,
+        } = manifest_entry;
+        match kind {
+            ManifestEntryKind::File {
                 original_size,
                 checksum,
             } => {
-                let absolute_backup_file_path = absolute_backup_path.join(path);
-                let absolute_destination_file_path = absolute_destination_path.join(path);
+                let absolute_backup_file_path = absolute_backup_path.join(relative_path);
+                let absolute_destination_file_path = absolute_destination_path.join(relative_path);
                 let file_restore_result =
                     restore_one_file(&absolute_backup_file_path, &absolute_destination_file_path)?;
                 if &file_restore_result.checksum != checksum
@@ -149,9 +161,57 @@ fn restore_all_files(
                         absolute_backup_file_path.display()
                     )));
                 }
+
+                let file =
+                    std::fs::File::open(&absolute_destination_file_path).map_err(|error| {
+                        JobError::internal(format!(
+                            "failed to open file {}: {error}",
+                            absolute_destination_file_path.display()
+                        ))
+                    })?;
+
+                lchown(
+                    &absolute_destination_file_path,
+                    Some(metadata.uid),
+                    Some(metadata.gid),
+                )
+                .map_err(|error| {
+                    JobError::internal(format!(
+                        "failed to set file uid or gid {}: {error}",
+                        absolute_destination_file_path.display()
+                    ))
+                })?;
+                file.set_permissions(std::fs::Permissions::from_mode(metadata.mode))
+                    .map_err(|error| {
+                        JobError::internal(format!(
+                            "failed to set file permission {}: {error}",
+                            absolute_destination_file_path.display()
+                        ))
+                    })?;
+
+                let atime =
+                    FileTime::from_unix_time(metadata.atime.seconds, metadata.atime.nanoseconds);
+                let mtime =
+                    FileTime::from_unix_time(metadata.mtime.seconds, metadata.mtime.nanoseconds);
+
+                filetime::set_file_handle_times(&file, Some(atime), Some(mtime)).map_err(
+                    |error| {
+                        JobError::internal(format!(
+                            "failed to set file atime or mtime {}: {error}",
+                            absolute_destination_file_path.display()
+                        ))
+                    },
+                )?;
+                file.sync_all().map_err(|error| {
+                    JobError::internal(format!(
+                        "failed to sync file {}: {error}",
+                        absolute_destination_file_path.display(),
+                    ))
+                })?;
             }
-            ManifestEntry::Directory { path } => {
-                let absolute_destination_directory_path = absolute_destination_path.join(path);
+            ManifestEntryKind::Directory => {
+                let absolute_destination_directory_path =
+                    absolute_destination_path.join(relative_path);
                 std::fs::create_dir(&absolute_destination_directory_path).map_err(|error| {
                     JobError::internal(format!(
                         "failed to create new destination directory {}: {error}",
@@ -159,12 +219,99 @@ fn restore_all_files(
                     ))
                 })?;
             }
+            ManifestEntryKind::Symlink { target } => {
+                let absolute_destination_symlink_path =
+                    absolute_destination_path.join(relative_path);
+                std::os::unix::fs::symlink(target, &absolute_destination_symlink_path).map_err(
+                    |error| {
+                        JobError::internal(format!(
+                            "cannot create symlink {}: {error}",
+                            absolute_destination_symlink_path.display()
+                        ))
+                    },
+                )?;
+                lchown(
+                    &absolute_destination_symlink_path,
+                    Some(metadata.uid),
+                    Some(metadata.gid),
+                )
+                .map_err(|error| {
+                    JobError::internal(format!(
+                        "failed to set symlink uid or gid {}: {error}",
+                        absolute_destination_symlink_path.display()
+                    ))
+                })?;
+
+                let atime =
+                    FileTime::from_unix_time(metadata.atime.seconds, metadata.atime.nanoseconds);
+                let mtime =
+                    FileTime::from_unix_time(metadata.mtime.seconds, metadata.mtime.nanoseconds);
+                filetime::set_symlink_file_times(&absolute_destination_symlink_path, atime, mtime)
+                    .map_err(|error| {
+                        JobError::internal(format!(
+                            "failed to set symlink atime or mtime {}: {error}",
+                            absolute_destination_symlink_path.display()
+                        ))
+                    })?;
+            }
         }
     }
 
     for manifest_entry in manifest_entries.iter().rev() {
-        if let ManifestEntry::Directory { path } = manifest_entry {
-            sync_directory(&absolute_destination_path.join(path))?;
+        if let ManifestEntry {
+            relative_path,
+            metadata,
+            kind: ManifestEntryKind::Directory,
+        } = manifest_entry
+        {
+            let absolute_destination_directory_path =
+                &absolute_destination_path.join(relative_path);
+            let directory =
+                std::fs::File::open(absolute_destination_directory_path).map_err(|error| {
+                    JobError::internal(format!(
+                        "failed to open directory {}: {error}",
+                        absolute_destination_directory_path.display()
+                    ))
+                })?;
+            lchown(
+                absolute_destination_directory_path,
+                Some(metadata.uid),
+                Some(metadata.gid),
+            )
+            .map_err(|error| {
+                JobError::internal(format!(
+                    "failed to set directory uid or gid {}: {error}",
+                    absolute_destination_directory_path.display()
+                ))
+            })?;
+            directory
+                .set_permissions(std::fs::Permissions::from_mode(metadata.mode))
+                .map_err(|error| {
+                    JobError::internal(format!(
+                        "failed to set directory permission {}: {error}",
+                        absolute_destination_directory_path.display()
+                    ))
+                })?;
+
+            let atime =
+                FileTime::from_unix_time(metadata.atime.seconds, metadata.atime.nanoseconds);
+            let mtime =
+                FileTime::from_unix_time(metadata.mtime.seconds, metadata.mtime.nanoseconds);
+
+            filetime::set_file_handle_times(&directory, Some(atime), Some(mtime)).map_err(
+                |error| {
+                    JobError::internal(format!(
+                        "failed to set directory atime or mtime {}: {error}",
+                        absolute_destination_directory_path.display()
+                    ))
+                },
+            )?;
+            directory.sync_all().map_err(|error| {
+                JobError::internal(format!(
+                    "failed to sync directory {}: {error}",
+                    absolute_destination_directory_path.display()
+                ))
+            })?;
         }
     }
 
@@ -227,7 +374,7 @@ pub fn run(repository: &Path, backup_id: &str, destination: &Path) -> Result<(),
 
     let manifest = handle.block_on(Manifest::read(&absolute_repository_path, backup_id))?;
 
-    if manifest.format_version != 1 {
+    if manifest.format_version != 2 {
         return Err(JobError::new(
             StatusCode::BAD_REQUEST,
             "unsupported format verions",
@@ -254,7 +401,54 @@ pub fn run(repository: &Path, backup_id: &str, destination: &Path) -> Result<(),
         &absolute_destination_path,
     )?;
 
-    sync_directory(&absolute_destination_path)?;
+    let directory = std::fs::File::open(&absolute_destination_path).map_err(|error| {
+        JobError::internal(format!(
+            "failed to open directory {}: {error}",
+            absolute_destination_path.display()
+        ))
+    })?;
+    lchown(
+        &absolute_destination_path,
+        Some(manifest.root_metadata.uid),
+        Some(manifest.root_metadata.gid),
+    )
+    .map_err(|error| {
+        JobError::internal(format!(
+            "failed to set directory uid or gid {}: {error}",
+            absolute_destination_path.display()
+        ))
+    })?;
+    directory
+        .set_permissions(std::fs::Permissions::from_mode(manifest.root_metadata.mode))
+        .map_err(|error| {
+            JobError::internal(format!(
+                "failed to set directory permission {}: {error}",
+                absolute_destination_path.display()
+            ))
+        })?;
+
+    let atime = FileTime::from_unix_time(
+        manifest.root_metadata.atime.seconds,
+        manifest.root_metadata.atime.nanoseconds,
+    );
+    let mtime = FileTime::from_unix_time(
+        manifest.root_metadata.mtime.seconds,
+        manifest.root_metadata.mtime.nanoseconds,
+    );
+
+    filetime::set_file_handle_times(&directory, Some(atime), Some(mtime)).map_err(|error| {
+        JobError::internal(format!(
+            "failed to set directory atime or mtime {}: {error}",
+            absolute_destination_path.display()
+        ))
+    })?;
+
+    directory.sync_all().map_err(|error| {
+        JobError::internal(format!(
+            "failed to sync directory {}: {error}",
+            absolute_destination_path.display()
+        ))
+    })?;
 
     Ok(())
 }
@@ -556,11 +750,20 @@ mod tests {
                     PathBuf::from(relative)
                 };
                 let mut connection = fixture.open_metadata().await?;
-                sqlx::query("INSERT INTO entries (backup_id, ordinal, type, path, original_size, checksum) VALUES (?, 1, ?, ?, ?, ?)")
-                    .bind(BACKUP_ID).bind(kind).bind(serde_json::to_string(&path)?)
+                sqlx::query("INSERT INTO entries (
+                        backup_id, ordinal, type, path, original_size, checksum,
+                        uid, gid, mode, atime_seconds, atime_nanoseconds, mtime_seconds, mtime_nanoseconds
+                    ) SELECT backup_id, 1, ?, ?, ?, ?,
+                        uid, gid, mode, atime_seconds, atime_nanoseconds, mtime_seconds, mtime_nanoseconds
+                      FROM entries WHERE backup_id = ? AND ordinal = 0")
+                    .bind(kind).bind(serde_json::to_string(&path)?)
                     .bind((kind == "file").then_some(0i64))
                     .bind((kind == "file").then(|| hex::encode(Sha256::digest([]))))
-                    .execute(&mut connection).await?;
+                    .bind(BACKUP_ID).execute(&mut connection).await?;
+                sqlx::query("UPDATE backups SET entries_created = 2 WHERE backup_id = ?")
+                    .bind(BACKUP_ID)
+                    .execute(&mut connection)
+                    .await?;
                 connection.close().await?;
                 let backup_before = fixture.backup_snapshot().await?;
                 let error = fixture

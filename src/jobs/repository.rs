@@ -1,4 +1,4 @@
-use super::{JobError, filesystem::get_absolute_directory_path, storage};
+use super::{JobError, backup::BackupStats, filesystem::get_absolute_directory_path, storage};
 use http::StatusCode;
 use sqlx::Row;
 use std::path::{Path, PathBuf};
@@ -65,20 +65,105 @@ pub struct Manifest {
     pub source: PathBuf,
     pub compression_algorithm: String,
     pub checksum_algorithm: String,
+    pub root_metadata: UnixMetadata,
+    pub backup_stats: BackupStats,
     pub entries: Vec<ManifestEntry>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
+pub struct ManifestEntry {
+    pub relative_path: PathBuf,
+    pub metadata: UnixMetadata,
+    pub kind: ManifestEntryKind,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct UnixMetadata {
+    pub uid: u32,
+    pub gid: u32,
+    pub mode: u32,
+    pub atime: FileTimestamp,
+    pub mtime: FileTimestamp,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct FileTimestamp {
+    pub seconds: i64,
+    pub nanoseconds: u32,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
-pub enum ManifestEntry {
+pub enum ManifestEntryKind {
     File {
-        path: PathBuf,
         original_size: u64,
         checksum: String,
     },
-    Directory {
-        path: PathBuf,
+    Directory,
+    Symlink {
+        target: PathBuf,
     },
+}
+
+impl UnixMetadata {
+    fn from_row(row: &sqlx::sqlite::SqliteRow, prefix: &str) -> Result<Self, JobError> {
+        let unsigned = |field: &str| -> Result<u32, JobError> {
+            let column = format!("{prefix}{field}");
+            u32::try_from(row.try_get::<i64, _>(column.as_str())?)
+                .map_err(|error| JobError::internal(format!("invalid {column}: {error}")))
+        };
+        Ok(Self {
+            uid: unsigned("uid")?,
+            gid: unsigned("gid")?,
+            mode: unsigned("mode")?,
+            atime: FileTimestamp {
+                seconds: row.try_get(format!("{prefix}atime_seconds").as_str())?,
+                nanoseconds: unsigned("atime_nanoseconds")?,
+            },
+            mtime: FileTimestamp {
+                seconds: row.try_get(format!("{prefix}mtime_seconds").as_str())?,
+                nanoseconds: unsigned("mtime_nanoseconds")?,
+            },
+        })
+    }
+
+    #[cfg(unix)]
+    pub fn read(path: &Path) -> Result<Self, JobError> {
+        use std::os::unix::fs::MetadataExt;
+
+        let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+            JobError::internal(format!(
+                "cannot read metadata for {}: {error}",
+                path.display()
+            ))
+        })?;
+
+        let nanoseconds = |value: i64| -> Result<u32, JobError> {
+            u32::try_from(value)
+                .ok()
+                .filter(|value| *value < 1_000_000_000)
+                .ok_or_else(|| {
+                    JobError::internal(format!(
+                        "invalid timestamp nanoseconds for {}: {value}",
+                        path.display()
+                    ))
+                })
+        };
+
+        Ok(Self {
+            uid: metadata.uid(),
+            gid: metadata.gid(),
+            mode: metadata.mode() & 0o7777,
+            atime: FileTimestamp {
+                seconds: metadata.atime(),
+                nanoseconds: nanoseconds(metadata.atime_nsec())?,
+            },
+            mtime: FileTimestamp {
+                seconds: metadata.mtime(),
+                nanoseconds: nanoseconds(metadata.mtime_nsec())?,
+            },
+        })
+    }
 }
 
 impl Manifest {
@@ -106,6 +191,12 @@ impl Manifest {
                 source: serde_json::from_str(&row.try_get::<String, _>("source")?)?,
                 compression_algorithm: row.try_get("compression")?,
                 checksum_algorithm: row.try_get("checksum_algorithm")?,
+                root_metadata: UnixMetadata::from_row(&row, "root_")?,
+                backup_stats: BackupStats {
+                    entries_created: row.try_get("entries_created")?,
+                    skipped_unsupported: row.try_get("skipped_unsupported")?,
+                    skipped_filtered: row.try_get("skipped_filtered")?,
+                },
                 entries: Vec::new(),
             };
             manifest.validate_format()?;
@@ -114,21 +205,29 @@ impl Manifest {
                 .fetch_all(&mut *transaction)
                 .await?
             {
-                let path = serde_json::from_str(&row.try_get::<String, _>("path")?)?;
-                let entry = match row.try_get::<String, _>("type")?.as_str() {
-                    "directory" => ManifestEntry::Directory { path },
-                    "file" => ManifestEntry::File {
-                        path,
+                let relative_path = serde_json::from_str(&row.try_get::<String, _>("path")?)?;
+                let kind = match row.try_get::<String, _>("type")?.as_str() {
+                    "directory" => ManifestEntryKind::Directory {},
+                    "file" => ManifestEntryKind::File {
                         original_size: u64::try_from(row.try_get::<i64, _>("original_size")?)
                             .map_err(|error| {
                                 JobError::internal(format!("invalid original size: {error}"))
                             })?,
                         checksum: row.try_get("checksum")?,
                     },
+                    "symlink" => ManifestEntryKind::Symlink {
+                        target: serde_json::from_str(&row.try_get::<String, _>("link_target")?)?,
+                    },
                     kind => return Err(JobError::internal(format!("invalid entry type {kind}"))),
+                };
+                let entry = ManifestEntry {
+                    relative_path,
+                    metadata: UnixMetadata::from_row(&row, "")?,
+                    kind,
                 };
                 manifest.entries.push(entry);
             }
+            manifest.validate_entry_count()?;
             transaction.commit().await?;
             Ok::<_, JobError>(manifest)
         }
@@ -151,24 +250,46 @@ impl Manifest {
         let pool = storage::open(&path, REPO_SCHEMA, true).await?;
         let result = async {
             let mut transaction = pool.begin().await?;
-            sqlx::query("INSERT INTO backups (backup_id, format_version, created_at, source, compression, checksum_algorithm) VALUES (?, ?, ?, ?, ?, ?)")
+            let root = &self.root_metadata;
+            sqlx::query("INSERT INTO backups (
+                backup_id, format_version, created_at, source, compression, checksum_algorithm,
+                root_uid, root_gid, root_mode, root_atime_seconds, root_atime_nanoseconds,
+                root_mtime_seconds, root_mtime_nanoseconds,
+                entries_created, skipped_unsupported, skipped_filtered
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                 .bind(&self.backup_id).bind(i64::from(self.format_version)).bind(&self.created_at)
                 .bind(serde_json::to_string(&self.source)?).bind(&self.compression_algorithm).bind(&self.checksum_algorithm)
+                .bind(i64::from(root.uid)).bind(i64::from(root.gid)).bind(i64::from(root.mode))
+                .bind(root.atime.seconds).bind(i64::from(root.atime.nanoseconds))
+                .bind(root.mtime.seconds).bind(i64::from(root.mtime.nanoseconds))
+                .bind(self.backup_stats.entries_created).bind(self.backup_stats.skipped_unsupported).bind(self.backup_stats.skipped_filtered)
                 .execute(&mut *transaction).await?;
             for (ordinal, entry) in self.entries.iter().enumerate() {
-                let (kind, path, size, checksum) = match entry {
-                    ManifestEntry::Directory { path } => ("directory", path, None, None),
-                    ManifestEntry::File { path, original_size, checksum } => (
-                        "file", path,
-                        Some(i64::try_from(*original_size).map_err(|error| JobError::internal(format!("file size for {} is out of range: {error}", path.display())))?),
-                        Some(checksum),
+                let (kind, size, checksum, target) = match &entry.kind {
+                    ManifestEntryKind::Directory => ("directory", None, None, None),
+                    ManifestEntryKind::File { original_size, checksum } => (
+                        "file",
+                        Some(i64::try_from(*original_size).map_err(|error| JobError::internal(format!("file size for {} is out of range: {error}", entry.relative_path.display())))?),
+                        Some(checksum), None,
+                    ),
+                    ManifestEntryKind::Symlink { target } => (
+                        "symlink", None, None, Some(serde_json::to_string(target)?),
                     ),
                 };
+                let metadata = &entry.metadata;
                 let ordinal = i64::try_from(ordinal).map_err(|error| JobError::internal(format!("entry ordinal is out of range: {error}")))?;
-                sqlx::query("INSERT INTO entries (backup_id, ordinal, type, path, original_size, checksum) VALUES (?, ?, ?, ?, ?, ?)")
-                    .bind(&self.backup_id).bind(ordinal).bind(kind).bind(serde_json::to_string(path)?)
-                    .bind(size).bind(checksum).execute(&mut *transaction).await?;
+                sqlx::query("INSERT INTO entries (
+                    backup_id, ordinal, type, path, original_size, checksum, link_target,
+                    uid, gid, mode, atime_seconds, atime_nanoseconds, mtime_seconds, mtime_nanoseconds
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                    .bind(&self.backup_id).bind(ordinal).bind(kind).bind(serde_json::to_string(&entry.relative_path)?)
+                    .bind(size).bind(checksum).bind(target)
+                    .bind(i64::from(metadata.uid)).bind(i64::from(metadata.gid)).bind(i64::from(metadata.mode))
+                    .bind(metadata.atime.seconds).bind(i64::from(metadata.atime.nanoseconds))
+                    .bind(metadata.mtime.seconds).bind(i64::from(metadata.mtime.nanoseconds))
+                    .execute(&mut *transaction).await?;
             }
+            self.validate_entry_count()?;
             transaction.commit().await?;
             Ok::<_, JobError>(())
         }.await;
@@ -182,8 +303,19 @@ impl Manifest {
         })
     }
 
+    fn validate_entry_count(&self) -> Result<(), JobError> {
+        let count = i64::try_from(self.entries.len())
+            .map_err(|error| JobError::internal(format!("entry count is out of range: {error}")))?;
+        if self.backup_stats.entries_created != count {
+            return Err(JobError::internal(
+                "entries_created does not match the stored entry count",
+            ));
+        }
+        Ok(())
+    }
+
     fn validate_format(&self) -> Result<(), JobError> {
-        if self.format_version != 1
+        if self.format_version != 2
             || self.compression_algorithm != "zstd"
             || self.checksum_algorithm != "sha256"
         {
@@ -342,12 +474,18 @@ mod tests {
 
     fn header(repository: &Path, backup_id: &str, second: u8) -> Manifest {
         Manifest {
-            format_version: 1,
+            format_version: 2,
             backup_id: backup_id.to_owned(),
             created_at: format!("2026-10-13T00:00:{second:02}.000Z"),
             source: repository.to_owned(),
             compression_algorithm: "zstd".into(),
             checksum_algorithm: "sha256".into(),
+            root_metadata: metadata(100),
+            backup_stats: BackupStats {
+                entries_created: 0,
+                skipped_unsupported: 2,
+                skipped_filtered: 3,
+            },
             entries: Vec::new(),
         }
     }
@@ -445,10 +583,13 @@ mod tests {
         header(repository, "published", 0).write(repository).await?;
         std::fs::create_dir_all(repository.join("backups/unpublished"))?;
         let mut failed = header(repository, "unpublished", 3);
-        failed.entries.push(ManifestEntry::File {
-            path: "out-of-range".into(),
-            original_size: u64::MAX,
-            checksum: "hash".into(),
+        failed.entries.push(ManifestEntry {
+            relative_path: "out-of-range".into(),
+            metadata: metadata(1),
+            kind: ManifestEntryKind::File {
+                original_size: u64::MAX,
+                checksum: "hash".into(),
+            },
         });
         assert!(failed.write(repository).await.is_err());
         let summaries = list_at(repository).await??;
@@ -510,22 +651,63 @@ mod tests {
         Ok(())
     }
 
+    fn metadata(seed: u32) -> UnixMetadata {
+        UnixMetadata {
+            uid: u32::MAX - seed,
+            gid: 3_000_000_000 + seed,
+            mode: 0o4750 + seed % 8,
+            atime: FileTimestamp {
+                seconds: -1234 - i64::from(seed),
+                nanoseconds: seed,
+            },
+            mtime: FileTimestamp {
+                seconds: 1_700_000_000 + i64::from(seed),
+                nanoseconds: 999_999_999 - seed,
+            },
+        }
+    }
+
     fn manifest() -> Manifest {
         Manifest {
-            format_version: 1,
+            format_version: 2,
             backup_id: "backup-001".into(),
             created_at: "2026-10-09T00:00:00Z".into(),
             source: "/source".into(),
             compression_algorithm: "zstd".into(),
             checksum_algorithm: "sha256".into(),
+            root_metadata: metadata(100),
+            backup_stats: BackupStats {
+                entries_created: 4,
+                skipped_unsupported: 2,
+                skipped_filtered: 3,
+            },
             entries: vec![
-                ManifestEntry::Directory {
-                    path: "empty".into(),
+                ManifestEntry {
+                    relative_path: "empty".into(),
+                    metadata: metadata(1),
+                    kind: ManifestEntryKind::Directory {},
                 },
-                ManifestEntry::File {
-                    path: "file.txt".into(),
-                    original_size: 0,
-                    checksum: "empty-file-sha256".into(),
+                ManifestEntry {
+                    relative_path: "file.txt".into(),
+                    metadata: metadata(2),
+                    kind: ManifestEntryKind::File {
+                        original_size: 0,
+                        checksum: "empty-file-sha256".into(),
+                    },
+                },
+                ManifestEntry {
+                    relative_path: "relative link".into(),
+                    metadata: metadata(3),
+                    kind: ManifestEntryKind::Symlink {
+                        target: "../目录/./missing".into(),
+                    },
+                },
+                ManifestEntry {
+                    relative_path: "absolute-link".into(),
+                    metadata: metadata(4),
+                    kind: ManifestEntryKind::Symlink {
+                        target: "/outside/missing".into(),
+                    },
                 },
             ],
         }
@@ -563,10 +745,13 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
         let mut manifest = manifest();
-        manifest.entries.push(ManifestEntry::File {
-            path: "too-large".into(),
-            original_size: u64::MAX,
-            checksum: "hash".into(),
+        manifest.entries.push(ManifestEntry {
+            relative_path: "too-large".into(),
+            metadata: metadata(5),
+            kind: ManifestEntryKind::File {
+                original_size: u64::MAX,
+                checksum: "hash".into(),
+            },
         });
         let error = manifest
             .write(directory.path())
@@ -595,7 +780,7 @@ mod tests {
         pool.close().await;
         manifest.entries.pop();
         manifest.write(directory.path()).await?;
-        manifest.format_version = 2;
+        manifest.format_version = 1;
         assert!(manifest.write(directory.path()).await.is_err());
         let pool = storage::open(
             &directory.path().join("repository.sqlite3"),
@@ -604,6 +789,49 @@ mod tests {
         )
         .await?;
         sqlx::query("UPDATE backups SET compression = 'unknown'")
+            .execute(&pool)
+            .await?;
+        pool.close().await;
+        assert!(
+            Manifest::read(directory.path(), &manifest.backup_id)
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn invalid_metadata_and_counts_roll_back_publication() -> TestResult {
+        let directory = TestDirectory::new()?;
+        let mut manifest = manifest();
+        manifest.entries[1].metadata.mtime.nanoseconds = 1_000_000_000;
+        assert!(manifest.write(directory.path()).await.is_err());
+        manifest.entries[1].metadata = metadata(2);
+        manifest.backup_stats.entries_created = 5;
+        assert!(manifest.write(directory.path()).await.is_err());
+        assert!(list_at(directory.path()).await??.is_empty());
+        let pool = storage::open(
+            &directory.path().join("repository.sqlite3"),
+            REPO_SCHEMA,
+            false,
+        )
+        .await?;
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM entries")
+                .fetch_one(&pool)
+                .await?,
+            0
+        );
+        pool.close().await;
+        manifest.backup_stats.entries_created = 4;
+        manifest.write(directory.path()).await?;
+        let pool = storage::open(
+            &directory.path().join("repository.sqlite3"),
+            REPO_SCHEMA,
+            false,
+        )
+        .await?;
+        sqlx::query("UPDATE backups SET entries_created = 5")
             .execute(&pool)
             .await?;
         pool.close().await;
