@@ -47,7 +47,7 @@ fn asset(content_type: &'static str, body: &'static str) -> impl axum::response:
             ("referrer-policy", "no-referrer"),
             (
                 "content-security-policy",
-                "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+                "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' http: https:; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
             ),
         ],
         body,

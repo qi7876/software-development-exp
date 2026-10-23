@@ -192,6 +192,38 @@ h2 {
   width: 100%;
   font-size: 12px;
 }
+.connection-panel button + button {
+  margin-top: 8px;
+}
+.connection-name {
+  margin-top: 8px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.connection-form {
+  margin-top: 24px;
+}
+.connection-form .form-grid {
+  margin-top: 20px;
+}
+.connection-form .form-actions {
+  gap: 12px;
+}
+.connection-list {
+  margin-top: 16px;
+}
+.data-table.connections-table th:first-child {
+  width: 20%;
+}
+.connections-table th:nth-child(3) {
+  width: 90px;
+}
+.data-table.connections-table th:last-child {
+  width: 210px;
+}
+.connection-actions button + button {
+  margin-left: 8px;
+}
 main {
   margin-left: 208px;
   padding: 32px;
