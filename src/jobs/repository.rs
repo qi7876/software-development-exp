@@ -9,29 +9,52 @@ pub struct RepoBackupInfo {
     pub created_at: String,
 }
 
-pub const REPO_SCHEMA: &str = "
+pub const REPO_SCHEMA: storage::Schema = storage::Schema {
+    version: 2,
+    sql: "
 CREATE TABLE backups (
     backup_id TEXT PRIMARY KEY NOT NULL,
-    format_version INTEGER NOT NULL,
+    format_version INTEGER NOT NULL CHECK (format_version = 2),
     created_at TEXT NOT NULL,
     source TEXT NOT NULL,
     compression TEXT NOT NULL,
-    checksum_algorithm TEXT NOT NULL
+    checksum_algorithm TEXT NOT NULL,
+    root_uid INTEGER NOT NULL CHECK (root_uid BETWEEN 0 AND 4294967295),
+    root_gid INTEGER NOT NULL CHECK (root_gid BETWEEN 0 AND 4294967295),
+    root_mode INTEGER NOT NULL CHECK (root_mode BETWEEN 0 AND 4095),
+    root_atime_seconds INTEGER NOT NULL,
+    root_atime_nanoseconds INTEGER NOT NULL CHECK (root_atime_nanoseconds BETWEEN 0 AND 999999999),
+    root_mtime_seconds INTEGER NOT NULL,
+    root_mtime_nanoseconds INTEGER NOT NULL CHECK (root_mtime_nanoseconds BETWEEN 0 AND 999999999),
+    entries_created INTEGER NOT NULL CHECK (entries_created >= 0),
+    skipped_unsupported INTEGER NOT NULL CHECK (skipped_unsupported >= 0),
+    skipped_filtered INTEGER NOT NULL CHECK (skipped_filtered >= 0)
 );
 CREATE TABLE entries (
     backup_id TEXT NOT NULL REFERENCES backups(backup_id),
     ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
-    type TEXT NOT NULL CHECK (type IN ('file', 'directory')),
+    type TEXT NOT NULL CHECK (type IN ('file', 'directory', 'symlink')),
     path TEXT NOT NULL,
+    uid INTEGER NOT NULL CHECK (uid BETWEEN 0 AND 4294967295),
+    gid INTEGER NOT NULL CHECK (gid BETWEEN 0 AND 4294967295),
+    mode INTEGER NOT NULL CHECK (mode BETWEEN 0 AND 4095),
+    atime_seconds INTEGER NOT NULL,
+    atime_nanoseconds INTEGER NOT NULL CHECK (atime_nanoseconds BETWEEN 0 AND 999999999),
+    mtime_seconds INTEGER NOT NULL,
+    mtime_nanoseconds INTEGER NOT NULL CHECK (mtime_nanoseconds BETWEEN 0 AND 999999999),
     original_size INTEGER,
     checksum TEXT,
+    link_target TEXT,
     PRIMARY KEY (backup_id, ordinal),
+    UNIQUE (backup_id, path),
     CHECK (
-        (type = 'file' AND original_size IS NOT NULL AND original_size >= 0 AND checksum IS NOT NULL) OR
-        (type = 'directory' AND original_size IS NULL AND checksum IS NULL)
+        (type = 'file' AND original_size IS NOT NULL AND original_size >= 0 AND checksum IS NOT NULL AND link_target IS NULL) OR
+        (type = 'directory' AND original_size IS NULL AND checksum IS NULL AND link_target IS NULL) OR
+        (type = 'symlink' AND original_size IS NULL AND checksum IS NULL AND link_target IS NOT NULL)
     )
 );
-";
+",
+};
 
 // Repository metadata is committed once and is immutable thereafter.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -231,6 +254,84 @@ mod tests {
     use std::{collections::BTreeMap, error::Error};
 
     type TestResult = Result<(), Box<dyn Error>>;
+
+    #[tokio::test]
+    async fn v2_schema_enforces_metadata_and_entry_types() -> TestResult {
+        let directory = TestDirectory::new()?;
+        let pool = storage::open(
+            &directory.path().join("repository.sqlite3"),
+            REPO_SCHEMA,
+            true,
+        )
+        .await?;
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+                .fetch_one(&pool)
+                .await?,
+            2
+        );
+        sqlx::query(
+            "INSERT INTO backups (
+            backup_id, format_version, created_at, source, compression, checksum_algorithm,
+            root_uid, root_gid, root_mode, root_atime_seconds, root_atime_nanoseconds,
+            root_mtime_seconds, root_mtime_nanoseconds,
+            entries_created, skipped_unsupported, skipped_filtered
+        ) VALUES ('backup', 2, '2026-10-23T00:00:00Z', '\"/source\"', 'zstd', 'sha256',
+            4294967295, 0, 4095, -1, 999999999, 0, 0, 3, 2, 1)",
+        )
+        .execute(&pool)
+        .await?;
+        for (ordinal, kind, size, checksum, target) in [
+            (0i64, "file", Some(0i64), Some("hash"), None),
+            (1, "directory", None, None, None),
+            (2, "symlink", None, None, Some("\"../missing\"")),
+        ] {
+            sqlx::query(
+                "INSERT INTO entries (
+                backup_id, ordinal, type, path, uid, gid, mode,
+                atime_seconds, atime_nanoseconds, mtime_seconds, mtime_nanoseconds,
+                original_size, checksum, link_target
+            ) VALUES ('backup', ?, ?, ?, 1000, 1000, 420, 0, 0, 0, 0, ?, ?, ?)",
+            )
+            .bind(ordinal)
+            .bind(kind)
+            .bind(format!("\"{kind}\""))
+            .bind(size)
+            .bind(checksum)
+            .bind(target)
+            .execute(&pool)
+            .await?;
+        }
+        for statement in [
+            "UPDATE entries SET uid = -1",
+            "UPDATE entries SET gid = 4294967296",
+            "UPDATE entries SET mode = 4096",
+            "UPDATE entries SET atime_nanoseconds = -1",
+            "UPDATE entries SET mtime_nanoseconds = 1000000000",
+            "UPDATE entries SET type = 'socket'",
+            "UPDATE entries SET original_size = NULL WHERE type = 'file'",
+            "UPDATE entries SET original_size = -1 WHERE type = 'file'",
+            "UPDATE entries SET checksum = NULL WHERE type = 'file'",
+            "UPDATE entries SET link_target = NULL WHERE type = 'symlink'",
+            "UPDATE entries SET link_target = 'target' WHERE type = 'directory'",
+            "UPDATE entries SET original_size = 0 WHERE type = 'symlink'",
+            "UPDATE entries SET path = 'duplicate'",
+            "UPDATE entries SET backup_id = 'missing'",
+            "UPDATE backups SET format_version = 1",
+            "UPDATE backups SET root_uid = NULL",
+            "UPDATE backups SET root_mtime_nanoseconds = 1000000000",
+            "UPDATE backups SET entries_created = -1",
+            "UPDATE backups SET skipped_unsupported = -1",
+            "UPDATE backups SET skipped_filtered = -1",
+        ] {
+            assert!(
+                sqlx::query(statement).execute(&pool).await.is_err(),
+                "accepted {statement}"
+            );
+        }
+        pool.close().await;
+        Ok(())
+    }
 
     async fn list_at(
         repository: &Path,
