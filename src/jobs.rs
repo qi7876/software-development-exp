@@ -16,7 +16,9 @@ use std::{
 use tokio::sync::{Notify, watch};
 use uuid::Uuid;
 
-const JOBS_SCHEMA: &str = "
+const JOBS_SCHEMA: storage::Schema = storage::Schema {
+    version: 1,
+    sql: "
 CREATE TABLE jobs (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id TEXT NOT NULL UNIQUE,
@@ -36,7 +38,8 @@ CREATE TABLE jobs (
 );
 CREATE INDEX queued_jobs ON jobs(sequence) WHERE state = 'queued';
 CREATE UNIQUE INDEX one_running_job ON jobs(state) WHERE state = 'running';
-";
+",
+};
 
 #[derive(Clone)]
 pub(crate) struct JobManager {
