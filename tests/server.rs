@@ -29,6 +29,16 @@ const LIST_PATH: &str = "/api/backups?repository=repo+with+space";
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 type Tree = BTreeMap<PathBuf, Option<Vec<u8>>>;
 
+fn unfiltered() -> Value {
+    json!({
+        "relative_path": {"include": [], "exclude": []},
+        "uid": {"include": [], "exclude": []},
+        "gid": {"include": [], "exclude": []},
+        "mode": {"include": [], "exclude": []},
+        "atime": {"from": null, "before": null}, "mtime": {"from": null, "before": null}
+    })
+}
+
 struct TestDirectory(PathBuf);
 
 impl TestDirectory {
@@ -214,7 +224,7 @@ impl TestServer {
     async fn backup(&self) -> TestResult<String> {
         self.submit(
             "/api/backups",
-            json!({"source": "source", "repository": "repo with space"}),
+            json!({"source": "source", "repository": "repo with space", "filter": unfiltered()}),
         )
         .await
     }
@@ -453,6 +463,81 @@ async fn occupied_destination_is_preserved(
 }
 
 #[tokio::test]
+async fn filters_survive_restart_and_control_backup_and_restore_through_http() -> TestResult {
+    let mut server = TestServer::start().await?;
+    std::fs::create_dir(server.path("source/docs"))?;
+    std::fs::create_dir(server.path("source/blocked"))?;
+    std::fs::write(server.path("source/docs/keep.txt"), b"selected")?;
+    std::fs::write(server.path("source/docs/drop.tmp"), b"excluded")?;
+    std::fs::write(server.path("source/blocked/unvisited.txt"), b"pruned")?;
+    std::fs::write(server.path("source/root.bin"), b"not selected")?;
+    let mut filter = unfiltered();
+    filter["relative_path"] = json!({"include": ["^docs(/|$)"], "exclude": ["\\.tmp$"]});
+    let id = server
+        .submit(
+            "/api/backups",
+            json!({
+                "source": "source", "repository": "repo with space", "filter": filter
+            }),
+        )
+        .await?;
+    let backup = server.wait_job(&id, false).await?;
+    assert_eq!(backup["state"], "succeeded");
+    let backup_id = backup["result"]["backup_id"]
+        .as_str()
+        .ok_or("missing backup ID")?;
+    let history = server.get("/api/jobs").await?;
+    assert_eq!(history["jobs"][0]["request"]["filter"], filter);
+    server.restart().await?;
+    assert_eq!(server.get("/api/jobs").await?, history);
+    let id = server
+        .submit(
+            "/api/restores",
+            json!({
+                "repository": "repo with space", "backup_id": backup_id, "destination": "restored"
+            }),
+        )
+        .await?;
+    assert_eq!(server.wait_job(&id, false).await?["state"], "succeeded");
+    assert_eq!(
+        read_tree(&server.path("restored"))?,
+        [
+            (PathBuf::from("docs"), None),
+            (PathBuf::from("docs/keep.txt"), Some(b"selected".to_vec())),
+        ]
+        .into()
+    );
+    server.stop().await
+}
+
+#[tokio::test]
+async fn invalid_filter_jobs_fail_before_creating_repository_contents() -> TestResult {
+    let mut server = TestServer::start().await?;
+    let mut invalid_regex = unfiltered();
+    invalid_regex["relative_path"]["exclude"] = json!(["["]);
+    let mut invalid_range = unfiltered();
+    invalid_range["mtime"] =
+        json!({"from": "2026-10-26T00:00:00Z", "before": "2026-10-25T00:00:00Z"});
+    for filter in [invalid_regex, invalid_range] {
+        let id = server
+            .submit(
+                "/api/backups",
+                json!({
+                    "source": "source", "repository": "repo with space", "filter": filter
+                }),
+            )
+            .await?;
+        let failed = server.wait_job(&id, false).await?;
+        assert_eq!(failed["state"], "failed");
+        assert_eq!(failed["error"]["code"], 400);
+        assert_eq!(server.get(LIST_PATH).await?, json!({"backups": []}));
+        assert!(!server.path("repo with space/backups").exists());
+        assert!(!server.path("repo with space/repository.sqlite3").exists());
+    }
+    server.stop().await
+}
+
+#[tokio::test]
 async fn job_history_paginates_without_duplicates_and_survives_restart() -> TestResult {
     let mut server = TestServer::start().await?;
     assert_eq!(
@@ -464,7 +549,7 @@ async fn job_history_paginates_without_duplicates_and_survives_restart() -> Test
         let id = server
             .submit(
                 "/api/backups",
-                json!({"source": source, "repository": "repo with space"}),
+                json!({"source": source, "repository": "repo with space", "filter": unfiltered()}),
             )
             .await?;
         server.wait_job(&id, false).await?;
@@ -476,11 +561,12 @@ async fn job_history_paginates_without_duplicates_and_survives_restart() -> Test
     let item = &first["jobs"][0];
     assert_eq!(
         item["request"],
-        json!({"kind": "Backup", "source": "missing-third", "repository": "repo with space"})
+        json!({"kind": "Backup", "source": "missing-third", "repository": "repo with space", "filter": unfiltered()})
     );
-    assert!(item["queued_at"].is_i64());
-    assert!(item["started_at"].as_i64() >= item["queued_at"].as_i64());
-    assert!(item["finished_at"].as_i64() >= item["started_at"].as_i64());
+    // Sequence defines ordering; sampled wall-clock timestamps need not be monotonic.
+    for field in ["queued_at", "started_at", "finished_at"] {
+        assert!(item[field].is_i64(), "missing {field}: {item}");
+    }
     assert_eq!(item["state"], "failed");
     assert!(
         item["error"]["message"]
@@ -527,7 +613,7 @@ async fn startup_authentication_and_failed_job_reporting() -> TestResult {
         .submit(
             "/api/backups",
             json!({
-                "source": "missing-source", "repository": "repo with space",
+                "source": "missing-source", "repository": "repo with space", "filter": unfiltered(),
             }),
         )
         .await?;

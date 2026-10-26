@@ -513,8 +513,15 @@ mod tests {
         async fn backup(&self) -> TestResult {
             let source = self.source.clone();
             let repository = self.repository.clone();
-            tokio::task::spawn_blocking(move || backup::run(&source, &repository, BACKUP_ID))
-                .await??;
+            tokio::task::spawn_blocking(move || {
+                backup::run(
+                    &source,
+                    &repository,
+                    &crate::test_support::unfiltered()?,
+                    BACKUP_ID,
+                )
+            })
+            .await??;
             Ok(())
         }
 

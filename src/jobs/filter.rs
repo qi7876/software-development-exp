@@ -138,3 +138,180 @@ impl CompiledRegexFilter {
         included && !excluded
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{unfiltered, unfiltered_config};
+    use serde_json::json;
+    use std::error::Error;
+
+    type TestResult = Result<(), Box<dyn Error>>;
+
+    fn metadata() -> UnixMetadata {
+        UnixMetadata {
+            uid: 1000,
+            gid: 2000,
+            mode: 0o644,
+            atime: FileTimestamp {
+                seconds: 100,
+                nanoseconds: 150,
+            },
+            mtime: FileTimestamp {
+                seconds: 100,
+                nanoseconds: 150,
+            },
+        }
+    }
+
+    #[test]
+    fn empty_rules_allow_entries() -> TestResult {
+        assert!(
+            unfiltered()?
+                .compile()?
+                .matches(Path::new("目录/report.txt"), &metadata())?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn regex_includes_are_alternatives_and_excludes_take_precedence() -> TestResult {
+        let mut config = unfiltered_config();
+        config["relative_path"] = json!({
+            "include": ["\\.txt$", "^docs/"],
+            "exclude": ["^docs/private(/|$)"]
+        });
+        let filter: Filter = serde_json::from_value(config)?;
+        let filter = filter.compile()?;
+        for (path, expected) in [
+            ("report.txt", true),
+            ("docs/report.csv", true),
+            ("docs/private/report.txt", false),
+            ("image.png", false),
+        ] {
+            assert_eq!(
+                filter.matches(Path::new(path), &metadata())?,
+                expected,
+                "{path}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn metadata_fields_are_combined_and_mode_is_octal() -> TestResult {
+        let mut config = unfiltered_config();
+        config["relative_path"]["include"] = json!(["^docs/"]);
+        config["uid"]["include"] = json!(["^999$", "^1000$"]);
+        config["gid"]["include"] = json!(["^2000$"]);
+        config["mode"]["include"] = json!(["^0644$"]);
+        let filter: Filter = serde_json::from_value(config.clone())?;
+        assert!(
+            filter
+                .compile()?
+                .matches(Path::new("docs/report.txt"), &metadata())?
+        );
+        assert!(
+            !filter
+                .compile()?
+                .matches(Path::new("other/report.txt"), &metadata())?
+        );
+        for (field, pattern) in [("uid", "^1000$"), ("gid", "^2000$"), ("mode", "^0644$")] {
+            let mut excluded = config.clone();
+            excluded[field]["exclude"] = json!([pattern]);
+            let filter: Filter = serde_json::from_value(excluded)?;
+            assert!(
+                !filter
+                    .compile()?
+                    .matches(Path::new("docs/report.txt"), &metadata())?,
+                "{field}"
+            );
+        }
+        config["mode"]["include"] = json!(["^420$"]);
+        let filter: Filter = serde_json::from_value(config)?;
+        assert!(
+            !filter
+                .compile()?
+                .matches(Path::new("docs/report.txt"), &metadata())?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn time_ranges_use_inclusive_from_and_exclusive_before_at_nanosecond_precision() -> TestResult {
+        for field in ["atime", "mtime"] {
+            let mut config = unfiltered_config();
+            config[field] = json!({
+                "from": "1970-01-01T01:01:40.000000100+01:00",
+                "before": "1970-01-01T00:01:40.000000200Z"
+            });
+            let filter: Filter = serde_json::from_value(config)?;
+            let filter = filter.compile()?;
+            for (nanoseconds, expected) in [(99, false), (100, true), (199, true), (200, false)] {
+                let mut metadata = metadata();
+                let timestamp = FileTimestamp {
+                    seconds: 100,
+                    nanoseconds,
+                };
+                if field == "atime" {
+                    metadata.atime = timestamp;
+                } else {
+                    metadata.mtime = timestamp;
+                }
+                assert_eq!(
+                    filter.matches(Path::new("file"), &metadata)?,
+                    expected,
+                    "{field}: {nanoseconds}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn time_ranges_allow_either_bound_to_be_omitted() -> TestResult {
+        for field in ["atime", "mtime"] {
+            for (range, expected) in [
+                (json!({}), true),
+                (json!({"from": "1970-01-01T00:01:40Z"}), true),
+                (json!({"from": "1970-01-01T00:01:41Z"}), false),
+                (json!({"before": "1970-01-01T00:01:41Z"}), true),
+                (json!({"before": "1970-01-01T00:01:40Z"}), false),
+            ] {
+                let mut config = unfiltered_config();
+                config[field] = range;
+                let filter: Filter = serde_json::from_value(config)?;
+                assert_eq!(
+                    filter.compile()?.matches(Path::new("file"), &metadata())?,
+                    expected
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_regexes_and_time_ranges_are_rejected() -> TestResult {
+        for field in ["relative_path", "uid", "gid", "mode"] {
+            for list in ["include", "exclude"] {
+                let mut config = unfiltered_config();
+                config[field][list] = json!(["["]);
+                let filter: Filter = serde_json::from_value(config)?;
+                let error = filter.compile().err().ok_or("accepted invalid regex")?;
+                assert_eq!(error.code, StatusCode::BAD_REQUEST);
+            }
+        }
+        for field in ["atime", "mtime"] {
+            for before in ["1970-01-01T00:00:00Z", "1969-12-31T23:59:59Z"] {
+                let mut config = unfiltered_config();
+                config[field] = json!({"from": "1970-01-01T00:00:00Z", "before": before});
+                let filter: Filter = serde_json::from_value(config)?;
+                assert_eq!(
+                    filter.compile().err().ok_or("accepted invalid range")?.code,
+                    StatusCode::BAD_REQUEST
+                );
+            }
+        }
+        Ok(())
+    }
+}

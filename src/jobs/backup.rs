@@ -83,7 +83,7 @@ fn walk_directory(
                 ),
             )
         })?;
-        if file_type.is_dir() || file_type.is_file() || file_type.is_symlink() {
+        if !file_type.is_dir() && !file_type.is_file() && !file_type.is_symlink() {
             backip_stats.skipped_unsupported += 1;
             continue;
         }
@@ -98,13 +98,13 @@ fn walk_directory(
             backip_stats.entries_created += 1;
             backup_entries.push(BackupEntry {
                 relative_path: relative_file_path,
-                metadata: metadata,
+                metadata,
                 kind: BackupEntryKind::Directory,
             });
             walk_directory(
                 absolute_root,
                 &absolute_file_path,
-                &compiled_filter,
+                compiled_filter,
                 backip_stats,
                 backup_entries,
             )?;
@@ -112,14 +112,14 @@ fn walk_directory(
             backip_stats.entries_created += 1;
             backup_entries.push(BackupEntry {
                 relative_path: relative_file_path,
-                metadata: metadata,
+                metadata,
                 kind: BackupEntryKind::File,
             });
         } else if file_type.is_symlink() {
             backip_stats.entries_created += 1;
             backup_entries.push(BackupEntry {
                 relative_path: relative_file_path,
-                metadata: metadata,
+                metadata,
                 kind: BackupEntryKind::Symlink,
             });
         }
@@ -141,7 +141,7 @@ fn path_traversal(
     walk_directory(
         absolute_source_path,
         absolute_source_path,
-        &compiled_filter,
+        compiled_filter,
         &mut backup_stats,
         &mut backup_entries,
     )?;
@@ -407,7 +407,7 @@ pub(super) fn run(
 #[cfg(test)]
 mod tests {
     use super::{super::repository::REPO_SCHEMA, super::storage, *};
-    use crate::test_support::TestDirectory;
+    use crate::test_support::{TestDirectory, unfiltered};
     use std::error::Error;
 
     #[test]
@@ -418,7 +418,7 @@ mod tests {
         std::fs::write(&source, "hello")?;
         std::fs::create_dir(&repo)?;
         let backup_id = "12345";
-        let err = run(&source, &repo, backup_id)
+        let err = run(&source, &repo, &unfiltered()?, backup_id)
             .err()
             .ok_or("accepted a file as source")?;
         assert_eq!(err.code, StatusCode::BAD_REQUEST);
@@ -434,7 +434,7 @@ mod tests {
         std::fs::create_dir(&source)?;
         std::fs::create_dir(&repo)?;
         let backup_id = "12345";
-        let err = run(&source, &repo, backup_id)
+        let err = run(&source, &repo, &unfiltered()?, backup_id)
             .err()
             .ok_or("accepted overlaped paths")?;
         assert_eq!(err.code, StatusCode::BAD_REQUEST);
@@ -451,7 +451,7 @@ mod tests {
         std::fs::create_dir(&source)?;
         std::os::unix::fs::symlink(&source, &alias)?;
         let backup_id = "12345";
-        let err = run(&source, &alias, backup_id)
+        let err = run(&source, &alias, &unfiltered()?, backup_id)
             .err()
             .ok_or("accepted overlaped symlink paths")?;
         assert_eq!(err.code, StatusCode::BAD_REQUEST);
@@ -468,7 +468,7 @@ mod tests {
         std::fs::create_dir(&source)?;
         std::fs::write(&source_file, "hello")?;
         std::fs::create_dir(&source_empty)?;
-        let (stats, entries) = path_traversal(&source)?;
+        let (stats, entries) = path_traversal(&source, &unfiltered()?.compile()?)?;
         assert_eq!(stats.entries_created, entries.len() as i64);
         assert_eq!(stats.skipped_unsupported, 0);
         assert_eq!(stats.skipped_filtered, 0);
@@ -501,7 +501,7 @@ mod tests {
         std::fs::create_dir(&source_docs)?;
         std::fs::write(&source_docs_file, "readme")?;
         std::fs::create_dir(&source_empty)?;
-        let (stats, entries) = path_traversal(&source)?;
+        let (stats, entries) = path_traversal(&source, &unfiltered()?.compile()?)?;
         assert_eq!(stats.entries_created, entries.len() as i64);
         assert_eq!(stats.skipped_unsupported, 0);
         assert_eq!(stats.skipped_filtered, 0);
@@ -545,7 +545,7 @@ mod tests {
         std::fs::write(&source_file, "hello")?;
         std::fs::create_dir(&source_docs)?;
         std::os::unix::fs::symlink(&source_file, &alias)?;
-        let (stats, entries) = path_traversal(&source)?;
+        let (stats, entries) = path_traversal(&source, &unfiltered()?.compile()?)?;
         assert_eq!(stats.entries_created, 3);
         assert_eq!(stats.skipped_unsupported, 0);
         assert_eq!(stats.skipped_filtered, 0);
@@ -683,7 +683,12 @@ mod tests {
         let repository_for_run = repository.clone();
 
         tokio::task::spawn_blocking(move || {
-            run(&source_for_run, &repository_for_run, "backup-001")
+            run(
+                &source_for_run,
+                &repository_for_run,
+                &unfiltered()?,
+                "backup-001",
+            )
         })
         .await??;
 
@@ -797,8 +802,15 @@ mod tests {
         let outside_before = serde_json::to_value(UnixMetadata::read(&outside)?)?;
         let source_for_run = source.clone();
         let repository_for_run = repository.clone();
-        tokio::task::spawn_blocking(move || run(&source_for_run, &repository_for_run, "links"))
-            .await??;
+        tokio::task::spawn_blocking(move || {
+            run(
+                &source_for_run,
+                &repository_for_run,
+                &unfiltered()?,
+                "links",
+            )
+        })
+        .await??;
         let manifest = Manifest::read(&repository, "links").await?;
         assert_eq!(manifest.entries.len(), 7);
         assert_eq!(manifest.backup_stats.entries_created, 7);
@@ -844,6 +856,80 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn filters_prune_directories_and_count_only_encountered_entries()
+    -> Result<(), Box<dyn Error>> {
+        use std::os::unix::{fs::symlink, net::UnixListener};
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("s");
+        let repository = directory.path().join("r");
+        std::fs::create_dir_all(source.join("keep"))?;
+        std::fs::create_dir(source.join("blocked"))?;
+        std::fs::create_dir(&repository)?;
+        std::fs::write(source.join("keep/data.txt"), b"selected")?;
+        std::fs::write(source.join("keep/drop.tmp"), b"filtered")?;
+        std::fs::write(source.join("blocked/unvisited.txt"), b"not counted")?;
+        std::fs::write(source.join("skip.bin"), b"filtered")?;
+        symlink("data.txt", source.join("keep/link"))?;
+        let _listener = UnixListener::bind(source.join("sock"))?;
+        let mut config = crate::test_support::unfiltered_config();
+        config["relative_path"] = serde_json::json!({
+            "include": ["^keep(/|$)"], "exclude": ["\\.tmp$"]
+        });
+        let filter: Filter = serde_json::from_value(config)?;
+        let source_for_run = source.clone();
+        let repository_for_run = repository.clone();
+        tokio::task::spawn_blocking(move || {
+            run(&source_for_run, &repository_for_run, &filter, "filtered")
+        })
+        .await??;
+        let manifest = Manifest::read(&repository, "filtered").await?;
+        let paths: std::collections::BTreeSet<_> = manifest
+            .entries
+            .iter()
+            .map(|entry| entry.relative_path.clone())
+            .collect();
+        assert_eq!(
+            paths,
+            ["keep", "keep/data.txt", "keep/link"]
+                .into_iter()
+                .map(PathBuf::from)
+                .collect()
+        );
+        assert_eq!(manifest.backup_stats.entries_created, 3);
+        assert_eq!(manifest.backup_stats.skipped_filtered, 3);
+        assert_eq!(manifest.backup_stats.skipped_unsupported, 1);
+        let payloads = repository.join("backups/filtered");
+        assert!(!payloads.join("blocked").exists());
+        assert!(!payloads.join("keep/drop.tmp").exists());
+        assert!(std::fs::symlink_metadata(payloads.join("keep/link")).is_err());
+        assert_eq!(
+            zstd::decode_all(std::fs::File::open(payloads.join("keep/data.txt"))?)?,
+            b"selected"
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn directory_include_is_required_even_if_descendant_name_matches()
+    -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let source = directory.path().join("source");
+        std::fs::create_dir_all(source.join("docs"))?;
+        std::fs::write(source.join("docs/report.txt"), b"unvisited")?;
+        let mut config = crate::test_support::unfiltered_config();
+        config["relative_path"]["include"] = serde_json::json!(["\\.txt$"]);
+        let filter: Filter = serde_json::from_value(config)?;
+        let (stats, entries) = path_traversal(&source, &filter.compile()?)?;
+        assert!(entries.is_empty());
+        assert_eq!(stats.entries_created, 0);
+        assert_eq!(stats.skipped_filtered, 1);
+        assert_eq!(stats.skipped_unsupported, 0);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn empty_source_publishes_zero_counts() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
         let source = directory.path().join("source");
@@ -852,8 +938,15 @@ mod tests {
         std::fs::create_dir(&repository)?;
         let source_for_run = source.clone();
         let repository_for_run = repository.clone();
-        tokio::task::spawn_blocking(move || run(&source_for_run, &repository_for_run, "empty"))
-            .await??;
+        tokio::task::spawn_blocking(move || {
+            run(
+                &source_for_run,
+                &repository_for_run,
+                &unfiltered()?,
+                "empty",
+            )
+        })
+        .await??;
         let manifest = Manifest::read(&repository, "empty").await?;
         assert!(manifest.entries.is_empty());
         assert_eq!(manifest.backup_stats.entries_created, 0);
@@ -876,7 +969,12 @@ mod tests {
         let source_for_run = source.clone();
         let repository_for_run = repository.clone();
         tokio::task::spawn_blocking(move || {
-            run(&source_for_run, &repository_for_run, "backup-001")
+            run(
+                &source_for_run,
+                &repository_for_run,
+                &unfiltered()?,
+                "backup-001",
+            )
         })
         .await??;
         let expected_manifest =
@@ -888,7 +986,12 @@ mod tests {
         let source_for_retry = source.clone();
         let repository_for_retry = repository.clone();
         let retry = tokio::task::spawn_blocking(move || {
-            run(&source_for_retry, &repository_for_retry, "backup-001")
+            run(
+                &source_for_retry,
+                &repository_for_retry,
+                &unfiltered()?,
+                "backup-001",
+            )
         })
         .await?;
         let error = retry.err().ok_or("accepted duplicate backup ID")?;
@@ -920,7 +1023,12 @@ mod tests {
         let source_for_run = source.clone();
         let repository_for_run = repository.clone();
         tokio::task::spawn_blocking(move || {
-            run(&source_for_run, &repository_for_run, "backup-001")
+            run(
+                &source_for_run,
+                &repository_for_run,
+                &unfiltered()?,
+                "backup-001",
+            )
         })
         .await??;
         let expected_manifest =
@@ -945,7 +1053,12 @@ mod tests {
         let source_for_run = source.clone();
         let repository_for_run = repository.clone();
         let result = tokio::task::spawn_blocking(move || {
-            run(&source_for_run, &repository_for_run, "backup-002")
+            run(
+                &source_for_run,
+                &repository_for_run,
+                &unfiltered()?,
+                "backup-002",
+            )
         })
         .await?;
         let error = result.err().ok_or("accepted failed metadata publication")?;

@@ -233,7 +233,11 @@ impl JobManager {
 
 fn execute(request: JobRequest, directory: PathBuf) -> Result<JobResult, JobError> {
     match request {
-        JobRequest::Backup { source, repository, filter} => {
+        JobRequest::Backup {
+            source,
+            repository,
+            filter,
+        } => {
             let backup_id = Uuid::new_v4().to_string();
             backup::run(
                 &directory.join(source),
@@ -280,7 +284,7 @@ pub(crate) enum JobRequest {
     Backup {
         source: PathBuf,
         repository: PathBuf,
-        filter: Filter
+        filter: Box<Filter>,
     },
     Restore {
         repository: PathBuf,
@@ -419,11 +423,12 @@ mod tests {
     use crate::test_support::TestDirectory;
     use std::{error::Error, time::Duration};
 
-    fn backup_request(source: &str) -> JobRequest {
-        JobRequest::Backup {
+    fn backup_request(source: &str) -> Result<JobRequest, serde_json::Error> {
+        Ok(JobRequest::Backup {
             source: source.into(),
             repository: "repository".into(),
-        }
+            filter: Box::new(crate::test_support::unfiltered()?),
+        })
     }
 
     #[tokio::test]
@@ -432,8 +437,8 @@ mod tests {
         let directory = TestDirectory::new()?;
         let jobs = JobManager::open(directory.path().to_owned()).await?;
         assert!(jobs.get_job("unknown").await?.is_none());
-        let first = jobs.submit(backup_request("one")).await?;
-        let second = jobs.submit(backup_request("two")).await?;
+        let first = jobs.submit(backup_request("one")?).await?;
+        let second = jobs.submit(backup_request("two")?).await?;
         let third = jobs
             .submit(JobRequest::Restore {
                 repository: "repository".into(),
@@ -513,9 +518,9 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(10), async {
             let directory = TestDirectory::new()?;
             let jobs = JobManager::open(directory.path().to_owned()).await?;
-            let first = jobs.submit(backup_request("first")).await?;
-            let second = jobs.submit(backup_request("second")).await?;
-            let third = jobs.submit(backup_request("third")).await?;
+            let first = jobs.submit(backup_request("first")?).await?;
+            let second = jobs.submit(backup_request("second")?).await?;
+            let third = jobs.submit(backup_request("third")?).await?;
             let (started, mut starts) = tokio::sync::mpsc::unbounded_channel();
             let (stop, receiver) = watch::channel(false);
             let worker_jobs = jobs.clone();
@@ -534,7 +539,7 @@ mod tests {
             assert!(matches!(jobs.get_job(&first.job_id).await?.ok_or("lost active job")?.state, JobState::Running));
             assert!(matches!(jobs.get_job(&second.job_id).await?.ok_or("lost queued job")?.state, JobState::Queued));
             // Querying and admitting work do not require releasing the operation.
-            let fourth = jobs.submit(backup_request("fourth")).await?;
+            let fourth = jobs.submit(backup_request("fourth")?).await?;
             release_first.send(())?;
             let (request, _, release_second) = starts.recv().await.ok_or("worker did not start second job")?;
             assert!(matches!(request, JobRequest::Backup { source, .. } if source == Path::new("second")));
@@ -562,7 +567,7 @@ mod tests {
         let worker_jobs = jobs.clone();
         let worker = tokio::spawn(async move { worker_jobs.run_worker(receiver).await });
         tokio::task::yield_now().await;
-        let job = jobs.submit(backup_request("source")).await?;
+        let job = jobs.submit(backup_request("source")?).await?;
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if matches!(
@@ -589,7 +594,7 @@ mod tests {
     async fn admission_and_completion_failures_are_observable() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
         let jobs = JobManager::open(directory.path().to_owned()).await?;
-        let job = jobs.submit(backup_request("source")).await?;
+        let job = jobs.submit(backup_request("source")?).await?;
         sqlx::raw_sql("CREATE TRIGGER block_completion BEFORE UPDATE ON jobs WHEN NEW.state IN ('failed', 'succeeded') BEGIN SELECT RAISE(FAIL, 'completion blocked'); END;").execute(&jobs.pool).await?;
         let (_stop, receiver) = watch::channel(false);
         let error = jobs
@@ -611,7 +616,7 @@ mod tests {
             .await?;
         jobs.close().await;
         let error = jobs
-            .submit(backup_request("not-admitted"))
+            .submit(backup_request("not-admitted")?)
             .await
             .err()
             .ok_or("accepted job with unavailable database")?;
