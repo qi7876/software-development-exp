@@ -699,6 +699,32 @@ test(
       );
     }
     assert.equal(submissions, 0);
+    const dstPage = await browser.newPage({
+      timezoneId: "America/New_York",
+      storageState: await page.context().storageState(),
+    });
+    await dstPage.goto(url);
+    await dstPage.waitForFunction(
+      () => !document.getElementById("source").disabled,
+    );
+    await dstPage.locator("#source").fill("source");
+    await dstPage.locator("#backup-repository").fill("repo with space");
+    await dstPage.locator("#filter-summary").click();
+    await dstPage.locator("#filter-atime-from").fill("2026-03-08T02:30");
+    await dstPage.locator("#filter-summary").click();
+    await dstPage.locator("#backup-button").click();
+    await dstPage.locator("#backup-message.error").waitFor();
+    assert.match(
+      await dstPage.locator("#backup-message").textContent(),
+      /有效的本地日期时间/,
+    );
+    assert.equal(
+      await dstPage
+        .locator("#filter-atime-from")
+        .evaluate((input) => input === document.activeElement),
+      true,
+    );
+    await dstPage.close();
     await page.locator("#clear-filter").click();
     await page.locator("#filter-relative_path-include").fill("[");
     await page.locator("#backup-button").click();
