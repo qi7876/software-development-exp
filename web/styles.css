@@ -18,7 +18,8 @@ body {
   min-width: 1200px;
 }
 button,
-input {
+input,
+textarea {
   font: inherit;
   border-radius: 0;
 }
@@ -45,7 +46,8 @@ a {
   color: var(--accent);
   text-underline-offset: 3px;
 }
-input {
+input,
+textarea {
   display: block;
   width: 100%;
   min-width: 0;
@@ -55,14 +57,16 @@ input {
   color: #202723;
   background: #fff;
 }
-input::placeholder {
+input::placeholder,
+textarea::placeholder {
   color: #7c867f;
 }
-input:disabled {
+input:disabled,
+textarea:disabled {
   background: #f2f4f2;
   color: #6b746e;
 }
-:where(input, button, a, summary):focus-visible {
+:where(input, textarea, button, a, summary):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
@@ -553,4 +557,44 @@ dialog::backdrop {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+.backup-filter {
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+  padding-top: 16px;
+}
+.backup-filter > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent);
+}
+.filter-content {
+  margin-top: 16px;
+}
+.filter-scope {
+  font-size: 13px;
+}
+.filter-row {
+  margin: 20px 0;
+}
+.filter-row legend {
+  font-weight: 600;
+}
+.filter-row > .field-help {
+  margin-top: 2px;
+}
+.filter-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 8px;
+}
+.filter-columns label {
+  font-size: 12px;
+  font-weight: 400;
+}
+.filter-columns textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
