@@ -12,8 +12,8 @@
   <body>
     <a class="skip-link" href="#main">跳转到主要内容</a>
     <aside class="sidebar">
-      <a class="brand" href="#backup" aria-label="bak 首页"
-        ><span class="brand-mark" aria-hidden="true">b</span><span>bak</span></a
+      <a class="brand" href="#backup" aria-label="bak. 首页"
+        ><span class="brand-mark" aria-hidden="true">b.</span><span>bak.</span></a
       >
       <nav aria-label="主导航">
         <a href="#backup" aria-current="page">创建备份</a>
@@ -76,6 +76,195 @@
                 </p>
               </div>
             </div>
+            <details id="backup-filter" class="backup-filter">
+              <summary id="filter-summary">过滤条件</summary>
+              <div class="filter-content">
+                <p class="filter-scope">
+                  作用于源目录内的文件、目录及符号链接。目录不匹配时跳过整个子树，包含规则也须允许祖先目录。
+                </p>
+                <p id="filter-rules-help" class="field-help">
+                  每行一条正则，留空不限；各字段须同时满足。同字段包含任一匹配即可，排除优先。
+                </p>
+                <fieldset class="filter-row">
+                  <legend>相对路径</legend>
+                  <p id="filter-relative_path-help" class="field-help">
+                    相对源目录，无前导 /。
+                  </p>
+                  <div class="filter-columns">
+                    <div>
+                      <label for="filter-relative_path-include"
+                        >包含<span class="sr-only">（相对路径）</span></label
+                      ><textarea
+                        id="filter-relative_path-include"
+                        rows="2"
+                        spellcheck="false"
+                        placeholder="^docs(/|$)"
+                        aria-describedby="filter-rules-help filter-relative_path-help"
+                      ></textarea>
+                    </div>
+                    <div>
+                      <label for="filter-relative_path-exclude"
+                        >排除<span class="sr-only">（相对路径）</span></label
+                      ><textarea
+                        id="filter-relative_path-exclude"
+                        rows="2"
+                        spellcheck="false"
+                        placeholder=""
+                        aria-describedby="filter-rules-help filter-relative_path-help"
+                      ></textarea>
+                    </div>
+                  </div>
+                </fieldset>
+                <fieldset class="filter-row">
+                  <legend>UID</legend>
+                  <p id="filter-uid-help" class="field-help">十进制用户 ID。</p>
+                  <div class="filter-columns">
+                    <div>
+                      <label for="filter-uid-include"
+                        >包含<span class="sr-only">（UID）</span></label
+                      ><textarea
+                        id="filter-uid-include"
+                        rows="2"
+                        spellcheck="false"
+                        placeholder="^1000$"
+                        aria-describedby="filter-rules-help filter-uid-help"
+                      ></textarea>
+                    </div>
+                    <div>
+                      <label for="filter-uid-exclude"
+                        >排除<span class="sr-only">（UID）</span></label
+                      ><textarea
+                        id="filter-uid-exclude"
+                        rows="2"
+                        spellcheck="false"
+                        placeholder=""
+                        aria-describedby="filter-rules-help filter-uid-help"
+                      ></textarea>
+                    </div>
+                  </div>
+                </fieldset>
+                <fieldset class="filter-row">
+                  <legend>GID</legend>
+                  <p id="filter-gid-help" class="field-help">十进制组 ID。</p>
+                  <div class="filter-columns">
+                    <div>
+                      <label for="filter-gid-include"
+                        >包含<span class="sr-only">（GID）</span></label
+                      ><textarea
+                        id="filter-gid-include"
+                        rows="2"
+                        spellcheck="false"
+                        placeholder="^1000$"
+                        aria-describedby="filter-rules-help filter-gid-help"
+                      ></textarea>
+                    </div>
+                    <div>
+                      <label for="filter-gid-exclude"
+                        >排除<span class="sr-only">（GID）</span></label
+                      ><textarea
+                        id="filter-gid-exclude"
+                        rows="2"
+                        spellcheck="false"
+                        placeholder=""
+                        aria-describedby="filter-rules-help filter-gid-help"
+                      ></textarea>
+                    </div>
+                  </div>
+                </fieldset>
+                <fieldset class="filter-row">
+                  <legend>权限</legend>
+                  <p id="filter-mode-help" class="field-help">
+                    四位八进制，如 0644。
+                  </p>
+                  <div class="filter-columns">
+                    <div>
+                      <label for="filter-mode-include"
+                        >包含<span class="sr-only">（权限）</span></label
+                      ><textarea
+                        id="filter-mode-include"
+                        rows="2"
+                        spellcheck="false"
+                        placeholder="^0644$"
+                        aria-describedby="filter-rules-help filter-mode-help"
+                      ></textarea>
+                    </div>
+                    <div>
+                      <label for="filter-mode-exclude"
+                        >排除<span class="sr-only">（权限）</span></label
+                      ><textarea
+                        id="filter-mode-exclude"
+                        rows="2"
+                        spellcheck="false"
+                        placeholder=""
+                        aria-describedby="filter-rules-help filter-mode-help"
+                      ></textarea>
+                    </div>
+                  </div>
+                </fieldset>
+                <p id="filter-time-help" class="field-help"></p>
+                <fieldset class="filter-row">
+                  <legend>修改时间</legend>
+                  <div class="filter-columns">
+                    <div>
+                      <label for="filter-mtime-from"
+                        >起始（含）<span class="sr-only">
+                          · 修改时间</span
+                        ></label
+                      ><input
+                        id="filter-mtime-from"
+                        type="datetime-local"
+                        step="1"
+                        aria-describedby="filter-time-help"
+                      />
+                    </div>
+                    <div>
+                      <label for="filter-mtime-before"
+                        >截止（不含）<span class="sr-only">
+                          · 修改时间</span
+                        ></label
+                      ><input
+                        id="filter-mtime-before"
+                        type="datetime-local"
+                        step="1"
+                        aria-describedby="filter-time-help"
+                      />
+                    </div>
+                  </div>
+                </fieldset>
+                <fieldset class="filter-row">
+                  <legend>访问时间</legend>
+                  <div class="filter-columns">
+                    <div>
+                      <label for="filter-atime-from"
+                        >起始（含）<span class="sr-only">
+                          · 访问时间</span
+                        ></label
+                      ><input
+                        id="filter-atime-from"
+                        type="datetime-local"
+                        step="1"
+                        aria-describedby="filter-time-help"
+                      />
+                    </div>
+                    <div>
+                      <label for="filter-atime-before"
+                        >截止（不含）<span class="sr-only">
+                          · 访问时间</span
+                        ></label
+                      ><input
+                        id="filter-atime-before"
+                        type="datetime-local"
+                        step="1"
+                        aria-describedby="filter-time-help"
+                      />
+                    </div>
+                  </div>
+                </fieldset>
+                <button id="clear-filter" class="secondary" type="button">
+                  清空条件
+                </button>
+              </div>
+            </details>
             <div class="form-actions">
               <button id="backup-button" type="submit">创建备份</button>
             </div>

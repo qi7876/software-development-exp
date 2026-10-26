@@ -17,6 +17,14 @@ import { chromium } from "playwright";
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const secret = "browser-test-key";
+const emptyFilter = () => ({
+  relative_path: { include: [], exclude: [] },
+  uid: { include: [], exclude: [] },
+  gid: { include: [], exclude: [] },
+  mode: { include: [], exclude: [] },
+  atime: {},
+  mtime: {},
+});
 
 async function tree(root) {
   const result = {};
@@ -254,6 +262,7 @@ test(
         },
         body: JSON.stringify({
           source: `missing-<img src=x onerror=alert(1)>-${index}`,
+          filter: emptyFilter(),
           repository: "repo with space",
         }),
       });
@@ -381,6 +390,8 @@ test(
     await page.locator('nav a[href="#backup"]').click();
     await page.locator("#source").fill("/local-only/source");
     await page.locator("#backup-repository").fill("/local-only/repository");
+    await page.locator("#filter-summary").click();
+    await page.locator("#filter-relative_path-exclude").fill("local-only");
     await manager();
     await save("远程", remote.url, "wrong-key");
     await page.locator("#connection-message.error").waitFor();
@@ -392,12 +403,24 @@ test(
       await page.locator("#source").inputValue(),
       "/local-only/source",
     );
+    assert.equal(
+      await page.locator("#filter-relative_path-exclude").inputValue(),
+      "local-only",
+    );
     assert.equal((await stored()).connections.length, 1);
 
     await save("远程", remote.url, "remote-api-key");
     await connected(remote.url);
     assert.equal(await page.locator("#source").inputValue(), "");
     assert.equal(await page.locator("#backup-repository").inputValue(), "");
+    assert.equal(
+      await page.locator("#filter-relative_path-exclude").inputValue(),
+      "",
+    );
+    assert.equal(
+      await page.locator("#backup-filter").getAttribute("open"),
+      null,
+    );
     assert.equal((await stored()).connections.length, 2);
     assert.equal(
       (await page.locator("#connection-list").textContent()).includes(
@@ -513,6 +536,211 @@ test(
     await page.locator("#storage-message.error").waitFor();
     assert.equal(
       await page.evaluate(() => localStorage.getItem("bak.connections.v1")),
+      null,
+    );
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  "backup filters serialize rules, prune directories and restore selected contents",
+  { timeout: 90000 },
+  async (t) => {
+    const { directory, url } = await startServer(t);
+    await mkdir(join(directory, "source/docs/private"), { recursive: true });
+    await writeFile(join(directory, "source/docs/keep.txt"), "keep");
+    await writeFile(join(directory, "source/docs/drop.tmp"), "drop");
+    await writeFile(
+      join(directory, "source/docs/private/secret.txt"),
+      "secret",
+    );
+    const browser = await chromium.launch({
+      channel: process.env.BAK_BROWSER_CHANNEL || undefined,
+    });
+    t.after(() => browser.close());
+    const page = await browser.newPage({
+      viewport: { width: 1200, height: 1000 },
+      timezoneId: "Asia/Shanghai",
+    });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto(url);
+    await page.locator("#open-connection").click();
+    await page.locator("#secret").fill(secret);
+    await page.locator("#connect-button").click();
+    await page.waitForFunction(
+      () => !document.getElementById("source").disabled,
+    );
+    await page.locator('nav a[href="#backup"]').click();
+    assert.equal(
+      await page.locator("#backup-filter").getAttribute("open"),
+      null,
+    );
+    await page.locator("#source").fill("source");
+    await page.locator("#backup-repository").fill("repo with space");
+    await page.locator("#filter-summary").focus();
+    await page.keyboard.press("Enter");
+    assert.equal(
+      await page
+        .locator("#filter-time-help")
+        .textContent()
+        .then((text) => text.includes("Asia/Shanghai")),
+      true,
+    );
+    await page
+      .locator("#filter-relative_path-include")
+      .fill("^docs(/|$)\n\n  ");
+    await page
+      .locator("#filter-relative_path-exclude")
+      .fill(String.raw`\.tmp$` + "\n^docs/private(/|$)");
+    for (const field of ["uid", "gid"]) {
+      await page.locator(`#filter-${field}-include`).fill("^[0-9]+$");
+      await page.locator(`#filter-${field}-exclude`).fill("^-1$");
+    }
+    await page.locator("#filter-mode-include").fill("^[0-7]{4}$");
+    await page.locator("#filter-mode-exclude").fill("^0000$");
+    await page.locator("#filter-mtime-from").fill("2000-01-01T08:00:12");
+    await page.locator("#filter-mtime-before").fill("2100-01-01T08:00");
+    await page.locator("#filter-atime-before").fill("2100-01-01T08:00");
+    assert.equal(
+      await page.locator("#filter-summary").textContent(),
+      "过滤条件 · 6 项",
+    );
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+    );
+    if (process.env.BAK_FILTER_SCREENSHOT)
+      await page.screenshot({
+        path: process.env.BAK_FILTER_SCREENSHOT,
+        fullPage: true,
+      });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+    );
+    await page.locator('nav a[href="#repository"]').click();
+    await page.locator('nav a[href="#backup"]').click();
+    assert.equal(
+      await page.locator("#filter-mode-include").inputValue(),
+      "^[0-7]{4}$",
+    );
+    await page.locator("#filter-summary").click();
+    const requestPromise = page.waitForRequest(
+      (req) => req.method() === "POST" && req.url().endsWith("/api/backups"),
+    );
+    await page.locator("#backup-button").click();
+    const payload = (await requestPromise).postDataJSON();
+    assert.deepEqual(payload.filter, {
+      relative_path: {
+        include: ["^docs(/|$)"],
+        exclude: [String.raw`\.tmp$`, "^docs/private(/|$)"],
+      },
+      uid: { include: ["^[0-9]+$"], exclude: ["^-1$"] },
+      gid: { include: ["^[0-9]+$"], exclude: ["^-1$"] },
+      mode: { include: ["^[0-7]{4}$"], exclude: ["^0000$"] },
+      mtime: {
+        from: "2000-01-01T00:00:12.000Z",
+        before: "2100-01-01T00:00:00.000Z",
+      },
+      atime: { before: "2100-01-01T00:00:00.000Z" },
+    });
+    await page.locator("#backup-job-link").click();
+    await page.locator(".job .badge.succeeded").waitFor();
+    await page.getByRole("button", { name: "查看备份", exact: true }).click();
+    await page.locator(".backup-row button").click();
+    await page.locator("#destination").fill("restored");
+    await page.locator("#restore-button").click();
+    await page.waitForFunction(
+      () => document.querySelectorAll(".job .badge.succeeded").length === 2,
+    );
+    assert.deepEqual(await tree(join(directory, "restored")), {
+      docs: { "keep.txt": Buffer.from("keep").toString("hex") },
+    });
+
+    await page.locator('nav a[href="#backup"]').click();
+    await page.locator("#filter-summary").click();
+    await page.locator("#clear-filter").click();
+    assert.equal(
+      await page.locator("#filter-summary").textContent(),
+      "过滤条件",
+    );
+    assert.deepEqual(
+      await page
+        .locator("#backup-filter input, #backup-filter textarea")
+        .evaluateAll((inputs) => inputs.map((input) => input.value)),
+      Array(12).fill(""),
+    );
+    let submissions = 0;
+    page.on("request", (req) => {
+      if (req.method() === "POST" && req.url().endsWith("/api/backups"))
+        submissions++;
+    });
+    for (const before of ["2026-01-01T00:00", "2025-01-01T00:00"]) {
+      await page.locator("#filter-mtime-from").fill("2026-01-01T00:00");
+      await page.locator("#filter-mtime-before").fill(before);
+      await page.locator("#filter-summary").click();
+      await page.locator("#backup-button").click();
+      await page.locator("#backup-message.error").waitFor();
+      assert.equal(
+        await page.locator("#backup-filter").getAttribute("open"),
+        "",
+      );
+      assert.equal(
+        await page
+          .locator("#filter-mtime-before")
+          .evaluate((input) => input === document.activeElement),
+        true,
+      );
+    }
+    assert.equal(submissions, 0);
+    const dstPage = await browser.newPage({
+      timezoneId: "America/New_York",
+      storageState: await page.context().storageState(),
+    });
+    await dstPage.goto(url);
+    await dstPage.waitForFunction(
+      () => !document.getElementById("source").disabled,
+    );
+    await dstPage.locator("#source").fill("source");
+    await dstPage.locator("#backup-repository").fill("repo with space");
+    await dstPage.locator("#filter-summary").click();
+    await dstPage.locator("#filter-atime-from").fill("2026-03-08T02:30");
+    await dstPage.locator("#filter-summary").click();
+    await dstPage.locator("#backup-button").click();
+    await dstPage.locator("#backup-message.error").waitFor();
+    assert.match(
+      await dstPage.locator("#backup-message").textContent(),
+      /有效的本地日期时间/,
+    );
+    assert.equal(
+      await dstPage
+        .locator("#filter-atime-from")
+        .evaluate((input) => input === document.activeElement),
+      true,
+    );
+    await dstPage.close();
+    await page.locator("#clear-filter").click();
+    await page.locator("#filter-relative_path-include").fill("[");
+    await page.locator("#backup-button").click();
+    await page.locator("#backup-job-link").click();
+    await page.locator(".job .badge.failed").waitFor();
+    assert.match(
+      await page.locator(".job-error").first().textContent(),
+      /400.*regex/,
+    );
+    await page.locator("#disconnect-button").click();
+    assert.equal(
+      await page.locator("#filter-relative_path-include").inputValue(),
+      "",
+    );
+    assert.equal(
+      await page.locator("#backup-filter").getAttribute("open"),
       null,
     );
     assert.deepEqual(errors, []);

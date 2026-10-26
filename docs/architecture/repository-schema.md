@@ -59,8 +59,8 @@ HTTP tests check that rules survive restart and affect restored contents, and th
 invalid filter jobs fail before creating repository contents. The job request JSON
 stores patterns, not compiled regular expressions; no task-table SQL change is needed.
 
-Remaining work includes exposing stored backup statistics in job results and
-adding filter controls to the browser console.
+The browser console provides optional filter controls and always submits the complete
+filter object. Remaining work includes exposing stored backup statistics in job results.
 
 The schema rejects old databases before querying their tables. It does not delete
 or upgrade any existing database or backup contents.

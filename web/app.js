@@ -184,6 +184,8 @@ function resetSession() {
       $(id).value = "";
     },
   );
+  clearFilter();
+  $("backup-filter").open = false;
   document.querySelectorAll("[data-connected]").forEach((element) => {
     element.disabled = true;
   });
@@ -555,6 +557,96 @@ async function submitted(job, id) {
   if (id === "backup-message") $("backup-job-link").hidden = false;
 }
 
+const regexFilterFields = ["relative_path", "uid", "gid", "mode"];
+const timeFilterFields = ["mtime", "atime"];
+const filterInputs = [
+  ...$("backup-filter").querySelectorAll("input, textarea"),
+];
+
+function patterns(value) {
+  return value.split(/\r?\n/).filter((line) => line.trim() !== "");
+}
+
+function updateFilterSummary() {
+  const count = [...regexFilterFields, ...timeFilterFields].filter((field) =>
+    filterInputs.some(
+      (input) =>
+        input.id.startsWith(`filter-${field}-`) && input.value.trim() !== "",
+    ),
+  ).length;
+  $("filter-summary").textContent = count
+    ? `过滤条件 · ${count} 项`
+    : "过滤条件";
+}
+
+function clearFilter() {
+  filterInputs.forEach((input) => {
+    input.value = "";
+  });
+  updateFilterSummary();
+}
+
+function backupFilter() {
+  const filter = {};
+  for (const field of regexFilterFields) {
+    filter[field] = {};
+    for (const list of ["include", "exclude"])
+      filter[field][list] = patterns($(`filter-${field}-${list}`).value);
+  }
+  for (const field of timeFilterFields) {
+    const range = {};
+    for (const bound of ["from", "before"]) {
+      const input = $(`filter-${field}-${bound}`);
+      if (!input.value) continue;
+      const time = new Date(input.value);
+      // Reject local times normalized across a daylight-saving gap.
+      const parts = input.value.split(/[-T:]/).map(Number);
+      const actual = [
+        time.getFullYear(),
+        time.getMonth() + 1,
+        time.getDate(),
+        time.getHours(),
+        time.getMinutes(),
+        time.getSeconds(),
+      ];
+      if (
+        !Number.isFinite(time.getTime()) ||
+        parts.some((part, i) => part !== actual[i])
+      ) {
+        $("backup-filter").open = true;
+        input.focus();
+        throw new Error("请输入有效的本地日期时间。");
+      }
+      range[bound] = time.toISOString();
+    }
+    if (
+      range.from &&
+      range.before &&
+      new Date(range.from) >= new Date(range.before)
+    ) {
+      $("backup-filter").open = true;
+      $(`filter-${field}-before`).focus();
+      throw new Error(
+        `${field === "mtime" ? "修改" : "访问"}时间的起始须早于截止。`,
+      );
+    }
+    filter[field] = range;
+  }
+  return filter;
+}
+
+$("filter-time-help").textContent =
+  `时间按浏览器时区 ${Intl.DateTimeFormat().resolvedOptions().timeZone} 输入，精确到秒；留空的一端不限。`;
+$("backup-filter").addEventListener("input", updateFilterSummary);
+$("backup-filter").addEventListener(
+  "invalid",
+  () => {
+    $("backup-filter").open = true;
+  },
+  true,
+);
+$("clear-filter").addEventListener("click", clearFilter);
+
 $("backup-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const source = $("source").value.trim();
@@ -565,9 +657,10 @@ $("backup-form").addEventListener("submit", async (event) => {
   $("backup-job-link").hidden = true;
   message("backup-message", "正在提交备份任务…");
   try {
+    const filter = backupFilter();
     const job = await api("/api/backups", {
       method: "POST",
-      body: JSON.stringify({ source, repository }),
+      body: JSON.stringify({ source, repository, filter }),
     });
     // Keep this repository visible; successful completion will refresh its contents.
     $("repository-path").value = repository;
