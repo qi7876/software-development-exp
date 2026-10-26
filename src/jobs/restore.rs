@@ -318,7 +318,7 @@ fn restore_all_files(
     Ok(())
 }
 
-pub fn run(repository: &Path, backup_id: &str, destination: &Path) -> Result<(), JobError> {
+pub(super) fn run(repository: &Path, backup_id: &str, destination: &Path) -> Result<(), JobError> {
     let absolute_repository_path = get_absolute_directory_path(repository)?;
     let absolute_destination_path = get_absolute_directory_path(destination)?;
     if paths_overlap(&absolute_repository_path, &absolute_destination_path) {
