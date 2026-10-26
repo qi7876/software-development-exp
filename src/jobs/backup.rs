@@ -1,9 +1,8 @@
-use super::repository::{ManifestEntryKind, UnixMetadata};
-
 use super::{
     JobError,
     filesystem::{get_absolute_directory_path, paths_overlap, sync_directory},
-    repository::{Manifest, ManifestEntry},
+    filter::{CompiledFilter, Filter},
+    repository::{Manifest, ManifestEntry, ManifestEntryKind, UnixMetadata},
 };
 use chrono::{SecondsFormat, Utc};
 use http::StatusCode;
@@ -13,13 +12,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub struct BackupEntry {
-    pub relative_path: PathBuf,
-    pub metadata: UnixMetadata,
-    pub kind: BackupEntryKind,
+struct BackupEntry {
+    relative_path: PathBuf,
+    metadata: UnixMetadata,
+    kind: BackupEntryKind,
 }
 
-pub enum BackupEntryKind {
+enum BackupEntryKind {
     File,
     Directory,
     Symlink,
@@ -31,15 +30,16 @@ struct FileBackupResult {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct BackupStats {
-    pub entries_created: i64,
-    pub skipped_unsupported: i64,
-    pub skipped_filtered: i64,
+pub(super) struct BackupStats {
+    pub(super) entries_created: i64,
+    pub(super) skipped_unsupported: i64,
+    pub(super) skipped_filtered: i64,
 }
 
 fn walk_directory(
     absolute_root: &Path,
     absolute_current: &Path,
+    compiled_filter: &CompiledFilter,
     backip_stats: &mut BackupStats,
     backup_entries: &mut Vec<BackupEntry>,
 ) -> Result<(), JobError> {
@@ -60,9 +60,6 @@ fn walk_directory(
             )
         })?;
 
-        // TODO: filter
-        // backip_stats.skipped_filtered += 1;
-
         let absolute_file_path = file.path();
         let relative_file_path = absolute_file_path
             .strip_prefix(absolute_root)
@@ -76,6 +73,7 @@ fn walk_directory(
                 )
             })?
             .to_path_buf();
+
         let file_type = file.file_type().map_err(|error| {
             JobError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -85,16 +83,28 @@ fn walk_directory(
                 ),
             )
         })?;
+        if file_type.is_dir() || file_type.is_file() || file_type.is_symlink() {
+            backip_stats.skipped_unsupported += 1;
+            continue;
+        }
+
+        let metadata = UnixMetadata::read(&absolute_file_path)?;
+        if !compiled_filter.matches(&relative_file_path, &metadata)? {
+            backip_stats.skipped_filtered += 1;
+            continue;
+        }
+
         if file_type.is_dir() {
             backip_stats.entries_created += 1;
             backup_entries.push(BackupEntry {
                 relative_path: relative_file_path,
-                metadata: UnixMetadata::read(&absolute_file_path)?,
+                metadata: metadata,
                 kind: BackupEntryKind::Directory,
             });
             walk_directory(
                 absolute_root,
                 &absolute_file_path,
+                &compiled_filter,
                 backip_stats,
                 backup_entries,
             )?;
@@ -102,19 +112,17 @@ fn walk_directory(
             backip_stats.entries_created += 1;
             backup_entries.push(BackupEntry {
                 relative_path: relative_file_path,
-                metadata: UnixMetadata::read(&absolute_file_path)?,
+                metadata: metadata,
                 kind: BackupEntryKind::File,
             });
         } else if file_type.is_symlink() {
             backip_stats.entries_created += 1;
             backup_entries.push(BackupEntry {
                 relative_path: relative_file_path,
-                metadata: UnixMetadata::read(&absolute_file_path)?,
+                metadata: metadata,
                 kind: BackupEntryKind::Symlink,
             });
-        } else {
-            backip_stats.skipped_unsupported += 1;
-        };
+        }
     }
     Ok(())
 }
@@ -122,6 +130,7 @@ fn walk_directory(
 /// Returns paths relative to the source directory.
 fn path_traversal(
     absolute_source_path: &Path,
+    compiled_filter: &CompiledFilter,
 ) -> Result<(BackupStats, Vec<BackupEntry>), JobError> {
     let mut backup_stats = BackupStats {
         entries_created: 0,
@@ -132,6 +141,7 @@ fn path_traversal(
     walk_directory(
         absolute_source_path,
         absolute_source_path,
+        &compiled_filter,
         &mut backup_stats,
         &mut backup_entries,
     )?;
@@ -314,7 +324,12 @@ fn backup_all_files(
     Ok(manifest_entries)
 }
 
-pub fn run(source: &Path, repository: &Path, backup_id: &str) -> Result<(), JobError> {
+pub(super) fn run(
+    source: &Path,
+    repository: &Path,
+    filter: &Filter,
+    backup_id: &str,
+) -> Result<(), JobError> {
     let absolute_source_path = get_absolute_directory_path(source)?;
     let absolute_repository_path = get_absolute_directory_path(repository)?;
     if paths_overlap(&absolute_source_path, &absolute_repository_path) {
@@ -327,8 +342,9 @@ pub fn run(source: &Path, repository: &Path, backup_id: &str) -> Result<(), JobE
             ),
         ));
     }
+    let compiled_filter = filter.compile()?;
     let root_metadata = UnixMetadata::read(&absolute_source_path)?;
-    let (backup_stats, backup_entries) = path_traversal(&absolute_source_path)?;
+    let (backup_stats, backup_entries) = path_traversal(&absolute_source_path, &compiled_filter)?;
 
     #[cfg(not(unix))]
     sync_directory(&absolute_repository_path)?;

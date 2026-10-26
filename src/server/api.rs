@@ -1,4 +1,4 @@
-use crate::jobs::{JobError, JobManager, JobRequest};
+use crate::jobs::{Filter, JobError, JobManager, JobRequest};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, FromRequest, Request, State, rejection::JsonRejection},
@@ -100,7 +100,9 @@ async fn read_json<T: DeserializeOwned>(request: Request) -> Result<T, JobError>
 struct BackupRequest {
     source: PathBuf,
     repository: PathBuf,
+    filter: Filter,
 }
+
 #[derive(Deserialize)]
 struct RestoreRequest {
     repository: PathBuf,
@@ -151,6 +153,7 @@ async fn start_backup(
         JobRequest::Backup {
             source: request.source,
             repository: request.repository,
+            filter: request.filter,
         },
     )
     .await

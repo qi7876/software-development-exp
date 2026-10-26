@@ -5,6 +5,7 @@ mod repository;
 mod restore;
 mod storage;
 
+pub(crate) use filter::Filter;
 use http::StatusCode;
 use serde_json::{Value, json};
 use sqlx::{Row, SqlitePool, sqlite::SqliteRow};
@@ -232,11 +233,12 @@ impl JobManager {
 
 fn execute(request: JobRequest, directory: PathBuf) -> Result<JobResult, JobError> {
     match request {
-        JobRequest::Backup { source, repository } => {
+        JobRequest::Backup { source, repository, filter} => {
             let backup_id = Uuid::new_v4().to_string();
             backup::run(
                 &directory.join(source),
                 &directory.join(repository),
+                &filter,
                 &backup_id,
             )?;
             Ok(JobResult::Backup { backup_id })
@@ -278,6 +280,7 @@ pub(crate) enum JobRequest {
     Backup {
         source: PathBuf,
         repository: PathBuf,
+        filter: Filter
     },
     Restore {
         repository: PathBuf,
