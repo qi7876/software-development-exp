@@ -56,7 +56,7 @@ Browser CORS preflights are handled before authentication. API requests allow an
 
 | Request | Behavior |
 | --- | --- |
-| `POST /api/backups` | Accept JSON with `source` and `repository`; return HTTP 202 after durably queuing a job. |
+| `POST /api/backups` | Accept JSON with `source`, `repository`, and `filter`; return HTTP 202 after durably queuing a job. |
 | `POST /api/restores` | Accept JSON with `repository`, `backup_id`, and `destination`; return HTTP 202 after durably queuing a job. |
 | `GET /api/jobs/{job_id}` | Return HTTP 200 with the stored job, or HTTP 404 if it does not exist. |
 | `GET /api/jobs?limit=20&before=CURSOR` | Return newest jobs first in `{"jobs":[...],"next_cursor":null}`; omit `before` for the first page. |
@@ -65,16 +65,20 @@ Browser CORS preflights are handled before authentication. API requests allow an
 ```shell
 curl -i -H 'Authorization: Bearer example-local-test-key' \
   -H 'Content-Type: application/json' \
-  -d '{"source":"source","repository":"repository"}' \
+  -d '{"source":"source","repository":"repository","filter":{"relative_path":{"include":[],"exclude":[]},"uid":{"include":[],"exclude":[]},"gid":{"include":[],"exclude":[]},"mode":{"include":[],"exclude":[]},"atime":{},"mtime":{}}}' \
   http://127.0.0.1:8080/api/backups
 # Poll the Location header returned above:
 curl -H 'Authorization: Bearer example-local-test-key' \
   http://127.0.0.1:8080/api/jobs/JOB_ID
 ```
 
-Accepted responses include `Location: /api/jobs/{job_id}` and a job with fields `job_id`, `kind`, `state`, `result`, and `error`. States are `queued`, `running`, `succeeded`, and `failed`. Pending jobs have null result/error; completed jobs contain either a result or an error. POST no longer waits for execution. A failed job query still returns HTTP 200: its `error.code` describes the operation failure. Successful backup jobs contain `{"backup_id":"..."}` in `result`; successful restore jobs contain `{"destination":"..."}`. Both have a null error. Backup and restore execution currently support Unix platforms; on other platforms they fail with code 501 before creating output contents.
+Accepted responses include `Location: /api/jobs/{job_id}` and a job with fields `job_id`, `kind`, `state`, `result`, and `error`. States are `queued`, `running`, `succeeded`, and `failed`. Pending jobs have null result/error; completed jobs contain either a result or an error. POST no longer waits for execution. A failed job query still returns HTTP 200: its `error.code` describes the operation failure. Successful backup jobs contain `{"backup_id":"..."}` in `result`; successful restore jobs contain `{"destination":"..."}`. Both have a null error. Backup and restore execution support Unix platforms only.
 
 Request errors use `{"error":{"code":400,"message":"..."}}` with the corresponding HTTP status. JSON bodies are limited to 2 MiB; `application/json` and `application/*+json` are accepted. Invalid or missing fields return 400, oversized bodies 413, unsupported media types 415, and missing or invalid authentication 401 with `WWW-Authenticate: Bearer`. There is no cancellation endpoint.
+
+Backup filter objects require `relative_path`, `uid`, `gid`, `mode`, `atime`, and `mtime`. Regex fields require `include` and `exclude` arrays; empty arrays impose no restriction. Include patterns are alternatives, and any exclude match rejects the entry. Fields combine with AND. Relative paths have no leading slash; UID/GID use decimal text and permissions use four-digit octal text such as `0644`. Time fields accept optional RFC 3339 `from` (inclusive) and `before` (exclusive) bounds, with nanosecond precision and timezone offsets. Filter configuration persists with the queued job and survives restart. Invalid regexes or reversed/equal time bounds fail the job with error code 400 before repository contents are created; they are currently checked during execution, after HTTP 202 admission.
+
+Filtering uses strict directory pruning: a rejected directory and its entire subtree are omitted, so include expressions must also permit the ancestors of selected files. For example, `^docs(/|$)` permits `docs` and its descendants, while `\.txt$` alone rejects a directory named `docs` before inspecting its files. Statistics count only encountered entries: unsupported types are counted before filtering, rejected supported entries are counted once, and descendants of rejected directories are not inspected or counted. Counts are stored in repository metadata; job results currently return only the backup ID. The browser console has not yet been adapted to submit the required filter object; use the HTTP API for this iteration.
 
 Job listing defaults to 20 entries and accepts limits from 1 to 100. Pass the returned string `next_cursor` as `before`; null means no older entries. Cursors use insertion order, so new jobs do not shift older pages; task states can still change between requests. Each entry includes the usual job fields plus `request` (original paths and request kind), `queued_at`, `started_at`, and `finished_at`. Times are Unix milliseconds; start/finish times are null until recorded. Unknown, duplicate, or invalid listing parameters return 400. Existing submission and individual-job responses are unchanged.
 
@@ -86,7 +90,7 @@ At startup, jobs left `running` by an earlier service exit become failed with co
 
 Run only one service instance per working directory. Both the working directory database and repository databases require local filesystems. SQLite uses WAL, `synchronous=FULL`, foreign keys, and a five-second busy timeout; pools allow at most four connections. Schema installation and versioning are transactional; unsupported versions prevent use.
 
-> Development status: repository format v2 backs up Unix metadata and symbolic link targets, with per-backup entry and skip counts. Ordinary content restore works; metadata and symlink restoration and filtering are unfinished. See [the schema contract and remaining work](docs/architecture/repository-schema.md).
+> Development status: repository format v2 backs up Unix metadata and symbolic link targets, with per-backup entry and skip counts. Restore applies Unix metadata and recreates symbolic links; backup filtering is implemented with strict directory pruning. See [the schema contract and remaining work](docs/architecture/repository-schema.md).
 
 Full backups store headers and ordered file/directory entries in `repository.sqlite3` at each repository root. A complete metadata record is committed atomically and an existing backup ID cannot be overwritten. Format version 2 stores a mirrored tree under `backups/<backup_id>/`: each regular file retains its relative name and contains Zstd-compressed bytes. Directory entries preserve empty directories. Metadata records each file's original byte count and SHA-256 checksum of its uncompressed contents, plus a UTC RFC 3339 creation timestamp. Entry ordinals preserve metadata ordering; file locations are determined by relative paths.
 
@@ -162,7 +166,7 @@ This closes the local MVP workflow. The next reliability priorities are source-f
 - UI directory browsing, saved repository shortcuts, byte/file progress, and safe task cancellation, as separate follow-ups.
 - Directory synchronization support for non-Unix backup and restore execution.
 - Permissions, modification times, symbolic links, and other advanced restore capabilities.
-- Scheduled jobs, retention policies, file filtering, and repository encryption. Consider WebDAV / S3 after the local workflow is stable. Incremental backups are not planned. Mobile clients, real-time synchronization, and multi-user collaboration are outside the current scope.
+- Scheduled jobs, retention policies, and repository encryption. Consider WebDAV / S3 after the local workflow is stable. Incremental backups are not planned. Mobile clients, real-time synchronization, and multi-user collaboration are outside the current scope.
 
 ## License
 

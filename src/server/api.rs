@@ -1,4 +1,4 @@
-use crate::jobs::{JobError, JobManager, JobRequest};
+use crate::jobs::{Filter, JobError, JobManager, JobRequest};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, FromRequest, Request, State, rejection::JsonRejection},
@@ -100,7 +100,9 @@ async fn read_json<T: DeserializeOwned>(request: Request) -> Result<T, JobError>
 struct BackupRequest {
     source: PathBuf,
     repository: PathBuf,
+    filter: Filter,
 }
+
 #[derive(Deserialize)]
 struct RestoreRequest {
     repository: PathBuf,
@@ -151,6 +153,7 @@ async fn start_backup(
         JobRequest::Backup {
             source: request.source,
             repository: request.repository,
+            filter: Box::new(request.filter),
         },
     )
     .await
@@ -651,7 +654,10 @@ mod tests {
                 "/api/backups",
                 "Bearer test-key",
                 "application/json",
-                br#"{"source":"source","repository":"repo"}"#.to_vec(),
+                serde_json::to_vec(&json!({
+                    "source": "source", "repository": "repo",
+                    "filter": crate::test_support::unfiltered_config()
+                }))?,
             )?)
             .await?;
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -684,6 +690,7 @@ mod tests {
                 request: JobRequest::Backup {
                     source: "source".into(),
                     repository: "repository".into(),
+                    filter: Box::new(crate::test_support::unfiltered()?),
                 },
                 state,
             };

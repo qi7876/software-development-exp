@@ -318,7 +318,7 @@ fn restore_all_files(
     Ok(())
 }
 
-pub fn run(repository: &Path, backup_id: &str, destination: &Path) -> Result<(), JobError> {
+pub(super) fn run(repository: &Path, backup_id: &str, destination: &Path) -> Result<(), JobError> {
     let absolute_repository_path = get_absolute_directory_path(repository)?;
     let absolute_destination_path = get_absolute_directory_path(destination)?;
     if paths_overlap(&absolute_repository_path, &absolute_destination_path) {
@@ -513,8 +513,15 @@ mod tests {
         async fn backup(&self) -> TestResult {
             let source = self.source.clone();
             let repository = self.repository.clone();
-            tokio::task::spawn_blocking(move || backup::run(&source, &repository, BACKUP_ID))
-                .await??;
+            tokio::task::spawn_blocking(move || {
+                backup::run(
+                    &source,
+                    &repository,
+                    &crate::test_support::unfiltered()?,
+                    BACKUP_ID,
+                )
+            })
+            .await??;
             Ok(())
         }
 

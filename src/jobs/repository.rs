@@ -4,12 +4,12 @@ use sqlx::Row;
 use std::path::{Path, PathBuf};
 
 #[derive(serde::Serialize)]
-pub struct RepoBackupInfo {
-    pub backup_id: String,
-    pub created_at: String,
+pub(crate) struct RepoBackupInfo {
+    pub(super) backup_id: String,
+    pub(super) created_at: String,
 }
 
-pub const REPO_SCHEMA: storage::Schema = storage::Schema {
+pub(super) const REPO_SCHEMA: storage::Schema = storage::Schema {
     version: 2,
     sql: "
 CREATE TABLE backups (
@@ -58,43 +58,43 @@ CREATE TABLE entries (
 
 // Repository metadata is committed once and is immutable thereafter.
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct Manifest {
-    pub format_version: u32,
-    pub backup_id: String,
-    pub created_at: String,
-    pub source: PathBuf,
-    pub compression_algorithm: String,
-    pub checksum_algorithm: String,
-    pub root_metadata: UnixMetadata,
-    pub backup_stats: BackupStats,
-    pub entries: Vec<ManifestEntry>,
+pub(super) struct Manifest {
+    pub(super) format_version: u32,
+    pub(super) backup_id: String,
+    pub(super) created_at: String,
+    pub(super) source: PathBuf,
+    pub(super) compression_algorithm: String,
+    pub(super) checksum_algorithm: String,
+    pub(super) root_metadata: UnixMetadata,
+    pub(super) backup_stats: BackupStats,
+    pub(super) entries: Vec<ManifestEntry>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct ManifestEntry {
-    pub relative_path: PathBuf,
-    pub metadata: UnixMetadata,
-    pub kind: ManifestEntryKind,
+pub(super) struct ManifestEntry {
+    pub(super) relative_path: PathBuf,
+    pub(super) metadata: UnixMetadata,
+    pub(super) kind: ManifestEntryKind,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct UnixMetadata {
-    pub uid: u32,
-    pub gid: u32,
-    pub mode: u32,
-    pub atime: FileTimestamp,
-    pub mtime: FileTimestamp,
+pub(super) struct UnixMetadata {
+    pub(super) uid: u32,
+    pub(super) gid: u32,
+    pub(super) mode: u32,
+    pub(super) atime: FileTimestamp,
+    pub(super) mtime: FileTimestamp,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct FileTimestamp {
-    pub seconds: i64,
-    pub nanoseconds: u32,
+pub(super) struct FileTimestamp {
+    pub(super) seconds: i64,
+    pub(super) nanoseconds: u32,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
-pub enum ManifestEntryKind {
+pub(super) enum ManifestEntryKind {
     File {
         original_size: u64,
         checksum: String,
@@ -128,7 +128,7 @@ impl UnixMetadata {
     }
 
     #[cfg(unix)]
-    pub fn read(path: &Path) -> Result<Self, JobError> {
+    pub(super) fn read(path: &Path) -> Result<Self, JobError> {
         use std::os::unix::fs::MetadataExt;
 
         let metadata = std::fs::symlink_metadata(path).map_err(|error| {
@@ -167,7 +167,7 @@ impl UnixMetadata {
 }
 
 impl Manifest {
-    pub async fn read(repository: &Path, backup_id: &str) -> Result<Self, JobError> {
+    pub(super) async fn read(repository: &Path, backup_id: &str) -> Result<Self, JobError> {
         let path = repository.join("repository.sqlite3");
         let pool = storage::open(&path, REPO_SCHEMA, false).await?;
         let result = async {
@@ -244,7 +244,7 @@ impl Manifest {
         })
     }
 
-    pub async fn write(&self, repository: &Path) -> Result<(), JobError> {
+    pub(super) async fn write(&self, repository: &Path) -> Result<(), JobError> {
         self.validate_format()?;
         let path = repository.join("repository.sqlite3");
         let pool = storage::open(&path, REPO_SCHEMA, true).await?;
@@ -328,7 +328,7 @@ impl Manifest {
     }
 }
 
-pub fn list(repository: &Path) -> Result<Vec<RepoBackupInfo>, JobError> {
+pub(super) fn list(repository: &Path) -> Result<Vec<RepoBackupInfo>, JobError> {
     let absolute_repository_path = get_absolute_directory_path(repository)?;
     let absolute_db_path = absolute_repository_path.join("repository.sqlite3");
 

@@ -24,3 +24,19 @@ impl Drop for TestDirectory {
         }
     }
 }
+
+// Build the complete HTTP shape: omitted filter fields are not defaults in the API.
+pub(crate) fn unfiltered_config() -> serde_json::Value {
+    serde_json::json!({
+        "relative_path": {"include": [], "exclude": []},
+        "uid": {"include": [], "exclude": []},
+        "gid": {"include": [], "exclude": []},
+        "mode": {"include": [], "exclude": []},
+        "atime": {"from": null, "before": null},
+        "mtime": {"from": null, "before": null}
+    })
+}
+
+pub(crate) fn unfiltered() -> Result<crate::jobs::Filter, serde_json::Error> {
+    serde_json::from_value(unfiltered_config())
+}
