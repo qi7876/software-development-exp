@@ -224,7 +224,7 @@ impl TestServer {
     async fn backup(&self) -> TestResult<String> {
         self.submit(
             "/api/backups",
-            json!({"source": "source", "repository": "repo with space", "filter": unfiltered()}),
+            json!({"source": "source", "repository": "repo with space", "compression": true, "filter": unfiltered()}),
         )
         .await
     }
@@ -370,7 +370,7 @@ async fn round_trip(files: BTreeMap<String, Vec<u8>>) -> TestResult {
     );
     assert_eq!(
         listed,
-        json!({"backups": [{"backup_id": backup_id, "created_at": created}]})
+        json!({"backups": [{"backup_id": backup_id, "created_at": created, "compression": true, "encryption": null}]})
     );
 
     server.restart().await?;
@@ -477,7 +477,7 @@ async fn filters_survive_restart_and_control_backup_and_restore_through_http() -
         .submit(
             "/api/backups",
             json!({
-                "source": "source", "repository": "repo with space", "filter": filter
+                "source": "source", "repository": "repo with space", "compression": true, "filter": filter
             }),
         )
         .await?;
@@ -523,7 +523,7 @@ async fn invalid_filter_jobs_fail_before_creating_repository_contents() -> TestR
             .submit(
                 "/api/backups",
                 json!({
-                    "source": "source", "repository": "repo with space", "filter": filter
+                    "source": "source", "repository": "repo with space", "compression": true, "filter": filter
                 }),
             )
             .await?;
@@ -549,7 +549,7 @@ async fn job_history_paginates_without_duplicates_and_survives_restart() -> Test
         let id = server
             .submit(
                 "/api/backups",
-                json!({"source": source, "repository": "repo with space", "filter": unfiltered()}),
+                json!({"source": source, "repository": "repo with space", "compression": true, "filter": unfiltered()}),
             )
             .await?;
         server.wait_job(&id, false).await?;
@@ -561,7 +561,7 @@ async fn job_history_paginates_without_duplicates_and_survives_restart() -> Test
     let item = &first["jobs"][0];
     assert_eq!(
         item["request"],
-        json!({"kind": "Backup", "source": "missing-third", "repository": "repo with space", "filter": unfiltered()})
+        json!({"kind": "Backup", "encryption": null, "source": "missing-third", "repository": "repo with space", "compression": true, "filter": unfiltered()})
     );
     // Sequence defines ordering; sampled wall-clock timestamps need not be monotonic.
     for field in ["queued_at", "started_at", "finished_at"] {
@@ -613,7 +613,7 @@ async fn startup_authentication_and_failed_job_reporting() -> TestResult {
         .submit(
             "/api/backups",
             json!({
-                "source": "missing-source", "repository": "repo with space", "filter": unfiltered(),
+                "source": "missing-source", "repository": "repo with space", "compression": true, "filter": unfiltered(),
             }),
         )
         .await?;
@@ -862,5 +862,122 @@ async fn http_stays_responsive_and_shutdown_finishes_only_the_active_job() -> Te
         std::fs::read(server.path("source/payload"))?,
         b"keep source contents"
     );
+    server.stop().await
+}
+
+#[tokio::test]
+async fn four_storage_modes_keys_and_authenticated_corruption_through_http() -> TestResult {
+    let mut server = TestServer::start().await?;
+    server.stop().await?;
+    for name in ["current", "previous"] {
+        let status = Command::new(env!("CARGO_BIN_EXE_bak"))
+            .args(["keygen", "--output"])
+            .arg(server.path(name))
+            .status()?;
+        assert!(status.success());
+    }
+    let key_before = std::fs::read(server.path("current"))?;
+    let duplicate = Command::new(env!("CARGO_BIN_EXE_bak"))
+        .args(["keygen", "--output"])
+        .arg(server.path("current"))
+        .output()?;
+    assert!(!duplicate.status.success());
+    assert_eq!(std::fs::read(server.path("current"))?, key_before);
+    let mut config: Value = serde_json::from_slice(&std::fs::read(server.path("config.json"))?)?;
+    config["encryption"] = json!({"keys": {"current": "current", "previous": "previous"}});
+    std::fs::write(server.path("config.json"), serde_json::to_vec(&config)?)?;
+    server.restart().await?;
+    let status = server.get("/api/status").await?;
+    assert_eq!(
+        status["encryption_keys"]
+            .as_array()
+            .ok_or("missing keys")?
+            .len(),
+        2
+    );
+    let mut random = vec![0; 3 * 128 * 1024 + 17];
+    rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut random);
+    std::fs::write(server.path("source/random"), &random)?;
+    std::fs::write(server.path("source/empty"), [])?;
+    std::fs::write(server.path("source/exact"), vec![b'x'; 128 * 1024])?;
+    std::fs::create_dir(server.path("source/empty-dir"))?;
+    std::os::unix::fs::symlink("random", server.path("source/link"))?;
+    let original = read_tree(&server.path("source"))?;
+    for (index, (compression, key_id)) in [
+        (false, None),
+        (true, None),
+        (false, Some("current")),
+        (true, Some("previous")),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let job = server.submit("/api/backups", json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":compression, "encryption_key_id": key_id})).await?;
+        let completed = server.wait_job(&job, false).await?;
+        assert_eq!(completed["state"], "succeeded", "{completed}");
+        let id = completed["result"]["backup_id"]
+            .as_str()
+            .ok_or("missing ID")?;
+        let listed = server.get(LIST_PATH).await?;
+        let summary = listed["backups"]
+            .as_array()
+            .ok_or("missing backups")?
+            .iter()
+            .find(|row| row["backup_id"] == id)
+            .ok_or("missing backup")?;
+        assert_eq!(summary["compression"], compression);
+        assert_eq!(!summary["encryption"].is_null(), key_id.is_some());
+        let payload = server
+            .path("repo with space/backups")
+            .join(id)
+            .join("random");
+        let encoded = std::fs::read(&payload)?;
+        if key_id.is_none() {
+            if compression {
+                assert_eq!(zstd::decode_all(encoded.as_slice())?, random);
+            } else {
+                assert_eq!(encoded, random);
+            }
+        } else {
+            assert!(encoded.starts_with(b"BAKENC\0\x01"));
+            assert_ne!(encoded, random);
+        }
+        let destination = format!("restore-{index}");
+        std::fs::create_dir(server.path(&destination))?;
+        let restore = server
+            .submit(
+                "/api/restores",
+                json!({"repository":"repo with space", "backup_id":id, "destination":destination}),
+            )
+            .await?;
+        let restored = server.wait_job(&restore, false).await?;
+        assert_eq!(restored["state"], "succeeded", "{restored}");
+        assert_eq!(read_tree(&server.path(&destination))?, original);
+        assert_eq!(
+            std::fs::read_link(server.path(&destination).join("link"))?,
+            PathBuf::from("random")
+        );
+        if key_id.is_some() {
+            for (suffix, damaged) in [
+                ("truncated", encoded[..encoded.len() - 1].to_vec()),
+                ("trailing", [encoded.as_slice(), &[0]].concat()),
+            ] {
+                std::fs::write(&payload, damaged)?;
+                let destination = format!("{destination}-{suffix}");
+                std::fs::create_dir(server.path(&destination))?;
+                let restore = server.submit("/api/restores", json!({"repository":"repo with space", "backup_id":id, "destination":destination})).await?;
+                assert_eq!(server.wait_job(&restore, false).await?["state"], "failed");
+            }
+            std::fs::write(&payload, &encoded)?;
+        }
+    }
+    let unknown = server.client.post(server.url("/api/backups")).bearer_auth(SECRET)
+        .json(&json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":false, "encryption_key_id":"unknown"})).send().await?;
+    assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
+    let history = serde_json::to_string(&server.get("/api/jobs?limit=100").await?)?;
+    for name in ["current", "previous"] {
+        let key = std::fs::read_to_string(server.path(name))?;
+        assert!(!history.contains(key.trim()));
+    }
     server.stop().await
 }

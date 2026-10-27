@@ -2,6 +2,7 @@
 
 const $ = (id) => document.getElementById(id);
 const state = {
+  encryptionKeys: [],
   connection: null,
   connections: [],
   selectedUrl: null,
@@ -185,6 +186,11 @@ function resetSession() {
     },
   );
   clearFilter();
+  state.encryptionKeys = [];
+  $("compression").checked = true;
+  $("encryption").checked = false;
+  $("encryption-key").replaceChildren(new Option("选择服务端密钥", ""));
+  updateEncodingOptions();
   $("backup-filter").open = false;
   document.querySelectorAll("[data-connected]").forEach((element) => {
     element.disabled = true;
@@ -371,6 +377,10 @@ async function connectProfile(connection, save = false) {
     document.querySelectorAll("[data-connected]").forEach((element) => {
       element.disabled = false;
     });
+    state.encryptionKeys = status.encryption_keys || [];
+    for (const key of state.encryptionKeys)
+      $("encryption-key").append(new Option(key.key_id, key.key_id));
+    updateEncodingOptions();
     $("refresh-jobs").disabled = false;
     renderConnections();
     message("connection-message", `已连接 ${connection.name}。`);
@@ -504,7 +514,7 @@ function renderBackups() {
   table.append(node("caption", "sr-only", "当前仓库的已完成备份"));
   const head = node("thead");
   const header = node("tr");
-  for (const label of ["创建时间", "备份编号", "操作"]) {
+  for (const label of ["创建时间", "备份编号", "存储模式", "操作"]) {
     const cell = node("th", "", label);
     cell.scope = "col";
     header.append(cell);
@@ -528,13 +538,20 @@ function renderBackups() {
       };
       $("restore-id").textContent = backup.backup_id;
       $("restore-repository").textContent = state.repository;
+      $("restore-mode").textContent = storageMode(backup);
+      $("restore-key-label").hidden = !backup.encryption;
+      $("restore-key").hidden = !backup.encryption;
+      $("restore-key").textContent = backup.encryption?.key_id || "";
       $("destination").value = "";
-      message("restore-message");
+      const available = !backup.encryption || state.encryptionKeys.some(key =>
+        key.key_id === backup.encryption.key_id && key.fingerprint === backup.encryption.fingerprint);
+      $("restore-button").disabled = !available;
+      message("restore-message", available ? "" : "服务端缺少匹配的加密密钥，请配置后重新连接。", !available);
       $("restore-dialog").showModal();
       $("destination").focus();
     });
     action.append(button);
-    row.append(created, info, action);
+    row.append(created, info, node("td", "", storageMode(backup)), action);
     body.append(row);
   }
   table.append(head, body);
@@ -556,6 +573,24 @@ async function submitted(job, id) {
   message(id, `${job.kind === "backup" ? "备份" : "恢复"}任务已提交。`);
   if (id === "backup-message") $("backup-job-link").hidden = false;
 }
+
+function storageMode(backup) {
+  if (backup.encryption) return backup.compression ? "压缩后加密" : "仅加密";
+  return backup.compression ? "仅压缩" : "不压缩、不加密";
+}
+
+function updateEncodingOptions() {
+  $("encryption").disabled = !state.encryptionKeys.length;
+  const encrypted = $("encryption").checked;
+  $("encryption-key-field").hidden = !encrypted;
+  $("encryption-key").required = encrypted;
+  $("encryption-key").disabled = !encrypted;
+  $("encryption-help").hidden = state.encryptionKeys.length > 0;
+  $("encryption-scope").hidden = !encrypted;
+  $("encoding-order").hidden = !encrypted || !$("compression").checked;
+}
+$("compression").addEventListener("change", updateEncodingOptions);
+$("encryption").addEventListener("change", updateEncodingOptions);
 
 const regexFilterFields = ["relative_path", "uid", "gid", "mode"];
 const timeFilterFields = ["mtime", "atime"];
@@ -660,7 +695,10 @@ $("backup-form").addEventListener("submit", async (event) => {
     const filter = backupFilter();
     const job = await api("/api/backups", {
       method: "POST",
-      body: JSON.stringify({ source, repository, filter }),
+      body: JSON.stringify({ source, repository, filter,
+        compression: $("compression").checked,
+        encryption_key_id: $("encryption").checked ? $("encryption-key").value : null,
+      }),
     });
     // Keep this repository visible; successful completion will refresh its contents.
     $("repository-path").value = repository;

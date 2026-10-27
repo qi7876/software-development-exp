@@ -19,6 +19,7 @@ body {
 }
 button,
 input,
+select,
 textarea {
   font: inherit;
   border-radius: 0;
@@ -47,6 +48,7 @@ a {
   text-underline-offset: 3px;
 }
 input,
+select,
 textarea {
   display: block;
   width: 100%;
@@ -62,11 +64,12 @@ textarea::placeholder {
   color: #7c867f;
 }
 input:disabled,
+select:disabled,
 textarea:disabled {
   background: #f2f4f2;
   color: #6b746e;
 }
-:where(input, textarea, button, a, summary):focus-visible {
+:where(input, select, textarea, button, a, summary):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
@@ -598,3 +601,25 @@ dialog::backdrop {
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
+
+.backup-options {
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+  padding-top: 16px;
+}
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 24px 0 0;
+  font-weight: 500;
+}
+.checkbox-label input {
+  width: 16px;
+  min-height: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+#encryption-key-field { margin-top: 16px; max-width: 420px; }
+#encryption-key-field label { font-size: 13px; }

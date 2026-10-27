@@ -1,4 +1,7 @@
 mod backup;
+mod content;
+pub(crate) mod crypto;
+pub(crate) use content::BackupOptions;
 mod filesystem;
 mod filter;
 mod repository;
@@ -19,7 +22,7 @@ use tokio::sync::{Notify, watch};
 use uuid::Uuid;
 
 const JOBS_SCHEMA: storage::Schema = storage::Schema {
-    version: 1,
+    version: 2,
     sql: "
 CREATE TABLE jobs (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,10 +51,14 @@ pub(crate) struct JobManager {
     pool: SqlitePool,
     working_directory: PathBuf,
     wake: Arc<Notify>,
+    pub(crate) keys: Arc<crypto::Keyring>,
 }
 
 impl JobManager {
-    pub(crate) async fn open(working_directory: PathBuf) -> Result<Self, JobError> {
+    pub(crate) async fn open(
+        working_directory: PathBuf,
+        keys: crypto::Keyring,
+    ) -> Result<Self, JobError> {
         let pool =
             storage::open(&working_directory.join("jobs.sqlite3"), JOBS_SCHEMA, true).await?;
         // A running operation may have performed external effects. Never replay it.
@@ -62,6 +69,7 @@ impl JobManager {
             pool,
             working_directory,
             wake: Arc::new(Notify::new()),
+            keys: Arc::new(keys),
         })
     }
 
@@ -188,7 +196,11 @@ impl JobManager {
     }
 
     pub(crate) async fn run_worker(&self, stop: watch::Receiver<bool>) -> Result<(), JobError> {
-        self.worker(stop, execute).await
+        let keys = self.keys.clone();
+        self.worker(stop, move |request, directory| {
+            execute(request, directory, &keys)
+        })
+        .await
     }
 
     async fn worker<F>(&self, mut stop: watch::Receiver<bool>, execute: F) -> Result<(), JobError>
@@ -231,19 +243,26 @@ impl JobManager {
     }
 }
 
-fn execute(request: JobRequest, directory: PathBuf) -> Result<JobResult, JobError> {
+fn execute(
+    request: JobRequest,
+    directory: PathBuf,
+    keys: &crypto::Keyring,
+) -> Result<JobResult, JobError> {
     match request {
         JobRequest::Backup {
             source,
             repository,
             filter,
+            options,
         } => {
             let backup_id = Uuid::new_v4().to_string();
-            backup::run(
+            backup::run_with_options(
                 &directory.join(source),
                 &directory.join(repository),
                 &filter,
                 &backup_id,
+                &options,
+                keys,
             )?;
             Ok(JobResult::Backup { backup_id })
         }
@@ -252,10 +271,11 @@ fn execute(request: JobRequest, directory: PathBuf) -> Result<JobResult, JobErro
             backup_id,
             destination,
         } => {
-            restore::run(
+            restore::run_with_keys(
                 &directory.join(repository),
                 &backup_id,
                 &directory.join(&destination),
+                keys,
             )?;
             Ok(JobResult::Restore { destination })
         }
@@ -285,6 +305,8 @@ pub(crate) enum JobRequest {
         source: PathBuf,
         repository: PathBuf,
         filter: Box<Filter>,
+        #[serde(flatten)]
+        options: BackupOptions,
     },
     Restore {
         repository: PathBuf,
@@ -428,6 +450,7 @@ mod tests {
             source: source.into(),
             repository: "repository".into(),
             filter: Box::new(crate::test_support::unfiltered()?),
+            options: BackupOptions::default(),
         })
     }
 
@@ -435,7 +458,8 @@ mod tests {
     async fn jobs_survive_restart_and_only_running_jobs_fail_recovery() -> Result<(), Box<dyn Error>>
     {
         let directory = TestDirectory::new()?;
-        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
         assert!(jobs.get_job("unknown").await?.is_none());
         let first = jobs.submit(backup_request("one")?).await?;
         let second = jobs.submit(backup_request("two")?).await?;
@@ -462,7 +486,8 @@ mod tests {
             second.job_id
         );
         jobs.close().await;
-        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
         assert!(matches!(
             jobs.get_job(&first.job_id)
                 .await?
@@ -488,12 +513,17 @@ mod tests {
         assert_eq!(resumed.job_id, third.job_id);
         jobs.finish(
             &resumed.job_id,
-            execute(resumed.request, directory.path().to_owned()),
+            execute(
+                resumed.request,
+                directory.path().to_owned(),
+                &crypto::Keyring::default(),
+            ),
         )
         .await?;
         assert!(jobs.claim().await?.is_none());
         jobs.close().await;
-        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
         let failed = jobs
             .get_job(&third.job_id)
             .await?
@@ -517,7 +547,7 @@ mod tests {
     -> Result<(), Box<dyn Error>> {
         tokio::time::timeout(Duration::from_secs(10), async {
             let directory = TestDirectory::new()?;
-            let jobs = JobManager::open(directory.path().to_owned()).await?;
+            let jobs = JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
             let first = jobs.submit(backup_request("first")?).await?;
             let second = jobs.submit(backup_request("second")?).await?;
             let third = jobs.submit(backup_request("third")?).await?;
@@ -562,7 +592,8 @@ mod tests {
     #[tokio::test]
     async fn idle_worker_wakes_for_new_jobs() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
-        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
         let (stop, receiver) = watch::channel(false);
         let worker_jobs = jobs.clone();
         let worker = tokio::spawn(async move { worker_jobs.run_worker(receiver).await });
@@ -593,7 +624,8 @@ mod tests {
     #[tokio::test]
     async fn admission_and_completion_failures_are_observable() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
-        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
         let job = jobs.submit(backup_request("source")?).await?;
         sqlx::raw_sql("CREATE TRIGGER block_completion BEFORE UPDATE ON jobs WHEN NEW.state IN ('failed', 'succeeded') BEGIN SELECT RAISE(FAIL, 'completion blocked'); END;").execute(&jobs.pool).await?;
         let (_stop, receiver) = watch::channel(false);
@@ -621,7 +653,8 @@ mod tests {
             .err()
             .ok_or("accepted job with unavailable database")?;
         assert!(error.message.contains("cannot queue job"));
-        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM jobs")
                 .fetch_one(&jobs.pool)
@@ -636,6 +669,81 @@ mod tests {
             JobState::Failed(_)
         ));
         jobs.close().await;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod encryption_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[tokio::test]
+    async fn queued_encryption_pins_key_across_restart() -> Result<(), Box<dyn std::error::Error>> {
+        for scenario in ["same", "missing", "changed"] {
+            let directory = crate::test_support::TestDirectory::new()?;
+            let root = directory.path();
+            std::fs::create_dir(root.join("source"))?;
+            std::fs::create_dir(root.join("repository"))?;
+            std::fs::write(root.join("source/file"), b"secret data")?;
+            std::fs::write(root.join("key"), hex::encode([7; 32]))?;
+            let files = BTreeMap::from([("main".to_string(), PathBuf::from("key"))]);
+            let keys = crypto::Keyring::load(root, &files)?;
+            let encryption = keys.select("main")?;
+            let jobs = JobManager::open(root.to_owned(), keys).await?;
+            let job = jobs
+                .submit(JobRequest::Backup {
+                    source: "source".into(),
+                    repository: "repository".into(),
+                    filter: Box::new(crate::test_support::unfiltered()?),
+                    options: BackupOptions {
+                        compression: true,
+                        encryption: Some(encryption.clone()),
+                    },
+                })
+                .await?;
+            jobs.close().await;
+            if scenario == "changed" {
+                std::fs::write(root.join("key"), hex::encode([8; 32]))?;
+            }
+            let keys = if scenario == "missing" {
+                crypto::Keyring::default()
+            } else {
+                crypto::Keyring::load(root, &files)?
+            };
+            let jobs = JobManager::open(root.to_owned(), keys).await?;
+            let (stop, stopped) = watch::channel(false);
+            let worker_jobs = jobs.clone();
+            let worker = tokio::spawn(async move { worker_jobs.run_worker(stopped).await });
+            let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let current = jobs
+                        .get_job(&job.job_id)
+                        .await?
+                        .ok_or_else(|| JobError::internal("missing job"))?;
+                    if !matches!(current.state, JobState::Queued | JobState::Running) {
+                        return Ok::<_, JobError>(current);
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            })
+            .await??;
+            stop.send_replace(true);
+            worker.await??;
+            match outcome.state {
+                JobState::Succeeded(_) => assert_eq!(scenario, "same"),
+                JobState::Failed(error) => {
+                    assert_ne!(scenario, "same", "{}", error.message);
+                    assert_eq!(error.code, StatusCode::BAD_REQUEST);
+                    assert!(!root.join("repository/backups").exists());
+                }
+                _ => return Err("job did not finish".into()),
+            }
+            let saved = serde_json::to_string(&outcome.request)?;
+            assert!(saved.contains(&encryption.fingerprint));
+            assert!(!saved.contains(&hex::encode([7; 32])));
+            jobs.close().await;
+        }
         Ok(())
     }
 }

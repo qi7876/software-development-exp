@@ -1,5 +1,7 @@
 use super::{
     JobError,
+    content::{BackupOptions, Content},
+    crypto::Keyring,
     filesystem::{get_absolute_directory_path, paths_overlap, sync_directory},
     filter::{CompiledFilter, Filter},
     repository::{Manifest, ManifestEntry, ManifestEntryKind, UnixMetadata},
@@ -148,9 +150,11 @@ fn path_traversal(
     Ok((backup_stats, backup_entries))
 }
 
-fn backup_one_file(
+fn backup_one_file_with_content(
     absolute_source_file_path: &Path,
     absolute_backup_file_path: &Path,
+    relative_path: &Path,
+    content: &Content<'_>,
 ) -> Result<FileBackupResult, JobError> {
     let mut source_file = std::fs::OpenOptions::new()
         .read(true)
@@ -186,10 +190,11 @@ fn backup_one_file(
         })?;
 
     let mut buffer = [0u8; 128 * 1024];
-    let mut backup_file_encoder =
-        zstd::stream::write::Encoder::new(backup_file, 0).map_err(|error| {
+    let mut backup_file_encoder = content
+        .writer(backup_file, relative_path)
+        .map_err(|error| {
             JobError::internal(format!(
-                "failed to create zstd encoder on backup file {}: {error}",
+                "failed to create content encoder on backup file {}: {error}",
                 absolute_backup_file_path.display(),
             ))
         })?;
@@ -216,7 +221,7 @@ fn backup_one_file(
             JobError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
-                    "failed to compress and forward data to backup file {}: {error}",
+                    "failed to encode and forward data to backup file {}: {error}",
                     absolute_backup_file_path.display(),
                 ),
             )
@@ -248,6 +253,7 @@ fn backup_all_files(
     backup_entries: Vec<BackupEntry>,
     absolute_source_path: &Path,
     absolute_backup_root_directory_path: &Path,
+    content: &Content<'_>,
 ) -> Result<Vec<ManifestEntry>, JobError> {
     let mut manifest_entries = Vec::<ManifestEntry>::new();
     for backup_entry in backup_entries {
@@ -262,8 +268,12 @@ fn backup_all_files(
                 let absolute_source_file_path = absolute_source_path.join(&relative_path);
                 let absolute_backup_file_path =
                     absolute_backup_root_directory_path.join(&relative_path);
-                let backup_result =
-                    backup_one_file(&absolute_source_file_path, &absolute_backup_file_path)?;
+                let backup_result = backup_one_file_with_content(
+                    &absolute_source_file_path,
+                    &absolute_backup_file_path,
+                    &relative_path,
+                    content,
+                )?;
                 ManifestEntry {
                     relative_path,
                     metadata,
@@ -324,12 +334,15 @@ fn backup_all_files(
     Ok(manifest_entries)
 }
 
-pub(super) fn run(
+pub(super) fn run_with_options(
     source: &Path,
     repository: &Path,
     filter: &Filter,
     backup_id: &str,
+    options: &BackupOptions,
+    keys: &Keyring,
 ) -> Result<(), JobError> {
+    let content = Content::new(options, keys, backup_id)?;
     let absolute_source_path = get_absolute_directory_path(source)?;
     let absolute_repository_path = get_absolute_directory_path(repository)?;
     if paths_overlap(&absolute_source_path, &absolute_repository_path) {
@@ -342,6 +355,7 @@ pub(super) fn run(
             ),
         ));
     }
+    super::repository::check_existing_format(&absolute_repository_path)?;
     let compiled_filter = filter.compile()?;
     let root_metadata = UnixMetadata::read(&absolute_source_path)?;
     let (backup_stats, backup_entries) = path_traversal(&absolute_source_path, &compiled_filter)?;
@@ -380,6 +394,7 @@ pub(super) fn run(
         backup_entries,
         &absolute_source_path,
         &absolute_backup_root_directory_path,
+        &content,
     )?;
 
     sync_directory(&absolute_backup_root_directory_path)?;
@@ -387,11 +402,12 @@ pub(super) fn run(
     sync_directory(&absolute_repository_path)?;
 
     let manifest = Manifest {
-        format_version: 2,
+        format_version: 3,
         backup_id: backup_id.to_owned(),
         created_at,
         source: absolute_source_path,
-        compression_algorithm: "zstd".to_string(),
+        compression_algorithm: if options.compression { "zstd" } else { "none" }.to_string(),
+        encryption: options.encryption.clone(),
         checksum_algorithm: "sha256".to_string(),
         entries: manifest_entries,
         root_metadata,
@@ -402,6 +418,35 @@ pub(super) fn run(
     handle.block_on(manifest.write(&absolute_repository_path))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn run(
+    source: &Path,
+    repository: &Path,
+    filter: &Filter,
+    backup_id: &str,
+) -> Result<(), JobError> {
+    run_with_options(
+        source,
+        repository,
+        filter,
+        backup_id,
+        &BackupOptions::default(),
+        &Keyring::default(),
+    )
+}
+
+#[cfg(test)]
+fn backup_one_file(source: &Path, destination: &Path) -> Result<FileBackupResult, JobError> {
+    let options = BackupOptions::default();
+    let keys = Keyring::default();
+    backup_one_file_with_content(
+        source,
+        destination,
+        Path::new("file"),
+        &Content::new(&options, &keys, "test")?,
+    )
 }
 
 #[cfg(test)]
@@ -695,7 +740,7 @@ mod tests {
         let manifest = Manifest::read(&repository, "backup-001").await?;
         assert_eq!(manifest.backup_id, "backup-001");
         assert_eq!(manifest.source, std::fs::canonicalize(&source)?);
-        assert_eq!(manifest.format_version, 2);
+        assert_eq!(manifest.format_version, 3);
         assert_eq!(manifest.compression_algorithm, "zstd");
         assert_eq!(manifest.checksum_algorithm, "sha256");
         let created_at = chrono::DateTime::parse_from_rfc3339(&manifest.created_at)?;

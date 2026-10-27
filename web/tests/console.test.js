@@ -263,6 +263,7 @@ test(
         body: JSON.stringify({
           source: `missing-<img src=x onerror=alert(1)>-${index}`,
           filter: emptyFilter(),
+          compression: true,
           repository: "repo with space",
         }),
       });

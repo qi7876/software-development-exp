@@ -1,4 +1,4 @@
-use crate::jobs::{Filter, JobError, JobManager, JobRequest};
+use crate::jobs::{BackupOptions, Filter, JobError, JobManager, JobRequest};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, FromRequest, Request, State, rejection::JsonRejection},
@@ -24,7 +24,7 @@ pub fn router(jobs: JobManager, secret_key: String, web_ui_enabled: bool) -> Rou
         .merge(super::ui::router(web_ui_enabled))
         .route(
             "/api/status",
-            get(|| async { Json(json!({"version": env!("CARGO_PKG_VERSION")})) }),
+            get(|State(state): State<AppState>| async move { Json(json!({"version": env!("CARGO_PKG_VERSION"), "encryption_keys": state.jobs.keys.available()})) }),
         )
         .route("/api/backups", get(list_backups).post(start_backup))
         .route("/api/restores", post(start_restore))
@@ -101,6 +101,8 @@ struct BackupRequest {
     source: PathBuf,
     repository: PathBuf,
     filter: Filter,
+    compression: bool,
+    encryption_key_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -154,6 +156,14 @@ async fn start_backup(
             source: request.source,
             repository: request.repository,
             filter: Box::new(request.filter),
+            options: BackupOptions {
+                compression: request.compression,
+                encryption: request
+                    .encryption_key_id
+                    .as_deref()
+                    .map(|id| state.jobs.keys.select(id))
+                    .transpose()?,
+            },
         },
     )
     .await
@@ -303,7 +313,11 @@ mod tests {
     async fn routing_auth_and_input_errors_follow_the_public_contract() -> Result<(), Box<dyn Error>>
     {
         let directory = TestDirectory::new()?;
-        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let jobs = JobManager::open(
+            directory.path().to_owned(),
+            crate::jobs::crypto::Keyring::default(),
+        )
+        .await?;
         let app = router(jobs.clone(), "test-key".into(), false);
         let cases = [
             ("GET", "/api/status", "", "", "", 401),
@@ -464,7 +478,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             json_body(response).await?,
-            json!({"version": env!("CARGO_PKG_VERSION")})
+            json!({"version": env!("CARGO_PKG_VERSION"), "encryption_keys": []})
         );
         jobs.close().await;
         Ok(())
@@ -473,7 +487,11 @@ mod tests {
     #[tokio::test]
     async fn cross_origin_preflight_and_authentication() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
-        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let jobs = JobManager::open(
+            directory.path().to_owned(),
+            crate::jobs::crypto::Keyring::default(),
+        )
+        .await?;
         let app = router(jobs.clone(), "test-key".into(), false);
         let preflight = Request::builder()
             .method("OPTIONS")
@@ -524,7 +542,11 @@ mod tests {
     async fn embedded_console_is_optional_and_api_stays_authenticated() -> Result<(), Box<dyn Error>>
     {
         let directory = TestDirectory::new()?;
-        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let jobs = JobManager::open(
+            directory.path().to_owned(),
+            crate::jobs::crypto::Keyring::default(),
+        )
+        .await?;
         for enabled in [false, true] {
             let app = router(jobs.clone(), "test-key".into(), enabled);
             let response = app
@@ -590,7 +612,11 @@ mod tests {
     #[tokio::test]
     async fn oversized_json_and_head_requests() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
-        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let jobs = JobManager::open(
+            directory.path().to_owned(),
+            crate::jobs::crypto::Keyring::default(),
+        )
+        .await?;
         let app = router(jobs.clone(), "test-key".into(), false);
         let response = app
             .clone()
@@ -645,7 +671,11 @@ mod tests {
     #[tokio::test]
     async fn database_admission_failure_returns_json_500() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
-        let jobs = JobManager::open(directory.path().to_owned()).await?;
+        let jobs = JobManager::open(
+            directory.path().to_owned(),
+            crate::jobs::crypto::Keyring::default(),
+        )
+        .await?;
         jobs.close().await;
         let app = router(jobs, "test-key".into(), false);
         let response = app
@@ -656,7 +686,7 @@ mod tests {
                 "application/json",
                 serde_json::to_vec(&json!({
                     "source": "source", "repository": "repo",
-                    "filter": crate::test_support::unfiltered_config()
+                    "compression": true, "filter": crate::test_support::unfiltered_config()
                 }))?,
             )?)
             .await?;
@@ -691,6 +721,7 @@ mod tests {
                     source: "source".into(),
                     repository: "repository".into(),
                     filter: Box::new(crate::test_support::unfiltered()?),
+                    options: BackupOptions::default(),
                 },
                 state,
             };
