@@ -155,7 +155,7 @@ class Server:
                 )
             self.stop_sampling.wait(0.2)
 
-    def request(self, path: str, payload: dict[str, str] | None = None) -> Any:
+    def request(self, path: str, payload: dict[str, Any] | None = None) -> Any:
         headers = {"Authorization": f"Bearer {SECRET}", "Connection": "close"}
         data = None
         if payload is not None:
@@ -176,7 +176,7 @@ class Server:
     def get(self, path: str) -> Any:
         return self.request(path)
 
-    def job(self, path: str, payload: dict[str, str]) -> tuple[dict[str, Any], float]:
+    def job(self, path: str, payload: dict[str, Any]) -> tuple[dict[str, Any], float]:
         started = time.monotonic()
         accepted = self.request(path, payload)
         deadline = started + 120
@@ -233,6 +233,15 @@ def cycle(
         {
             "source": str(source),
             "repository": str(repository),
+            "compression": True,
+            "filter": {
+                "relative_path": {"include": [], "exclude": []},
+                "uid": {"include": [], "exclude": []},
+                "gid": {"include": [], "exclude": []},
+                "mode": {"include": [], "exclude": []},
+                "atime": {},
+                "mtime": {},
+            },
         },
     )
     backup_id = backup["result"]["backup_id"]

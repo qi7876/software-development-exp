@@ -2,6 +2,8 @@ use crate::jobs::repository::ManifestEntryKind;
 
 use super::{
     JobError,
+    content::{BackupOptions, Content},
+    crypto::Keyring,
     filesystem::{get_absolute_directory_path, paths_overlap},
     repository::{Manifest, ManifestEntry},
 };
@@ -38,6 +40,8 @@ fn validate_entry_path(path: &Path) -> Result<(), JobError> {
 fn restore_one_file(
     absolute_backup_file_path: &Path,
     absolute_destination_file_path: &Path,
+    relative_path: &Path,
+    content: &Content<'_>,
 ) -> Result<FileBackupResult, JobError> {
     let backup_file = std::fs::OpenOptions::new()
         .read(true)
@@ -73,12 +77,13 @@ fn restore_one_file(
         })?;
 
     let mut buffer = [0u8; 128 * 1024];
-    let mut backup_file_decoder =
-        zstd::stream::read::Decoder::new(backup_file).map_err(|error| {
+    let mut backup_file_decoder = content
+        .reader(backup_file, relative_path)
+        .map_err(|error| {
             JobError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
-                    "failed to create zstd decoder on backup file {}: {error}",
+                    "failed to create content decoder on backup file {}: {error}",
                     absolute_backup_file_path.display(),
                 ),
             )
@@ -89,7 +94,7 @@ fn restore_one_file(
     loop {
         let n = backup_file_decoder.read(&mut buffer).map_err(|error| {
             JobError::internal(format!(
-                "failed to decompress and forward data form backup file {} to buffer: {error}",
+                "failed to decode and forward data from backup file {} to buffer: {error}",
                 absolute_backup_file_path.display(),
             ))
         })?;
@@ -108,6 +113,12 @@ fn restore_one_file(
         hasher.update(chunk);
         original_size += n as u64;
     }
+    backup_file_decoder.finish().map_err(|error| {
+        JobError::internal(format!(
+            "failed to finish reading {}: {error}",
+            absolute_backup_file_path.display()
+        ))
+    })?;
     destination_file.sync_all().map_err(|error| {
         JobError::internal(format!(
             "failed to sync destination file {}: {error}",
@@ -126,6 +137,7 @@ fn restore_all_files(
     manifest_entries: &Vec<ManifestEntry>,
     absolute_backup_path: &Path,
     absolute_destination_path: &Path,
+    content: &Content<'_>,
 ) -> Result<(), JobError> {
     for manifest_entry in manifest_entries {
         validate_entry_path({
@@ -151,8 +163,12 @@ fn restore_all_files(
             } => {
                 let absolute_backup_file_path = absolute_backup_path.join(relative_path);
                 let absolute_destination_file_path = absolute_destination_path.join(relative_path);
-                let file_restore_result =
-                    restore_one_file(&absolute_backup_file_path, &absolute_destination_file_path)?;
+                let file_restore_result = restore_one_file(
+                    &absolute_backup_file_path,
+                    &absolute_destination_file_path,
+                    relative_path,
+                    content,
+                )?;
                 if &file_restore_result.checksum != checksum
                     || &file_restore_result.original_size != original_size
                 {
@@ -318,7 +334,12 @@ fn restore_all_files(
     Ok(())
 }
 
-pub(super) fn run(repository: &Path, backup_id: &str, destination: &Path) -> Result<(), JobError> {
+pub(super) fn run_with_keys(
+    repository: &Path,
+    backup_id: &str,
+    destination: &Path,
+    keys: &Keyring,
+) -> Result<(), JobError> {
     let absolute_repository_path = get_absolute_directory_path(repository)?;
     let absolute_destination_path = get_absolute_directory_path(destination)?;
     if paths_overlap(&absolute_repository_path, &absolute_destination_path) {
@@ -374,24 +395,11 @@ pub(super) fn run(repository: &Path, backup_id: &str, destination: &Path) -> Res
 
     let manifest = handle.block_on(Manifest::read(&absolute_repository_path, backup_id))?;
 
-    if manifest.format_version != 2 {
-        return Err(JobError::new(
-            StatusCode::BAD_REQUEST,
-            "unsupported format verions",
-        ));
-    }
-    if manifest.compression_algorithm != "zstd" {
-        return Err(JobError::new(
-            StatusCode::BAD_REQUEST,
-            "unsupported compression_algorithm",
-        ));
-    }
-    if manifest.checksum_algorithm != "sha256" {
-        return Err(JobError::new(
-            StatusCode::BAD_REQUEST,
-            "unsupported compression_algorithm",
-        ));
-    }
+    let options = BackupOptions {
+        compression: manifest.compression_algorithm == "zstd",
+        encryption: manifest.encryption.clone(),
+    };
+    let content = Content::new(&options, keys, backup_id)?;
 
     let absolute_backup_path = absolute_repository_path.join(format!("backups/{}", backup_id));
 
@@ -399,6 +407,7 @@ pub(super) fn run(repository: &Path, backup_id: &str, destination: &Path) -> Res
         &manifest.entries,
         &absolute_backup_path,
         &absolute_destination_path,
+        &content,
     )?;
 
     let directory = std::fs::File::open(&absolute_destination_path).map_err(|error| {
@@ -451,6 +460,11 @@ pub(super) fn run(repository: &Path, backup_id: &str, destination: &Path) -> Res
     })?;
 
     Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn run(repository: &Path, backup_id: &str, destination: &Path) -> Result<(), JobError> {
+    run_with_keys(repository, backup_id, destination, &Keyring::default())
 }
 
 #[cfg(all(test, unix))]

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import {
@@ -37,7 +38,12 @@ async function tree(root) {
   return result;
 }
 
-async function startServer(t, apiSecret = secret, webUi = true) {
+async function startServer(
+  t,
+  apiSecret = secret,
+  webUi = true,
+  encryption = false,
+) {
   const directory = await mkdtemp(join(tmpdir(), "bak-browser-"));
   let child;
   t.after(async () => {
@@ -63,12 +69,25 @@ async function startServer(t, apiSecret = secret, webUi = true) {
     "Round trip · 备份与恢复\n",
   );
   await writeFile(join(directory, "occupied/keep.txt"), "keep me");
+  if (encryption) {
+    for (const id of ["current", "previous"])
+      await writeFile(
+        join(directory, `${id}.key`),
+        randomBytes(32).toString("hex"),
+        { mode: 0o600 },
+      );
+  }
   await writeFile(
     join(directory, "config.json"),
     JSON.stringify({
       listen: "127.0.0.1:0",
       secret_key: apiSecret,
       web_ui: { enabled: webUi },
+      encryption: {
+        keys: encryption
+          ? { current: "current.key", previous: "previous.key" }
+          : {},
+      },
     }),
   );
   child = spawn(join(project, "target/debug/bak"), ["-d", directory], {
@@ -263,6 +282,7 @@ test(
         body: JSON.stringify({
           source: `missing-<img src=x onerror=alert(1)>-${index}`,
           filter: emptyFilter(),
+          compression: true,
           repository: "repo with space",
         }),
       });
@@ -329,7 +349,7 @@ test(
   "saved connections switch real API origins and survive closing the page",
   { timeout: 90000 },
   async (t) => {
-    const local = await startServer(t);
+    const local = await startServer(t, secret, true, true);
     const remote = await startServer(t, "remote-api-key", false);
     const browser = await chromium.launch({
       channel: process.env.BAK_BROWSER_CHANNEL || undefined,
@@ -390,6 +410,9 @@ test(
     await page.locator('nav a[href="#backup"]').click();
     await page.locator("#source").fill("/local-only/source");
     await page.locator("#backup-repository").fill("/local-only/repository");
+    await page.locator("#compression").uncheck();
+    await page.locator("#encryption").check();
+    await page.locator("#encryption-key").selectOption("current");
     await page.locator("#filter-summary").click();
     await page.locator("#filter-relative_path-exclude").fill("local-only");
     await manager();
@@ -407,6 +430,9 @@ test(
       await page.locator("#filter-relative_path-exclude").inputValue(),
       "local-only",
     );
+    assert.equal(await page.locator("#compression").isChecked(), false);
+    assert.equal(await page.locator("#encryption").isChecked(), true);
+    assert.equal(await page.locator("#encryption-key").inputValue(), "current");
     assert.equal((await stored()).connections.length, 1);
 
     await save("远程", remote.url, "remote-api-key");
@@ -421,6 +447,9 @@ test(
       await page.locator("#backup-filter").getAttribute("open"),
       null,
     );
+    assert.equal(await page.locator("#compression").isChecked(), true);
+    assert.equal(await page.locator("#encryption").isChecked(), false);
+    assert.equal(await page.locator("#encryption-key").inputValue(), "");
     assert.equal((await stored()).connections.length, 2);
     assert.equal(
       (await page.locator("#connection-list").textContent()).includes(
@@ -742,6 +771,169 @@ test(
     assert.equal(
       await page.locator("#backup-filter").getAttribute("open"),
       null,
+    );
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  "console selects all four storage modes and matches restore keys",
+  { timeout: 90000 },
+  async (t) => {
+    const { directory, url } = await startServer(t, secret, true, true);
+    const browser = await chromium.launch({
+      channel: process.env.BAK_BROWSER_CHANNEL || undefined,
+    });
+    t.after(() => browser.close());
+    const page = await browser.newPage({
+      viewport: { width: 1200, height: 1000 },
+    });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto(url);
+    await page.locator("#open-connection").click();
+    await page.locator("#secret").fill(secret);
+    await page.locator("#connect-button").click();
+    await page.waitForFunction(
+      () => !document.getElementById("source").disabled,
+    );
+    await page.locator('nav a[href="#backup"]').click();
+    assert.equal(await page.locator("#compression").isChecked(), true);
+    assert.equal(await page.locator("#encryption").isChecked(), false);
+    assert.equal(await page.locator("#encryption").isEnabled(), true);
+    assert.deepEqual(
+      await page.locator("#encryption-key option").allTextContents(),
+      ["选择服务端密钥", "current", "previous"],
+    );
+    let encryptedId;
+    const modes = [
+      [false, false, "不压缩、不加密"],
+      [true, false, "仅压缩"],
+      [false, true, "仅加密"],
+      [true, true, "压缩后加密"],
+    ];
+    for (let index = 0; index < modes.length; index++) {
+      const [compression, encryption, mode] = modes[index];
+      await page.locator('nav a[href="#backup"]').click();
+      await page.locator("#source").fill("source");
+      await page.locator("#backup-repository").fill("repo with space");
+      await page.locator("#compression").setChecked(compression);
+      await page.locator("#encryption").setChecked(encryption);
+      if (encryption)
+        await page
+          .locator("#encryption-key")
+          .selectOption(index === 2 ? "current" : "previous");
+      assert.equal(
+        await page.locator("#encoding-order").isVisible(),
+        compression && encryption,
+      );
+      assert.equal(
+        await page.locator("#encryption-scope").isVisible(),
+        encryption,
+      );
+      await page.locator('nav a[href="#repository"]').click();
+      await page.locator('nav a[href="#backup"]').click();
+      assert.equal(await page.locator("#compression").isChecked(), compression);
+      assert.equal(await page.locator("#encryption").isChecked(), encryption);
+      const responsePromise = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.url().endsWith("/api/backups"),
+      );
+      await page.locator("#backup-button").click();
+      const response = await responsePromise;
+      const payload = response.request().postDataJSON();
+      assert.equal(payload.compression, compression);
+      assert.equal(
+        payload.encryption_key_id,
+        encryption ? (index === 2 ? "current" : "previous") : null,
+      );
+      await page.locator("#backup-job-link").click();
+      await page.waitForFunction(
+        () => document.querySelector(".job .badge")?.textContent === "已完成",
+      );
+      const job = await response.json();
+      const jobResponse = await fetch(`${url}/api/jobs/${job.job_id}`, {
+        headers: { Authorization: `Bearer ${secret}` },
+      });
+      const backupId = (await jobResponse.json()).result.backup_id;
+      if (index === 3) encryptedId = backupId;
+      await page
+        .getByRole("button", { name: "查看备份", exact: true })
+        .first()
+        .click();
+      const row = page.locator(".backup-row").filter({ hasText: backupId });
+      await row.waitFor();
+      assert.equal(await row.locator("td").nth(2).textContent(), mode);
+      await row.getByRole("button", { name: "恢复", exact: true }).click();
+      assert.equal(await page.locator("#restore-mode").textContent(), mode);
+      assert.equal(await page.locator("#restore-key").isVisible(), encryption);
+      assert.equal(await page.locator("#restore-button").isEnabled(), true);
+      await mkdir(join(directory, `restored-${index}`));
+      await page.locator("#destination").fill(`restored-${index}`);
+      await page.locator("#restore-button").click();
+      await page.waitForFunction(
+        (expected) =>
+          document.querySelectorAll(".job .badge.succeeded").length ===
+          expected,
+        (index + 1) * 2,
+      );
+      assert.deepEqual(
+        await tree(join(directory, `restored-${index}`)),
+        await tree(join(directory, "source")),
+      );
+    }
+    await page.locator('nav a[href="#backup"]').click();
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+    );
+    if (process.env.BAK_ENCRYPTION_SCREENSHOT)
+      await page.screenshot({
+        path: process.env.BAK_ENCRYPTION_SCREENSHOT,
+        fullPage: true,
+      });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+    );
+    await page.locator("#disconnect-button").click();
+    assert.equal(await page.locator("#compression").isChecked(), true);
+    assert.equal(await page.locator("#encryption").isChecked(), false);
+    assert.equal(await page.locator("#encryption-key").inputValue(), "");
+    // Simulate a service reconfigured without the key; the UI must prevent an invalid restore.
+    await page.route("**/api/status", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.encryption_keys = [];
+      await route.fulfill({ response, json: body });
+    });
+    await page.locator("#open-connection").click();
+    await page
+      .locator(".connection-row")
+      .getByRole("button", { name: "连接", exact: true })
+      .click();
+    await page.waitForFunction(
+      () => !document.getElementById("source").disabled,
+    );
+    assert.equal(await page.locator("#encryption").isDisabled(), true);
+    await page.locator('nav a[href="#repository"]').click();
+    await page.locator("#repository-path").fill("repo with space");
+    await page.locator("#repository-button").click();
+    await page
+      .locator(".backup-row")
+      .filter({ hasText: encryptedId })
+      .getByRole("button", { name: "恢复", exact: true })
+      .click();
+    assert.equal(await page.locator("#restore-button").isDisabled(), true);
+    assert.match(
+      await page.locator("#restore-message").textContent(),
+      /缺少匹配/,
     );
     assert.deepEqual(errors, []);
   },

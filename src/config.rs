@@ -6,12 +6,20 @@ pub(crate) struct Config {
     pub(crate) secret_key: String,
     #[serde(default)]
     pub(crate) web_ui: WebUIConfig,
+    #[serde(default)]
+    pub(crate) encryption: EncryptionConfig,
 }
 
 #[derive(serde::Deserialize, Debug, Default)]
 pub(crate) struct WebUIConfig {
     #[serde(default)]
     pub(crate) enabled: bool,
+}
+
+#[derive(serde::Deserialize, Debug, Default)]
+pub(crate) struct EncryptionConfig {
+    #[serde(default)]
+    pub(crate) keys: std::collections::BTreeMap<String, std::path::PathBuf>,
 }
 
 impl Config {
