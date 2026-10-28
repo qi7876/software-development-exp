@@ -725,6 +725,7 @@ mod encryption_tests {
                     filter: Box::new(crate::test_support::unfiltered()?),
                     options: BackupOptions {
                         compression: true,
+                        compression_level: 7,
                         encryption: Some(encryption.clone()),
                     },
                 })
@@ -768,6 +769,10 @@ mod encryption_tests {
             }
             let saved = serde_json::to_string(&outcome.request)?;
             assert!(saved.contains(&encryption.fingerprint));
+            assert_eq!(
+                serde_json::from_str::<Value>(&saved)?["compression_level"],
+                7
+            );
             assert!(!saved.contains(&hex::encode([7; 32])));
             jobs.close().await;
         }

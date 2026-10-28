@@ -561,7 +561,7 @@ async fn job_history_paginates_without_duplicates_and_survives_restart() -> Test
     let item = &first["jobs"][0];
     assert_eq!(
         item["request"],
-        json!({"kind": "Backup", "encryption": null, "source": "missing-third", "repository": "repo with space", "compression": true, "filter": unfiltered()})
+        json!({"kind": "Backup", "encryption": null, "compression_level": 3, "source": "missing-third", "repository": "repo with space", "compression": true, "filter": unfiltered()})
     );
     // Sequence defines ordering; sampled wall-clock timestamps need not be monotonic.
     for field in ["queued_at", "started_at", "finished_at"] {
@@ -914,7 +914,7 @@ async fn four_storage_modes_keys_and_authenticated_corruption_through_http() -> 
     .into_iter()
     .enumerate()
     {
-        let job = server.submit("/api/backups", json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":compression, "encryption_key_id": key_id})).await?;
+        let job = server.submit("/api/backups", json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":compression, "encryption_key_id": key_id, "compression_level": if index == 1 {1} else {7}})).await?;
         let completed = server.wait_job(&job, false).await?;
         assert_eq!(completed["state"], "succeeded", "{completed}");
         let id = completed["result"]["backup_id"]
@@ -1063,5 +1063,52 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
         2
     );
     connection.close().await?;
+    server.stop().await
+}
+
+#[tokio::test]
+async fn compression_levels_validate_before_admission_and_persist() -> TestResult {
+    let mut server = TestServer::start().await?;
+    for compression in [false, true] {
+        for invalid in [
+            json!(0),
+            json!(23),
+            json!(-1),
+            json!(1.5),
+            json!("3"),
+            Value::Null,
+        ] {
+            let response = server.client.post(server.url("/api/backups")).bearer_auth(SECRET)
+                .json(&json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":compression, "compression_level":invalid})).send().await?;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
+    }
+    assert_eq!(server.get("/api/jobs").await?["jobs"], json!([]));
+    assert!(!server.path("repo with space/backups").exists());
+    for level in [None, Some(1), Some(22)] {
+        let mut payload = json!({"source":"missing-source", "repository":"repo with space", "filter":unfiltered(), "compression":true});
+        if let Some(level) = level {
+            payload["compression_level"] = json!(level);
+        }
+        let id = server.submit("/api/backups", payload).await?;
+        let failed = server.wait_job(&id, false).await?;
+        assert_eq!(failed["state"], "failed");
+        assert!(
+            failed["error"]["message"]
+                .as_str()
+                .ok_or("missing error")?
+                .contains("missing-source")
+        );
+        let history = server.get("/api/jobs").await?;
+        assert_eq!(
+            history["jobs"][0]["request"]["compression_level"],
+            level.unwrap_or(3)
+        );
+    }
+    server.restart().await?;
+    assert_eq!(
+        server.get("/api/jobs").await?["jobs"][0]["request"]["compression_level"],
+        22
+    );
     server.stop().await
 }

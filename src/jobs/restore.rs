@@ -397,6 +397,7 @@ pub(super) fn run_with_keys(
 
     let options = BackupOptions {
         compression: manifest.compression_algorithm == "zstd",
+        compression_level: BackupOptions::default_compression_level(),
         encryption: manifest.encryption.clone(),
     };
     let content = Content::new(&options, keys, backup_id)?;

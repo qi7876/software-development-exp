@@ -11,6 +11,8 @@ use std::{
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct BackupOptions {
     pub(crate) compression: bool,
+    #[serde(default = "BackupOptions::default_compression_level")]
+    pub(crate) compression_level: i32,
     pub(crate) encryption: Option<Encryption>,
 }
 
@@ -18,8 +20,25 @@ impl Default for BackupOptions {
     fn default() -> Self {
         Self {
             compression: true,
+            compression_level: Self::default_compression_level(),
             encryption: None,
         }
+    }
+}
+
+impl BackupOptions {
+    pub(crate) fn default_compression_level() -> i32 {
+        3
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), JobError> {
+        if !(1..=22).contains(&self.compression_level) {
+            return Err(JobError::new(
+                http::StatusCode::BAD_REQUEST,
+                "compression_level must be an integer from 1 to 22",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -35,6 +54,7 @@ impl<'a> Content<'a> {
         keys: &'a Keyring,
         backup_id: &'a str,
     ) -> Result<Self, JobError> {
+        options.validate()?;
         let key = options
             .encryption
             .as_ref()
@@ -65,7 +85,7 @@ impl<'a> Content<'a> {
         };
         if self.options.compression {
             Ok(ContentWriter::Compressed(
-                zstd::stream::write::Encoder::new(writer, 0)?,
+                zstd::stream::write::Encoder::new(writer, self.options.compression_level)?,
             ))
         } else {
             Ok(ContentWriter::Direct(writer))
@@ -162,6 +182,75 @@ impl ContentReader {
                 "trailing payload data",
             ));
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+    #[test]
+    fn levels_are_validated_even_without_compression() -> TestResult {
+        let keys = Keyring::default();
+        for level in [1, 3, 22, 0, 23, -1] {
+            let options = BackupOptions {
+                compression: false,
+                compression_level: level,
+                encryption: None,
+            };
+            let result = Content::new(&options, &keys, "test");
+            assert_eq!(result.is_ok(), (1..=22).contains(&level));
+            if let Err(error) = result {
+                assert_eq!(error.code, http::StatusCode::BAD_REQUEST);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn selected_levels_match_zstd_streams_and_restore_with_default_settings() -> TestResult {
+        let directory = crate::test_support::TestDirectory::new()?;
+        let keys = Keyring::default();
+        let input: Vec<u8> = (0..65000u64).map(|n| ((n * n / 17) % 251) as u8).collect();
+        let mut encodings = Vec::new();
+        for level in [1, 3, 9] {
+            let options = BackupOptions {
+                compression_level: level,
+                ..BackupOptions::default()
+            };
+            let content = Content::new(&options, &keys, "test")?;
+            let path = directory.path().join(format!("level-{level}"));
+            let mut writer = content.writer(File::create(&path)?, Path::new("file"))?;
+            writer.write_all(&input)?;
+            writer.finish()?;
+            let encoded = std::fs::read(&path)?;
+            let mut reference = zstd::stream::write::Encoder::new(Vec::new(), level)?;
+            reference.write_all(&input)?;
+            assert_eq!(encoded, reference.finish()?);
+            encodings.push(encoded);
+            let defaults = BackupOptions::default();
+            let restore = Content::new(&defaults, &keys, "test")?;
+            let mut reader = restore.reader(File::open(&path)?, Path::new("file"))?;
+            let mut decoded = Vec::new();
+            reader.read_to_end(&mut decoded)?;
+            reader.finish()?;
+            assert_eq!(decoded, input);
+        }
+        assert!(encodings.windows(2).any(|pair| pair[0] != pair[1]));
+        Ok(())
+    }
+
+    #[test]
+    fn old_queued_requests_keep_default_level() -> TestResult {
+        let value = serde_json::json!({ "kind":"Backup", "source":"source", "repository":"repo", "filter": crate::test_support::unfiltered_config(), "compression":true, "encryption":null });
+        let request: crate::jobs::JobRequest = serde_json::from_value(value)?;
+        let crate::jobs::JobRequest::Backup { options, .. } = request else {
+            return Err("unexpected request kind".into());
+        };
+        assert_eq!(options.compression_level, 3);
         Ok(())
     }
 }

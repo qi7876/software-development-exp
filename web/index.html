@@ -93,6 +93,40 @@
                   aria-describedby="encryption-help"
                 />加密（XChaCha20-Poly1305）</label
               >
+              <fieldset
+                id="compression-level-fields"
+                class="compression-level-fields"
+              >
+                <label for="compression-level">压缩等级（1–22）</label>
+                <div class="compression-level-controls">
+                  <input
+                    id="compression-level-slider"
+                    type="range"
+                    min="1"
+                    max="22"
+                    step="1"
+                    value="3"
+                    aria-label="压缩等级滑块"
+                    aria-describedby="compression-level-help"
+                  />
+                  <input
+                    id="compression-level"
+                    type="number"
+                    min="1"
+                    max="22"
+                    step="1"
+                    value="3"
+                    required
+                    aria-describedby="compression-level-help compression-level-warning"
+                  />
+                </div>
+                <p id="compression-level-help" class="field-help">
+                  仅影响本次备份；等级越高通常压缩更充分、耗时更长。
+                </p>
+                <p id="compression-level-warning" class="field-help" hidden>
+                  高等级会增加耗时和内存占用。
+                </p>
+              </fieldset>
               <div id="encryption-key-field" hidden>
                 <label for="encryption-key">加密密钥</label>
                 <select id="encryption-key">

@@ -102,6 +102,8 @@ struct BackupRequest {
     repository: PathBuf,
     filter: Filter,
     compression: bool,
+    #[serde(default = "BackupOptions::default_compression_level")]
+    compression_level: i32,
     encryption_key_id: Option<String>,
 }
 
@@ -150,20 +152,23 @@ async fn start_backup(
     let request: BackupRequest = read_json(request).await?;
     validate_path(&request.source, "source")?;
     validate_path(&request.repository, "repository")?;
+    let options = BackupOptions {
+        compression: request.compression,
+        compression_level: request.compression_level,
+        encryption: request
+            .encryption_key_id
+            .as_deref()
+            .map(|id| state.jobs.keys.select(id))
+            .transpose()?,
+    };
+    options.validate()?;
     accepted_job(
         &state.jobs,
         JobRequest::Backup {
             source: request.source,
             repository: request.repository,
             filter: Box::new(request.filter),
-            options: BackupOptions {
-                compression: request.compression,
-                encryption: request
-                    .encryption_key_id
-                    .as_deref()
-                    .map(|id| state.jobs.keys.select(id))
-                    .transpose()?,
-            },
+            options,
         },
     )
     .await

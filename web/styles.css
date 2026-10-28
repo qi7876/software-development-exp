@@ -628,3 +628,26 @@ dialog::backdrop {
 #encryption-key-field label {
   font-size: 13px;
 }
+
+.compression-level-fields {
+  margin-top: 16px;
+  max-width: 420px;
+}
+.compression-level-fields label {
+  font-size: 13px;
+}
+.compression-level-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.compression-level-controls input[type="range"] {
+  flex: 1;
+  padding: 0;
+  border: 0;
+  accent-color: var(--accent);
+}
+.compression-level-controls input[type="number"] {
+  width: 76px;
+  flex-shrink: 0;
+}

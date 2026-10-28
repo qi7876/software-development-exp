@@ -1,6 +1,6 @@
 # Content encryption and encoding contract
 
-Compression and encryption are runtime choices per backup, not Cargo feature switches. The default is Zstd compression without encryption. SHA-256 and original sizes always describe plaintext. Combining features means source → Zstd → encryption → disk; restore applies the inverse. Each writer finishes compression, then encryption, then synchronizes its output before metadata publication. Readers must consume the encoded stream completely, including the authenticated final block, before success.
+Compression and encryption are runtime choices per backup, not Cargo feature switches. The default is Zstd compression at level 3 without encryption. Compression levels 1–22 are recorded in task requests and affect only encoding. Old requests without a level use 3; restore does not need the original level. The level is deliberately absent from payload AAD and repository metadata, so existing encrypted payloads and schemas remain compatible. SHA-256 and original sizes always describe plaintext. Combining features means source → Zstd → encryption → disk; restore applies the inverse. Each writer finishes compression, then encryption, then synchronizes its output before metadata publication. Readers must consume the encoded stream completely, including the authenticated final block, before success.
 
 ## Key lifecycle
 
