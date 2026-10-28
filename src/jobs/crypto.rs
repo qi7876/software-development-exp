@@ -298,8 +298,16 @@ mod tests {
         }
         writer.finish()
     }
+    struct ShortReads<R>(R);
+    impl<R: Read> Read for ShortReads<R> {
+        fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+            let length = output.len().min(31);
+            self.0.read(&mut output[..length])
+        }
+    }
+
     fn decrypt(data: &[u8], key: &[u8; 32], context: &[u8]) -> io::Result<Vec<u8>> {
-        let mut reader = DecryptReader::new(Cursor::new(data), key, context)?;
+        let mut reader = DecryptReader::new(ShortReads(Cursor::new(data)), key, context)?;
         let mut out = Vec::new();
         reader.read_to_end(&mut out)?;
         Ok(out)

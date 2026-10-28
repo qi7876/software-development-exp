@@ -543,10 +543,19 @@ function renderBackups() {
       $("restore-key").hidden = !backup.encryption;
       $("restore-key").textContent = backup.encryption?.key_id || "";
       $("destination").value = "";
-      const available = !backup.encryption || state.encryptionKeys.some(key =>
-        key.key_id === backup.encryption.key_id && key.fingerprint === backup.encryption.fingerprint);
+      const available =
+        !backup.encryption ||
+        state.encryptionKeys.some(
+          (key) =>
+            key.key_id === backup.encryption.key_id &&
+            key.fingerprint === backup.encryption.fingerprint,
+        );
       $("restore-button").disabled = !available;
-      message("restore-message", available ? "" : "服务端缺少匹配的加密密钥，请配置后重新连接。", !available);
+      message(
+        "restore-message",
+        available ? "" : "服务端缺少匹配的加密密钥，请配置后重新连接。",
+        !available,
+      );
       $("restore-dialog").showModal();
       $("destination").focus();
     });
@@ -695,9 +704,14 @@ $("backup-form").addEventListener("submit", async (event) => {
     const filter = backupFilter();
     const job = await api("/api/backups", {
       method: "POST",
-      body: JSON.stringify({ source, repository, filter,
+      body: JSON.stringify({
+        source,
+        repository,
+        filter,
         compression: $("compression").checked,
-        encryption_key_id: $("encryption").checked ? $("encryption-key").value : null,
+        encryption_key_id: $("encryption").checked
+          ? $("encryption-key").value
+          : null,
       }),
     });
     // Keep this repository visible; successful completion will refresh its contents.

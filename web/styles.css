@@ -621,5 +621,10 @@ dialog::backdrop {
   margin: 0;
   accent-color: var(--accent);
 }
-#encryption-key-field { margin-top: 16px; max-width: 420px; }
-#encryption-key-field label { font-size: 13px; }
+#encryption-key-field {
+  margin-top: 16px;
+  max-width: 420px;
+}
+#encryption-key-field label {
+  font-size: 13px;
+}

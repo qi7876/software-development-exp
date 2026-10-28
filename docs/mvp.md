@@ -2,7 +2,7 @@
 
 The MVP is a single-user backup service: connect from the embedded browser console, back up an existing source directory to an existing independent repository, browse completed backups, restore into an existing empty directory, and inspect persisted task results. The console can select local or remote HTTP/HTTPS APIs and persists connection profiles and keys in browser storage. Switching verifies the target and clears old service data. Backup and restore execution currently require Unix. The console supports wide desktop windows of at least 1200 CSS pixels; paths always refer to the selected service device. There is no frontend deployment or runtime asset download.
 
-The current format remains version 1 with individually compressed files and repository metadata in SQLite. Hybrid small-file packs remain future work. Incremental backup is not planned.
+The current format is version 3 with individually encoded files and repository metadata in SQLite. Zstd compression and XChaCha20-Poly1305 content encryption are independent per-backup choices; encrypted backups require named server keys. Hybrid small-file packs remain future work. Incremental backup is not planned.
 
 ## Reliability before broader use
 
@@ -25,7 +25,7 @@ Task history is paginated, while repository backup listing currently returns all
 
 Implement the documented hybrid pack design only after measuring small-file workloads. Preserve per-file integrity checks, define a new format version, and test truncated/damaged packs as well as ordinary round trips. Individual files within a pack share its damage exposure.
 
-Permissions, modification times, symbolic links, and directory synchronization on non-Unix platforms remain unsupported. Define required preservation semantics before claiming broader platform support. Scheduling, filtering, encryption, and remote storage are later extensions.
+Permissions, modification times, symbolic links, and directory synchronization on non-Unix platforms remain unsupported. Define required preservation semantics before claiming broader platform support. Filtering and file-content encryption are implemented. Scheduling, encrypted metadata, and remote storage remain later extensions.
 
 The service currently uses one shared Bearer secret and plain HTTP. Non-local deployment requires a deliberate transport/authentication setup; separate users and permission isolation are outside this MVP. Packaging and automated CI should follow the actual supported operating systems and run the unified check command, including browser checks where dependencies are installed.
 

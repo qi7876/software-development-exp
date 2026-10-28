@@ -679,6 +679,33 @@ mod encryption_tests {
     use std::collections::BTreeMap;
 
     #[tokio::test]
+    async fn old_job_schema_is_rejected_without_modification()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = crate::test_support::TestDirectory::new()?;
+        let path = directory.path().join("jobs.sqlite3");
+        let schema = storage::Schema {
+            version: 1,
+            sql: "CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve');",
+        };
+        let pool = storage::open(&path, schema, true).await?;
+        pool.close().await;
+        assert!(
+            JobManager::open(directory.path().to_owned(), crypto::Keyring::default())
+                .await
+                .is_err()
+        );
+        let pool = storage::open(&path, schema, false).await?;
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT value FROM sentinel")
+                .fetch_one(&pool)
+                .await?,
+            "preserve"
+        );
+        pool.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn queued_encryption_pins_key_across_restart() -> Result<(), Box<dyn std::error::Error>> {
         for scenario in ["same", "missing", "changed"] {
             let directory = crate::test_support::TestDirectory::new()?;

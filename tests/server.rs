@@ -886,7 +886,8 @@ async fn four_storage_modes_keys_and_authenticated_corruption_through_http() -> 
     let mut config: Value = serde_json::from_slice(&std::fs::read(server.path("config.json"))?)?;
     config["encryption"] = json!({"keys": {"current": "current", "previous": "previous"}});
     std::fs::write(server.path("config.json"), serde_json::to_vec(&config)?)?;
-    server.restart().await?;
+    server.spawn()?;
+    server.wait_ready().await?;
     let status = server.get("/api/status").await?;
     assert_eq!(
         status["encryption_keys"]
@@ -903,6 +904,7 @@ async fn four_storage_modes_keys_and_authenticated_corruption_through_http() -> 
     std::fs::create_dir(server.path("source/empty-dir"))?;
     std::os::unix::fs::symlink("random", server.path("source/link"))?;
     let original = read_tree(&server.path("source"))?;
+    let mut encrypted_backups = BTreeMap::new();
     for (index, (compression, key_id)) in [
         (false, None),
         (true, None),
@@ -918,6 +920,9 @@ async fn four_storage_modes_keys_and_authenticated_corruption_through_http() -> 
         let id = completed["result"]["backup_id"]
             .as_str()
             .ok_or("missing ID")?;
+        if let Some(key_id) = key_id {
+            encrypted_backups.insert(key_id, id.to_string());
+        }
         let listed = server.get(LIST_PATH).await?;
         let summary = listed["backups"]
             .as_array()
@@ -979,5 +984,84 @@ async fn four_storage_modes_keys_and_authenticated_corruption_through_http() -> 
         let key = std::fs::read_to_string(server.path(name))?;
         assert!(!history.contains(key.trim()));
     }
+    for scenario in ["missing", "changed"] {
+        config["encryption"]["keys"] = if scenario == "missing" {
+            json!({"previous": "previous"})
+        } else {
+            json!({"previous": "previous", "current": "previous"})
+        };
+        std::fs::write(server.path("config.json"), serde_json::to_vec(&config)?)?;
+        server.restart().await?;
+        let destination = format!("restore-key-{scenario}");
+        std::fs::create_dir(server.path(&destination))?;
+        let restore = server.submit("/api/restores", json!({"repository":"repo with space", "backup_id":encrypted_backups["current"], "destination":destination})).await?;
+        let failed = server.wait_job(&restore, false).await?;
+        assert_eq!(failed["state"], "failed");
+        assert_eq!(failed["error"]["code"], 400);
+        assert!(read_tree(&server.path(&destination))?.is_empty());
+    }
+    std::fs::create_dir(server.path("restore-retained-key"))?;
+    let restore = server.submit("/api/restores", json!({"repository":"repo with space", "backup_id":encrypted_backups["previous"], "destination":"restore-retained-key"})).await?;
+    assert_eq!(
+        server.wait_job(&restore, false).await?["state"],
+        "succeeded"
+    );
+    server.stop().await?;
+    for path in [
+        "jobs.sqlite3",
+        "repo with space/repository.sqlite3",
+        "server.log",
+    ] {
+        let bytes = std::fs::read(server.path(path))?;
+        for name in ["current", "previous"] {
+            let text = std::fs::read_to_string(server.path(name))?;
+            assert!(
+                !bytes
+                    .windows(text.trim().len())
+                    .any(|window| window == text.trim().as_bytes()),
+                "secret exposed in {path}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
+    let mut server = TestServer::start().await?;
+    let database = server.path("repo with space/repository.sqlite3");
+    let mut connection = SqliteConnection::connect_with(
+        &SqliteConnectOptions::new()
+            .filename(&database)
+            .create_if_missing(true),
+    )
+    .await?;
+    sqlx::raw_sql("CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve'); PRAGMA user_version = 2;").execute(&mut connection).await?;
+    connection.close().await?;
+    let id = server.backup().await?;
+    let failed = server.wait_job(&id, false).await?;
+    assert_eq!(failed["state"], "failed");
+    assert!(
+        failed["error"]["message"]
+            .as_str()
+            .ok_or("missing error")?
+            .contains("schema version 2")
+    );
+    assert!(!server.path("repo with space/backups").exists());
+    let mut connection =
+        SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(database)).await?;
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT value FROM sentinel")
+            .fetch_one(&mut connection)
+            .await?,
+        "preserve"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+            .fetch_one(&mut connection)
+            .await?,
+        2
+    );
+    connection.close().await?;
     server.stop().await
 }

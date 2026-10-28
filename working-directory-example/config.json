@@ -3,5 +3,8 @@
   "secret_key": "example-local-test-key",
   "web_ui": {
     "enabled": true
+  },
+  "encryption": {
+    "keys": {}
   }
 }
