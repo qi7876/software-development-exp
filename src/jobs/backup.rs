@@ -406,7 +406,12 @@ pub(super) fn run_with_options(
         backup_id: backup_id.to_owned(),
         created_at,
         source: absolute_source_path,
-        compression_algorithm: if options.compression { "zstd" } else { "none" }.to_string(),
+        compression_algorithm: if options.compression.is_some() {
+            "zstd"
+        } else {
+            "none"
+        }
+        .to_string(),
         encryption: options.encryption.clone(),
         checksum_algorithm: "sha256".to_string(),
         entries: manifest_entries,

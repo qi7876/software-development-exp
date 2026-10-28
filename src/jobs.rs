@@ -1,7 +1,7 @@
 mod backup;
 mod content;
 pub(crate) mod crypto;
-pub(crate) use content::BackupOptions;
+pub(crate) use content::{BackupOptions, ZstdOptions};
 mod filesystem;
 mod filter;
 mod repository;
@@ -724,8 +724,7 @@ mod encryption_tests {
                     repository: "repository".into(),
                     filter: Box::new(crate::test_support::unfiltered()?),
                     options: BackupOptions {
-                        compression: true,
-                        compression_level: 7,
+                        compression: Some(ZstdOptions { level: 7 }),
                         encryption: Some(encryption.clone()),
                     },
                 })
