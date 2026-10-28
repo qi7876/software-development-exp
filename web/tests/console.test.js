@@ -410,6 +410,7 @@ test(
     await page.locator('nav a[href="#backup"]').click();
     await page.locator("#source").fill("/local-only/source");
     await page.locator("#backup-repository").fill("/local-only/repository");
+    await page.locator("#compression-level").fill("8");
     await page.locator("#compression").uncheck();
     await page.locator("#encryption").check();
     await page.locator("#encryption-key").selectOption("current");
@@ -433,6 +434,7 @@ test(
     assert.equal(await page.locator("#compression").isChecked(), false);
     assert.equal(await page.locator("#encryption").isChecked(), true);
     assert.equal(await page.locator("#encryption-key").inputValue(), "current");
+    assert.equal(await page.locator("#compression-level").inputValue(), "8");
     assert.equal((await stored()).connections.length, 1);
 
     await save("远程", remote.url, "remote-api-key");
@@ -450,6 +452,11 @@ test(
     assert.equal(await page.locator("#compression").isChecked(), true);
     assert.equal(await page.locator("#encryption").isChecked(), false);
     assert.equal(await page.locator("#encryption-key").inputValue(), "");
+    assert.equal(await page.locator("#compression-level").inputValue(), "3");
+    assert.equal(
+      await page.locator("#compression-level-slider").inputValue(),
+      "3",
+    );
     assert.equal((await stored()).connections.length, 2);
     assert.equal(
       (await page.locator("#connection-list").textContent()).includes(
@@ -818,6 +825,9 @@ test(
       await page.locator("#source").fill("source");
       await page.locator("#backup-repository").fill("repo with space");
       await page.locator("#compression").setChecked(compression);
+      const level = index === 1 ? 7 : 9;
+      if (compression)
+        await page.locator("#compression-level").fill(String(level));
       await page.locator("#encryption").setChecked(encryption);
       if (encryption)
         await page
@@ -844,6 +854,7 @@ test(
       const response = await responsePromise;
       const payload = response.request().postDataJSON();
       assert.equal(payload.compression, compression);
+      assert.equal(payload.compression_level, compression ? level : undefined);
       assert.equal(
         payload.encryption_key_id,
         encryption ? (index === 2 ? "current" : "previous") : null,
@@ -852,6 +863,23 @@ test(
       await page.waitForFunction(
         () => document.querySelector(".job .badge")?.textContent === "已完成",
       );
+      const details = page.locator(".job").first().locator("details");
+      if (compression) {
+        await details.locator("summary").click();
+        assert.equal(
+          await details.locator("dt").filter({ hasText: "压缩等级" }).count(),
+          1,
+        );
+        assert.equal(
+          await details.locator("dd").last().textContent(),
+          String(level),
+        );
+      } else {
+        assert.equal(
+          await details.locator("dt").filter({ hasText: "压缩等级" }).count(),
+          0,
+        );
+      }
       const job = await response.json();
       const jobResponse = await fetch(`${url}/api/jobs/${job.job_id}`, {
         headers: { Authorization: `Bearer ${secret}` },
@@ -936,5 +964,125 @@ test(
       /缺少匹配/,
     );
     assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  "compression level controls synchronize, validate and retain values",
+  { timeout: 60000 },
+  async (t) => {
+    const { url } = await startServer(t);
+    const browser = await chromium.launch({
+      channel: process.env.BAK_BROWSER_CHANNEL || undefined,
+    });
+    t.after(() => browser.close());
+    const page = await browser.newPage({
+      viewport: { width: 1200, height: 1000 },
+    });
+    await page.goto(url);
+    await page.locator("#open-connection").click();
+    await page.locator("#secret").fill(secret);
+    await page.locator("#connect-button").click();
+    await page.waitForFunction(
+      () => !document.getElementById("source").disabled,
+    );
+    await page.locator('nav a[href="#backup"]').click();
+    await page.locator("#source").fill("source");
+    await page.locator("#backup-repository").fill("repo with space");
+    const number = page.locator("#compression-level");
+    const slider = page.locator("#compression-level-slider");
+    for (const control of [number, slider]) {
+      assert.equal(await control.getAttribute("min"), "1");
+      assert.equal(await control.getAttribute("max"), "22");
+      assert.equal(await control.getAttribute("step"), "1");
+      assert.equal(await control.inputValue(), "3");
+    }
+    await slider.focus();
+    await page.keyboard.press("Home");
+    assert.equal(await number.inputValue(), "1");
+    await page.keyboard.press("End");
+    assert.equal(await number.inputValue(), "22");
+    assert.equal(
+      await page.locator("#compression-level-warning").isVisible(),
+      true,
+    );
+    await page.keyboard.press("ArrowLeft");
+    assert.equal(await number.inputValue(), "21");
+    await number.fill("19");
+    assert.equal(await slider.inputValue(), "19");
+    assert.equal(
+      await page.locator("#compression-level-warning").isVisible(),
+      false,
+    );
+    await number.press("ArrowUp");
+    assert.equal(await slider.inputValue(), "20");
+    assert.equal(
+      await page.locator("#compression-level-warning").isVisible(),
+      true,
+    );
+    await number.press("ArrowDown");
+    assert.equal(await slider.inputValue(), "19");
+    let submissions = 0;
+    page.on("request", (req) => {
+      if (req.method() === "POST" && req.url().endsWith("/api/backups"))
+        submissions++;
+    });
+    for (const invalid of ["", "0", "23", "1.5"]) {
+      await number.fill(invalid);
+      await page.locator("#backup-button").click();
+      assert.equal(
+        await number.evaluate((input) => input.validity.valid),
+        false,
+      );
+      assert.equal(await slider.inputValue(), "19");
+      assert.equal(
+        await number.evaluate((input) => input === document.activeElement),
+        true,
+      );
+    }
+    assert.equal(submissions, 0);
+    await number.fill("12");
+    await page.locator("#compression").uncheck();
+    assert.equal(await number.isDisabled(), true);
+    assert.equal(await slider.isDisabled(), true);
+    await page.locator("#compression").check();
+    assert.equal(await number.inputValue(), "12");
+    assert.equal(await slider.inputValue(), "12");
+    await page.locator('nav a[href="#repository"]').click();
+    await page.locator('nav a[href="#backup"]').click();
+    assert.equal(await number.inputValue(), "12");
+    if (process.env.BAK_COMPRESSION_SCREENSHOT)
+      await page.screenshot({
+        path: process.env.BAK_COMPRESSION_SCREENSHOT,
+        fullPage: true,
+      });
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+    );
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+    );
+    // An inactive, invalid level must neither block submission nor be sent.
+    await number.fill("23");
+    await page.locator("#compression").uncheck();
+    const requestPromise = page.waitForRequest(
+      (req) => req.method() === "POST" && req.url().endsWith("/api/backups"),
+    );
+    await page.locator("#backup-button").click();
+    assert.equal(
+      (await requestPromise).postDataJSON().compression_level,
+      undefined,
+    );
+    await page.locator("#backup-job-link").waitFor();
+    await page.locator("#disconnect-button").click();
+    assert.equal(await number.inputValue(), "3");
+    assert.equal(await slider.inputValue(), "3");
   },
 );

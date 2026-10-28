@@ -1,4 +1,4 @@
-use crate::jobs::{BackupOptions, Filter, JobError, JobManager, JobRequest};
+use crate::jobs::{BackupOptions, Filter, JobError, JobManager, JobRequest, ZstdOptions};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, FromRequest, Request, State, rejection::JsonRejection},
@@ -102,6 +102,8 @@ struct BackupRequest {
     repository: PathBuf,
     filter: Filter,
     compression: bool,
+    #[serde(default = "ZstdOptions::default_level")]
+    compression_level: i32,
     encryption_key_id: Option<String>,
 }
 
@@ -150,20 +152,25 @@ async fn start_backup(
     let request: BackupRequest = read_json(request).await?;
     validate_path(&request.source, "source")?;
     validate_path(&request.repository, "repository")?;
+    let compression = ZstdOptions {
+        level: request.compression_level,
+    };
+    compression.validate()?;
+    let options = BackupOptions {
+        compression: request.compression.then_some(compression),
+        encryption: request
+            .encryption_key_id
+            .as_deref()
+            .map(|id| state.jobs.keys.select(id))
+            .transpose()?,
+    };
     accepted_job(
         &state.jobs,
         JobRequest::Backup {
             source: request.source,
             repository: request.repository,
             filter: Box::new(request.filter),
-            options: BackupOptions {
-                compression: request.compression,
-                encryption: request
-                    .encryption_key_id
-                    .as_deref()
-                    .map(|id| state.jobs.keys.select(id))
-                    .transpose()?,
-            },
+            options,
         },
     )
     .await

@@ -188,6 +188,8 @@ function resetSession() {
   clearFilter();
   state.encryptionKeys = [];
   $("compression").checked = true;
+  $("compression-level").value = "3";
+  $("compression-level-slider").value = "3";
   $("encryption").checked = false;
   $("encryption-key").replaceChildren(new Option("选择服务端密钥", ""));
   updateEncodingOptions();
@@ -588,7 +590,24 @@ function storageMode(backup) {
   return backup.compression ? "仅压缩" : "不压缩、不加密";
 }
 
+function updateCompressionLevelWarning() {
+  $("compression-level-warning").hidden =
+    !$("compression").checked ||
+    Number($("compression-level-slider").value) < 20;
+}
+$("compression-level-slider").addEventListener("input", () => {
+  $("compression-level").value = $("compression-level-slider").value;
+  updateCompressionLevelWarning();
+});
+$("compression-level").addEventListener("input", () => {
+  if ($("compression-level").validity.valid)
+    $("compression-level-slider").value = $("compression-level").value;
+  updateCompressionLevelWarning();
+});
+
 function updateEncodingOptions() {
+  $("compression-level-fields").disabled = !$("compression").checked;
+  updateCompressionLevelWarning();
   $("encryption").disabled = !state.encryptionKeys.length;
   const encrypted = $("encryption").checked;
   $("encryption-key-field").hidden = !encrypted;
@@ -709,6 +728,9 @@ $("backup-form").addEventListener("submit", async (event) => {
         repository,
         filter,
         compression: $("compression").checked,
+        ...($("compression").checked
+          ? { compression_level: Number($("compression-level").value) }
+          : {}),
         encryption_key_id: $("encryption").checked
           ? $("encryption-key").value
           : null,
@@ -875,6 +897,8 @@ function renderJobs() {
     ];
     if (job.kind === "restore")
       values.unshift(["备份编号", job.request.backup_id]);
+    if (job.kind === "backup" && job.request.compression)
+      values.push(["压缩等级", String(job.request.compression_level ?? 3)]);
     for (const [label, value] of values)
       fields.append(
         node("dt", "", label),
