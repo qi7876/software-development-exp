@@ -11,8 +11,18 @@ diagram: "bak: Runtime and Local Storage" {
   package_0: "Clients" {
     style.font-size: 36
     style.fill: white
-    Client: "<<HTTP client>>\nUsers / curl" {
+    Client: "<<browser or HTTP>>\nOperator / automation" {
       shape: person
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Browser: "<<HTML / CSS / JavaScript>>\nEmbedded web console" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Profiles: "<<API connection profiles>>\nlocalStorage" {
+      shape: stored_data
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
@@ -20,7 +30,7 @@ diagram: "bak: Runtime and Local Storage" {
   package_1: "Single server process" {
     style.font-size: 36
     style.fill: white
-    Server: "<<implemented>>\nbak\naxum + Tokio + SQLx" {
+    Server: "<<API and FIFO worker>>\nbak: axum + Tokio + SQLx" {
       shape: rectangle
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
@@ -29,12 +39,12 @@ diagram: "bak: Runtime and Local Storage" {
   package_2: "Working directory" {
     style.font-size: 36
     style.fill: white
-    Config: "<<startup input>>\nconfig.json" {
+    Config: "<<startup configuration>>\nconfig.json" {
       shape: stored_data
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    Jobs: "<<durable queue and\nhistory>>\njobs.sqlite3" {
+    Jobs: "<<queue / history v2>>\njobs.sqlite3" {
       shape: cylinder
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
@@ -43,12 +53,17 @@ diagram: "bak: Runtime and Local Storage" {
   package_3: "Local filesystem" {
     style.font-size: 36
     style.fill: white
-    Source: "<<regular files and\ndirectories>>\nSource directory" {
+    Keys: "<<256-bit symmetric keys>>\nNamed key files" {
       shape: stored_data
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    Dest: "<<verified output>>\nEmpty restore directory" {
+    Source: "<<files / directories /\nsymlinks>>\nSource directory" {
+      shape: stored_data
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Dest: "<<verified Unix output>>\nEmpty restore directory" {
       shape: stored_data
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
@@ -57,22 +72,26 @@ diagram: "bak: Runtime and Local Storage" {
   package_4: "Local repository" {
     style.font-size: 36
     style.fill: white
-    Repo: "<<published metadata>>\nrepository.sqlite3" {
+    Repo: "<<metadata v3>>\nrepository.sqlite3" {
       shape: cylinder
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    Files: "<<mirrored Zstd files>>\nbackups/<backup_id>/" {
+    Files: "<<encoded file contents>>\nbackups/<backup_id>/" {
       shape: stored_data
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
   }
-  package_0.Client -> package_1.Server: "HTTP + Bearer / JSON"
-  package_1.Server -> package_2.Config: "Read at startup"
+  package_0.Client -> package_0.Browser: "Use console"
+  package_0.Browser -> package_0.Profiles: "Save profiles and API keys"
+  package_0.Browser -> package_1.Server: "Bearer API / CORS; poll jobs"
+  package_0.Client -> package_1.Server: "HTTP automation"
+  package_1.Server -> package_2.Config: "Load at startup"
+  package_1.Server -> package_3.Keys: "Load immutable keyring"
   package_1.Server -> package_2.Jobs: "Queue / claim / complete / recover"
-  package_1.Server -> package_3.Source: "Stream input"
-  package_1.Server -> package_4.Repo: "Publish / list / read metadata"
-  package_1.Server -> package_4.Files: "Write compressed / read payloads"
-  package_1.Server -> package_3.Dest: "Restore and synchronize"
+  package_1.Server -> package_3.Source: "Filter and read entries"
+  package_1.Server -> package_4.Repo: "Publish / list / read"
+  package_1.Server -> package_4.Files: "Encode / decode payloads"
+  package_1.Server -> package_3.Dest: "Restore / authenticate / sync"
 }

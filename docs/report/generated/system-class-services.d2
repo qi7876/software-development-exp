@@ -8,76 +8,103 @@ diagram: "Facade, Modules and Data Access" {
   style.font-size: 44
   style.fill: white
   style.stroke: transparent
-  package_0: "HTTP and lifecycle" {
+  package_0: "HTTP boundary" {
     style.font-size: 36
     style.fill: white
-    Server: "<<module>>\nserver" {
-      shape: class
-      "+ serve(config, jobs)": "Result"
-    }
     API: "<<module>>\nserver::api" {
       shape: class
-      "+ router(jobs, key)": "Router"
+      "+ router(jobs, key, web_ui_enabled)": "Router"
     }
   }
-  package_1: "Jobs and operations" {
+  package_1: "Job subsystem" {
     style.font-size: 36
     style.fill: white
     Manager: "<<struct>>\nJobManager" {
       shape: class
       "- pool": "SqlitePool"
       "- working_directory": "PathBuf"
-      "- wake": "Arc<Notify>"
+      "- keys": "Arc<Keyring>"
       "+ submit(request)": "JobInfo"
       "+ get_job(id)": "Option<JobInfo>"
+      "+ list_jobs(limit, before)": "Value"
       "+ list_backups(path)": "Vec<RepoBackupInfo>"
       "+ run_worker(stop)": "Result"
-      "+ close()": "Void"
+    }
+    Keys: "<<struct>>\nKeyring" {
+      shape: class
+      "- keys": "BTreeMap"
+      "+ load(directory, files)": "Keyring"
+      "+ select(id)": "Encryption"
+      "+ resolve(encryption)": "&[u8;32]"
+    }
+  }
+  package_2: "File operations" {
+    style.font-size: 36
+    style.fill: white
+    Filter: "<<struct>>\nCompiledFilter" {
+      shape: class
+      "+ matches(path, metadata)": "bool"
+    }
+    Content: "<<struct>>\nContent" {
+      shape: class
+      "+ new(options, keys, backup_id)": "Content"
+      "+ writer(file, path)": "ContentWriter"
+      "+ reader(file, path)": "ContentReader"
     }
     Backup: "<<module>>\nbackup" {
       shape: class
-      "+ run(source, repository, backup_id)": "Result"
+      "+ run_with_options(...)": "Result"
     }
     Restore: "<<module>>\nrestore" {
       shape: class
-      "+ run(repository, backup_id, destination)": "Result"
+      "+ run_with_keys(repository, backup_id, destination, keys)": "Result"
     }
     Repo: "<<module>>\nrepository" {
       shape: class
       "+ Manifest::read(path, id)": "Manifest"
-      "+ Manifest::write()": "Result"
+      "+ Manifest::write(path)": "Result"
       "+ list(path)": "Vec<RepoBackupInfo>"
     }
   }
-  package_0.Server -> package_0.API: "router" {
+  package_0.API -> package_1.Manager: "calls" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }
-  package_0.Server -> package_1.Manager: "supervise worker" {
+  package_1.Manager <- package_1.Keys: "shared keys" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "1"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: false
+  }
+  package_1.Manager -> package_2.Backup: "executes" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }
-  package_0.API -> package_1.Manager: "facade calls" {
+  package_1.Manager -> package_2.Restore: "executes" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }
-  package_1.Manager -> package_1.Backup: "blocking execution" {
+  package_2.Backup -> package_2.Filter: "matches" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }
-  package_1.Manager -> package_1.Restore: "blocking execution" {
+  package_2.Backup -> package_2.Content: "encode" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }
-  package_1.Manager -> package_1.Repo: "listing" {
+  package_2.Restore -> package_2.Content: "decode" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }
-  package_1.Backup -> package_1.Repo: "write metadata" {
+  package_2.Content -> package_1.Keys: "resolve key" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }
-  package_1.Restore -> package_1.Repo: "read metadata" {
+  package_2.Backup -> package_2.Repo: "publish" {
+    target-arrowhead.shape: arrow
+    style.stroke-dash: 5
+  }
+  package_2.Restore -> package_2.Repo: "read" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }

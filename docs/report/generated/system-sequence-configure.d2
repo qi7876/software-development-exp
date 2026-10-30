@@ -11,17 +11,23 @@ diagram: "Service Startup, Shutdown and Recovery" {
   shape: sequence_diagram
   User: "Operator" {shape: person}
   Main: "<<control>>\nStartup" {shape: rectangle}
+  Keys: "<<entity>>\nKeyring / key files" {shape: rectangle}
   Jobs: "<<control>>\nJobManager" {shape: rectangle}
   DB: "jobs.sqlite3" {shape: cylinder}
   Server: "<<boundary>>\nserver" {shape: rectangle}
   User -> Main: "bak -d working-directory"
   Main -> Main: "Parse flags / read config.json"
-  Main -> Jobs: "Open job manager"
+  Main -> Keys: "Load named keys and fingerprints"
+  Main -> Jobs: "Open JobManager with shared Keyring"
   Jobs -> DB: "Initialize schema / fail interrupted\nrunning jobs"
   DB -> Jobs: "Terminal history and queued jobs\nretained" {style.stroke-dash: 5}
   Main -> Server: "Bind listener and supervise worker"
   Server -> Jobs: "Run FIFO worker"
-  fragment_7: "opt [Ctrl-C or SIGTERM]" {
+  fragment_8: "opt [Embedded console enabled]" {
+    User -> Server: "Load public UI / verify selected API"
+    Server -> User: "Authenticated version and key\nfingerprints" {style.stroke-dash: 5}
+  }
+  fragment_12: "opt [Ctrl-C or SIGTERM]" {
     User -> Server: "Request graceful shutdown"
     Server -> Jobs: "Stop claiming; finish active operation"
     Jobs -> DB: "Persist active outcome; retain queued\nwork"

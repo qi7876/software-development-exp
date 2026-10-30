@@ -16,20 +16,21 @@ diagram: "Accepted Job to Published Full Backup" {
   Backup: "<<control>>\nbackup" {shape: rectangle}
   Repo: "Repository" {shape: cylinder}
   Client -> API: "POST /api/backups + Bearer key"
-  API -> Jobs: "Validate request / submit"
+  API -> Jobs: "Validate level / pin key fingerprint /\nsubmit"
   Jobs -> DB: "Commit queued job"
   API -> Client: "202 + Location + queued job" {style.stroke-dash: 5}
   Jobs -> DB: "Claim oldest queued job as running"
   Jobs -> Backup: "Execute through spawn_blocking"
-  Backup -> Backup: "Walk / stream Zstd / SHA-256 / file\nsizes"
+  Backup -> Backup: "Match pinned key / compile filter /\nprune traversal"
+  Backup -> Backup: "Encode raw / Zstd / AEAD / Zstd then\nAEAD"
   Backup -> Repo: "Synchronize payload files and\ndirectories"
-  fragment_8: alt {
-    branch_8: "[Payload processing succeeded]" {
-      Backup -> Repo: "Transactionally commit header and\nentries"
+  fragment_9: alt {
+    branch_9: "[Payload processing succeeded]" {
+      Backup -> Repo: "Commit v3 header / entries / metadata /\ncounts"
       Backup -> Jobs: "backup_id" {style.stroke-dash: 5}
       Jobs -> DB: "Commit succeeded result"
     }
-    branch_12: "[Processing or publication failed]" {
+    branch_13: "[Processing or publication failed]" {
       Backup -> Jobs: "Operation error" {style.stroke-dash: 5}
       Jobs -> DB: "Commit failed outcome"
     }
