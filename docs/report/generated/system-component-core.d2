@@ -30,6 +30,11 @@ diagram: "bak: Module Responsibilities" {
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
+    UI: "<<embedded assets>>\nserver::ui" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
   }
   package_2: "Job subsystem" {
     style.font-size: 36
@@ -64,6 +69,21 @@ diagram: "bak: Module Responsibilities" {
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
+    Filter: "<<regex / time / pruning>>\njobs::filter" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Content: "<<optional Zstd / AEAD IO>>\njobs::content" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Crypto: "<<keys / STREAM BE32>>\njobs::crypto" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
   }
   package_0.Main -> package_2.Jobs: "Open durable manager"
   package_0.Main -> package_1.Server: "Run service"
@@ -79,4 +99,11 @@ diagram: "bak: Module Responsibilities" {
   package_2.Restore -> package_2.FS: "Paths / directory sync"
   package_2.Jobs -> package_2.Storage: "Initialize job DB"
   package_2.Repo -> package_2.Storage: "Open repository DB"
+  package_1.Server -> package_1.UI: "Optional static console"
+  package_0.Main -> package_2.Crypto: "Generate / load keys"
+  package_2.Jobs -> package_2.Crypto: "Share Keyring"
+  package_2.Backup -> package_2.Filter: "Compile and match"
+  package_2.Backup -> package_2.Content: "Encode files"
+  package_2.Restore -> package_2.Content: "Decode files"
+  package_2.Content -> package_2.Crypto: "Authenticated stream wrappers"
 }

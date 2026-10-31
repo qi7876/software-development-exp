@@ -1,0 +1,67 @@
+{
+  "recorded_at": "2026-10-30T11:35:04.616979+08:00",
+  "production_revision": "5ac19b92bb68650d416a44cd234c7abf8184fa32",
+  "source_tree": "370b5c5a6cc3e7890f43771f94e26d212fe68715",
+  "environment": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "checks": [
+    {
+      "command": "cargo fmt --all --check",
+      "result": "通过",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo clippy --all-targets --all-features -- -D warnings",
+      "result": "通过，无警告",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --all-targets",
+      "result": "67 项单元/组件测试、12 项真实 HTTP 集成测试通过",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo build --all-targets",
+      "result": "通过",
+      "exit_code": 0
+    },
+    {
+      "command": "npm --prefix web run check",
+      "result": "JavaScript 语法检查通过",
+      "exit_code": 0
+    },
+    {
+      "command": "BAK_BROWSER_CHANNEL=chrome npm --prefix web test",
+      "result": "5 组真实浏览器流程通过",
+      "exit_code": 0
+    },
+    {
+      "command": "uv run ruff check .",
+      "result": "通过",
+      "exit_code": 0
+    },
+    {
+      "command": "uv run basedpyright",
+      "result": "0 errors / 0 warnings / 0 notes",
+      "exit_code": 0
+    },
+    {
+      "command": "uv run python -m unittest discover -s docs/report/tests",
+      "result": "9 项测试通过，包括本地 Word 保护检查，无跳过",
+      "exit_code": 0
+    },
+    {
+      "command": "uv run scripts/update_use_cases.py --check",
+      "result": "用例 D2/PNG 无漂移",
+      "exit_code": 0
+    },
+    {
+      "command": "uv run scripts/update_system_design.py --check",
+      "result": "设计 D2/PNG 无漂移",
+      "exit_code": 0
+    }
+  ],
+  "scope": "当前功能和文档回归；没有重新执行性能、稳定性或 Instruments 测量。",
+  "historical_evidence": "verification.json (2026-10-14)",
+  "entrypoint": "BAK_BROWSER_CHANNEL=chrome uv run scripts/check.py --report --web-ui",
+  "historical_measurements_rerun": false
+}

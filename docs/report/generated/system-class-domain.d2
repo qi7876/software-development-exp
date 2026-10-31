@@ -19,7 +19,7 @@ diagram: "Job and Repository Data Types" {
     }
     JobRequest: "<<enum>>\nJobRequest" {
       shape: class
-      "+ Backup { source, repository }"
+      "+ Backup { source, repository, filter, options }"
       "+ Restore { repository, backup_id, destination }"
     }
     JobState: "<<enum>>\nJobState" {
@@ -30,25 +30,61 @@ diagram: "Job and Repository Data Types" {
       "+ Failed": "JobError"
     }
   }
-  package_1: "Repository data" {
+  package_1: "Encoding settings" {
+    style.font-size: 36
+    style.fill: white
+    Options: "<<struct>>\nBackupOptions" {
+      shape: class
+      "+ compression": "Option<ZstdOptions>"
+      "+ encryption": "Option<Encryption>"
+    }
+    Zstd: "<<struct>>\nZstdOptions" {
+      shape: class
+      "+ level": "i32"
+    }
+    Encryption: "<<struct>>\nEncryption" {
+      shape: class
+      "+ key_id": "String"
+      "+ fingerprint": "String"
+    }
+  }
+  package_2: "Repository data" {
     style.font-size: 36
     style.fill: white
     Manifest: "<<struct>>\nManifest" {
       shape: class
-      "+ backup_id": "String"
-      "+ created_at": "String"
       "+ format_version": "u32"
+      "+ compression_algorithm": "String"
+      "+ encryption": "Option<Encryption>"
+      "+ root_metadata": "UnixMetadata"
+      "+ backup_stats": "BackupStats"
       "+ entries": "Vec<ManifestEntry>"
     }
-    Entry: "<<enum>>\nManifestEntry" {
+    Entry: "<<struct>>\nManifestEntry" {
       shape: class
-      "+ File { path, original_size, checksum }"
-      "+ Directory { path }"
+      "+ relative_path": "PathBuf"
+      "+ metadata": "UnixMetadata"
+      "+ kind": "ManifestEntryKind"
     }
-    Summary: "<<struct>>\nRepoBackupInfo" {
+    Kind: "<<enum>>\nManifestEntryKind" {
       shape: class
-      "+ backup_id": "String"
-      "+ created_at": "String"
+      "+ File { original_size, checksum }"
+      "+ Directory"
+      "+ Symlink { target }"
+    }
+    Metadata: "<<struct>>\nUnixMetadata" {
+      shape: class
+      "+ uid": "u32"
+      "+ gid": "u32"
+      "+ mode": "u32"
+      "+ atime": "FileTimestamp"
+      "+ mtime": "FileTimestamp"
+    }
+    Stats: "<<struct>>\nBackupStats" {
+      shape: class
+      "+ entries_created": "i64"
+      "+ skipped_unsupported": "i64"
+      "+ skipped_filtered": "i64"
     }
   }
   package_0.JobInfo <- package_0.JobRequest: "request" {
@@ -63,9 +99,51 @@ diagram: "Job and Repository Data Types" {
     source-arrowhead.shape: diamond
     source-arrowhead.style.filled: true
   }
-  package_1.Manifest <- package_1.Entry: "ordered entries" {
+  package_0.JobRequest <- package_1.Options: "backup options" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "0..1"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
+  }
+  package_1.Options <- package_1.Zstd: "compression" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "0..1"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
+  }
+  package_1.Options <- package_1.Encryption: "encryption" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "0..1"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
+  }
+  package_2.Manifest <- package_2.Entry: "ordered entries" {
     source-arrowhead.label: "1"
     target-arrowhead.label: "0..*"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
+  }
+  package_2.Manifest <- package_2.Metadata: "source root" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "1"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
+  }
+  package_2.Manifest <- package_2.Stats: "counts" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "1"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
+  }
+  package_2.Entry <- package_2.Metadata: "entry attributes" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "1"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
+  }
+  package_2.Entry <- package_2.Kind: "entry type" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "1"
     source-arrowhead.shape: diamond
     source-arrowhead.style.filled: true
   }

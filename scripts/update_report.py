@@ -34,6 +34,7 @@ GENERATED_CONTENT_WIDTH_CM = 14.0
 BODY_FONT_SIZE_PT = 10.5
 TABLE_FONT_SIZE_PT = 10.5
 VERIFICATION_PATH = ROOT / "docs" / "report" / "verification.json"
+CURRENT_VERIFICATION_PATH = ROOT / "docs" / "report" / "current-verification.json"
 
 
 def _find_section_cell(document: DocumentType, title: str) -> _Cell:
@@ -365,12 +366,12 @@ def _draw_workflow(path: Path) -> None:
     canvas = Image.new("RGB", (1800, 430), "white")
     draw = ImageDraw.Draw(canvas)
     labels = (
-        "HTTP request\n202 + job ID",
+        "Browser / API\n202 + job ID",
         "Durable FIFO\njob queue",
-        "Stream / hash\nZstd / sync",
-        "Commit backup\nmetadata",
+        "Filter / encode\nZstd / AEAD",
+        "Sync / publish\nmetadata v3",
         "List published\nbackups",
-        "Restore / verify\nsync / result",
+        "Decode / verify\nUnix metadata",
     )
     for index, text in enumerate(labels):
         x = 40 + index * 292
@@ -403,8 +404,8 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "bak 是面向个人用户的本地文件备份软件。当前提供全量备份、已发布备份列表和完整恢复，"
-        "通过流式 Zstd 压缩、原始大小与 SHA-256 "
-        "校验验证恢复结果，并以持久化作业提供可查询的执行状态。",
+        "支持筛选、Unix 元数据、符号链接、可选 Zstd 压缩和 XChaCha20-Poly1305 内容加密，"
+        "通过认证流、原始大小与 SHA-256 校验验证恢复结果，并以持久化作业提供可查询状态。",
     )
     _heading(document, anchor, "1.2 综合描述", 2)
     _paragraph(
@@ -412,8 +413,9 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         anchor,
         "产品发布单一 Rust 可执行文件 bak，读取工作目录中的 "
         "config.json，运行 axum/Tokio HTTP 服务。"
-        "用户和自动化脚本通过 curl 等 HTTP 客户端调用 Bearer 认证接口。后台 worker 顺序执行作业；"
-        "当前没有 Web 控制台、计划调度、增量备份或仓库加密。"
+        "用户通过嵌入式 Web 控制台或 curl 调用 Bearer 认证接口。"
+        "浏览器可选择本机或远程 API，后台 worker 顺序执行作业；"
+        "当前未实现计划调度、增量备份或元数据加密。"
         "本报告描述已实现行为，不把未来目标列为当前能力。",
     )
     _heading(document, anchor, "1.3 运行环境与限制", 2)
@@ -485,19 +487,31 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         anchor,
         ("接口", "行为"),
         (
-            ("GET /", "公开文本 bak is running；不是 Web 控制台。"),
-            ("GET /api/status", '认证后返回 {"version":"0.1.0"}；GET 路由也支持 HEAD。'),
+            (
+                "GET /；/ui/* 静态资源",
+                "web_ui.enabled=true 时提供公开嵌入式控制台，否则返回运行提示。",
+            ),
+            (
+                "GET /api/status",
+                "认证后返回 version 和 encryption_keys（标识/指纹）；GET 路由支持 HEAD。",
+            ),
             (
                 "POST /api/backups",
-                "JSON: source、repository；入库后返回 202、Location 和 queued 作业。",
+                "JSON: source、repository、filter、compression；可选 "
+                "compression_level 和 encryption_key_id；先入库再返回 "
+                "202/Location。",
             ),
             (
                 "GET /api/backups?repository=PATH",
-                "返回 backups 摘要数组；created_at 降序、同时间 backup_id 升序。",
+                "返回编号、创建时间、压缩状态与密钥信息；时间降序、同时间编号升序。",
             ),
             (
                 "POST /api/restores",
                 "JSON: repository、backup_id、destination；返回 202 和持久化作业。",
+            ),
+            (
+                "GET /api/jobs?limit=20&before=CURSOR",
+                "返回 jobs/next_cursor；历史含请求与执行时间，limit 为 1–100。",
             ),
             (
                 "GET /api/jobs/{job_id}",
@@ -509,11 +523,16 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        "所有 /api/ 请求使用 Authorization: Bearer <secret_key>。接受响应包含 job_id、kind、state、"
+        "所有 /api/ 请求使用 Authorization: "
+        "Bearer <secret_key>。接受响应包含 "
+        "job_id、kind、state、"
         "result、error；成功备份结果为 backup_id，"
         "成功恢复结果为 destination。失败作业查询仍返回 HTTP 200，"
-        "error.code 表示操作错误。请求错误返回相应 HTTP 状态和统一 error.code/error.message JSON；"
-        "JSON 请求上限 2 MiB，非法输入 400，未认证 401，过大 413，媒体类型不支持 415。",
+        "error.code 表示操作错误。请求错误返回相应 HTTP "
+        "状态和统一 error.code/error.message "
+        "JSON；"
+        "JSON 请求上限 2 MiB，非法输入 400，未认证 401，过大 413，媒体类型不支持 415。"
+        "CORS 预检先于认证，跨域使用显式 Bearer 头且不启用 cookie。",
     )
     _heading(document, anchor, "3.2 启动与配置", 2)
     _table(
@@ -527,7 +546,16 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
             ("secret_key", "必需且非空；用于 API 认证，与备份加密无关。"),
             (
                 "web_ui",
-                "对象包含 enabled、archive_url、directory；界面尚未实现，保持 enabled=false。",
+                "可省略，默认关闭；enabled=true 启用编译时静态资源。"
+                "旧 archive_url/directory 被忽略。",
+            ),
+            (
+                "encryption.keys",
+                "命名标识到密钥文件路径的映射，启动加载，路径相对工作目录或为绝对路径。",
+            ),
+            (
+                "bak keygen --output PATH",
+                "生成 256 位随机密钥，Unix 权限 0600，拒绝覆盖已有文件，不要求 -d。",
             ),
             ("logging", "废弃字段；出现此字段启动失败，应删除。作业历史固定存入 SQLite。"),
         ),
@@ -536,7 +564,9 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        "示例：mkdir -p working-directory-example/source working-directory-example/repository；"
+        "示例：mkdir -p working-directory-ex"
+        "ample/source working-directory-e"
+        "xample/repository；"
         "cargo run -- -d working-directory-example。示例配置含公开测试 key，实际使用应更换。"
         "启动错误输出诊断并非零退出；当前 config 允许其他未知字段，不应声称拒绝所有未知字段。",
     )
@@ -547,17 +577,58 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "工作目录 jobs.sqlite3 保存 FIFO 队列与终态历史；"
         "仓库 repository.sqlite3 保存备份头与有序条目。"
         "backups/<backup_id>/ 镜像保存源相对路径，"
-        "文件保留原名但内容为 Zstd 压缩数据。空目录有独立条目。"
-        "压缩文件与目录同步后，元数据事务一次提交；只有提交的头记录定义已发布备份。",
+        "载荷保留原名，内容可原样、只压缩、只加密或先压缩再加密；空目录和符号链接有独立条目。"
+        "文件与目录同步后，一次提交头、条目、Unix 根元数据与统计。"
+        "作业库 schema v2、仓库 format/schema "
+        "v3，旧数据库拒绝且不迁移。",
     )
     _paragraph(
         document,
         anchor,
         "恢复要求已有空目标且不与仓库重叠，预先校验全部条目路径，再以 "
-        "create_new 写入并验证解压大小和 SHA-256。"
+        "create_new 写入并自动解密/解压，验证最终认证块、原文大小和 SHA-256，"
+        "重建符号链接、应用 Unix 元数据并同步。"
         "正常关闭停止接收请求与领取作业，完成活动操作并留下 "
         "queued 作业。重启将遗留 running 标为失败，"
         "不自动重放，再继续 queued 作业。客户端断开不取消已提交作业，重试 POST 会产生新作业。",
+    )
+    _heading(document, anchor, "3.4 控制台、筛选与编码", 2)
+    _paragraph(
+        document,
+        anchor,
+        "控制台包含创建备份、备份仓库、任务记录及连接管理。"
+        "localStorage 按浏览器 origin "
+        "保存名称、地址和明文 API key；"
+        "先验证候选服务再切换，成功后终止旧请求并清空服务相关输入与结果，"
+        "失败保留原服务。任务每 3 秒刷新，支持历史翻页。",
+    )
+    _paragraph(
+        document,
+        anchor,
+        "筛选使用严格目录剪枝：相对路径、UID/GID、四位八进制权限正"
+        "则和访问/修改时间条件共同作用于文件、目录与符号链接。"
+        "字段 AND、包含 OR、排除优先，时间起点含而终点不含。"
+        "祖先目录不匹配则不检查其后代；规则在 worker 中编译，"
+        "202 后仍可能失败。",
+    )
+    _paragraph(
+        document,
+        anchor,
+        "压缩等级为 1–22、默认 3，Web UI "
+        "使用双向同步的滑块和数字输入框，仅在本次备份启用压缩时生效。"
+        "内部 BackupOptions 的压缩和加密均为 "
+        "Option；None 禁用，Some 保存 "
+        "ZstdOptions 或密钥标识/指纹。"
+        "等级不参与恢复或载荷认证数据，因此旧任务和已有加密备份兼容。",
+    )
+    _paragraph(
+        document,
+        anchor,
+        "命名密钥在启动时加载，排队任务固定 key_id 和 "
+        "fingerprint；重启后替换同名密钥不会静默改变任务。"
+        "加密只保护普通文件内容，文件名、大小、校验和、Unix "
+        "元数据和链接目标仍可见。浏览器从不保存服务端加密密钥；"
+        "API 认证 key 与加密密钥独立，服务端仍可读取明文。",
     )
     _heading(document, anchor, "4. 非功能约束")
     _table(
@@ -573,7 +644,8 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "SQLite 使用 WAL、synchronous=FULL、外键、5 秒 busy timeout 和最多 4 个连接。"
         "事务分别覆盖单个数据库，外部文件与作业库、仓库库不共享事务；"
         "失败可留下未发布目录或部分恢复输出。"
-        "不检测备份期间的源修改、不自动清理、不导入旧 JSON manifest/JSONL。HTTP 没有内置 TLS。",
+        "不检测备份期间的源修改、不自动清理、不导入旧 JSON "
+        "manifest/JSONL。HTTP 没有内置 TLS。",
     )
     _heading(document, anchor, "5. 当前闭环与后续展望")
     _draw_workflow(GENERATED_DIR / "implemented-workflow.png")
@@ -583,8 +655,9 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        "下一阶段优先处理文件一致性与失败清理。Web 控制台、非 Unix 目录同步、权限与时间恢复、调度、"
-        "增量、保留策略、筛选、加密和远程存储属于后续展望，当前均不作为已实现功能验收。",
+        "下一阶段优先处理源一致性与失败清理。非 Unix "
+        "执行、调度、保留策略、元数据加密和远程存储尚未实现；"
+        "增量备份不在当前计划内。已有内容加密不代表整个仓库元数据加密。",
     )
 
 
@@ -682,7 +755,8 @@ def _populate_system_design(
             (
                 "构建与依赖",
                 "Cargo 与 Cargo.lock；uv 管理文档依赖；"
-                "axum、Tokio、SQLx/SQLite、Zstd、SHA-256、serde。",
+                "axum、Tokio、SQLx/SQLite、Zstd、SHA-256、RustCrypto "
+                "XChaCha20-Poly1305、regex、serde。",
             ),
             (
                 "版本控制",
@@ -691,7 +765,9 @@ def _populate_system_design(
             (
                 "测试",
                 "cargo test、Proptest、Reqwest；"
-                "真实文件系统、SQLite 和独立服务进程；Python unittest 验证文档。",
+                "真实文件系统、SQLite 和独立服务进程；"
+                "Node.js/Playwright 验证浏览器；Python "
+                "unittest 验证文档。",
             ),
             (
                 "静态分析",
@@ -771,9 +847,12 @@ def _populate_system_design(
     for boundary in (
         "一个 bak 进程；HTTP、worker 和阻塞文件操作通过普通 Rust 调用与 Tokio 协作。",
         "API 只经 JobManager 门面访问业务；私有模块不为测试暴露。",
-        "本地镜像文件格式已实现；Zstd 与 SHA-256 元数据有格式版本，旧 JSON manifest 不读取或迁移。",
+        "仓库 format/schema v3、作业库 v2；"
+        "过滤和可选编码已实现，旧数据库与 JSON manifest "
+        "不读取或迁移。",
         "作业和仓库分属两个数据库；元数据提交与作业终态提交之间存在独立失败边界。",
-        "当前无 Web 控制台、调度、取消、增量或加密；未验证断电行为和非 Unix 操作执行。",
+        "Web 控制台和内容加密已实现；调度、取消、增量和元数据加密尚未"
+        "实现。未验证断电或非 Unix 执行。",
     ):
         _paragraph(document, anchor, boundary, bullet=True)
 
@@ -796,12 +875,14 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             (
                 "组件集成测试",
                 "内联测试使用真实文件系统、SQLite、Zstd "
-                "和 SHA-256，验证备份、恢复、仓库和作业协作。",
+                "、SHA-256 和真实 AEAD 实现，验证筛选、元数据、备份、恢复、仓库与作业协作。",
             ),
             (
                 "应用集成 / 端到端测试",
                 "tests/server.rs 运行实际二进制，以 HTTP "
-                "验证认证、完整闭环、历史、响应、SIGTERM 与 SIGKILL 恢复。",
+                "验证认证、四种编码模式、密钥、完整闭环、历史、响应和 "
+                "SIGTERM/SIGKILL 恢复；Playwright "
+                "使用真实服务验证 UI。",
             ),
             (
                 "属性测试",
@@ -849,7 +930,24 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
                 "占用恢复目标",
                 "作业失败、错误码 400；目标、源、仓库不变；生成文件和空目录，失败结果跨重启保留。",
             ),
-            ("压缩边界与路径", "0/1 字节、缓冲区边界、多块内容、Unicode 与空目录正确恢复。"),
+            (
+                "压缩边界与路径",
+                "0/1 字节、缓冲区边界、多块、Unicode、空目录正确恢复；"
+                "等级 1–22 校验、默认值和重启持久化。",
+            ),
+            (
+                "筛选与 Unix 元数据",
+                "正则优先级、时间边界、目录剪枝、计数、权限/时间、符号链接和根属性恢复。",
+            ),
+            (
+                "四模式与密钥",
+                "原样、压缩、加密和先压缩后加密；错误密钥、替换密钥、截断、块重排"
+                "、尾随数据及认证失败。",
+            ),
+            (
+                "浏览器流程",
+                "连接保存和切换、跨域、任务翻页、筛选、密钥匹配、滑块/数字同步与边界校验。",
+            ),
             (
                 "路径与完整性错误",
                 "恢复写入前拒绝危险元数据路径；大小、哈希或压缩数据不一致不能报告成功。",
@@ -864,6 +962,33 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
         (4.2, 9.8),
     )
     _heading(document, anchor, "4. 实际执行与工具分析结果")
+    _heading(document, anchor, "当前功能回归", 2)
+    if CURRENT_VERIFICATION_PATH.exists():
+        current = json.loads(CURRENT_VERIFICATION_PATH.read_text())
+        _paragraph(
+            document,
+            anchor,
+            f"当前记录日期：{current['recorded_at']}；被测代码提交：{current['production_revision']}；"
+            "详见 current-verification.json。"
+            "本轮更新功能与架构证据，没有重测性能、稳定性或 "
+            "Instruments。",
+        )
+        _table(
+            document,
+            anchor,
+            ("检查", "当前结果"),
+            ((row["command"], row["result"]) for row in current.get("checks", [])),
+            (8.0, 6.0),
+        )
+    else:
+        _paragraph(document, anchor, "当前版本尚无功能回归记录，不能用历史测量代替。")
+    _heading(document, anchor, "历史测量：性能、稳定性与内存", 2)
+    _paragraph(
+        document,
+        anchor,
+        "以下 verification.json 是 2026-10-14 记录的历史测量，对应其明确标注的旧源码版本，"
+        "不覆盖新增 UI、元数据、筛选、加密或压缩等级，不能作为当前版本性能和内存结论。",
+    )
     if not VERIFICATION_PATH.exists():
         _paragraph(document, anchor, "尚无本次验证记录；不能将计划或模板示例作为通过证据。")
         return
@@ -886,7 +1011,8 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
         document,
         anchor,
         "每类数据先预热一次再测三轮；端到端作业耗时包括入队、轮询和文件/目录同步。"
-        "数据生成与正确性比对在计时外。采集带状态查询和 RSS 采样开销，缓存未清空；不是纯算法基准。",
+        "数据生成与正确性比对在计时外。采集带状态查询和 RSS "
+        "采样开销，缓存未清空；不是纯算法基准。",
     )
     rows = []
     for item in evidence.get("performance", []):
@@ -941,8 +1067,10 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
     _paragraph(
         document,
         anchor,
-        "只有实际执行成功的场景标为通过。当前无讨论确定的性能合格线；单机短时观察不证明长期稳定性、"
-        "无泄漏或断电安全。工具失败或采样范围不足需保留记录。生产代码优化和发现的问题另行跟踪。",
+        "只有实际执行成功的场景标为通过。当前无讨论确定的性能合格线；"
+        "单机短时观察不证明长期稳定性、"
+        "无泄漏或断电安全。工具失败或采样范围不足需保留记录。"
+        "生产代码优化和发现的问题另行跟踪。",
     )
 
 

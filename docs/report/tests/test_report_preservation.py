@@ -80,9 +80,21 @@ class ReportPreservationTests(unittest.TestCase):
                 "稳定性测试",
                 "静态代码分析",
                 "Instruments",
+                "XChaCha20-Poly1305",
+                "压缩等级",
+                "严格目录剪枝",
+                "localStorage",
+                "当前功能回归",
+                "历史测量",
             ]:
                 self.assertIn(required, text)
-            self.assertNotIn("backup_available=false", text)
+            for outdated in [
+                "backup_available=false",
+                "当前没有 Web 控制台",
+                "界面尚未实现",
+                "当前不恢复权限",
+            ]:
+                self.assertNotIn(outdated, text)
 
 
 if __name__ == "__main__":

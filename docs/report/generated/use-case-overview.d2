@@ -8,7 +8,7 @@ diagram: "bak: Implemented Use Cases" {
   style.font-size: 44
   style.fill: white
   style.stroke: transparent
-  CLIENT: "Operator (HTTP client)" {
+  CLIENT: "Operator (browser / HTTP)" {
     shape: person
     style.stroke: "#334155"
     style.fill: white
@@ -24,6 +24,11 @@ diagram: "bak: Implemented Use Cases" {
     style.fill: white
   }
   TGT: "<<system>>\nLocal repository and\ndestination" {
+    shape: rectangle
+    style.stroke: "#334155"
+    style.fill: white
+  }
+  KEYS: "<<system>>\nServer key files" {
     shape: rectangle
     style.stroke: "#334155"
     style.fill: white
@@ -57,12 +62,22 @@ diagram: "bak: Implemented Use Cases" {
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    UC_06: "UC-06\nQuery durable job result" {
+    UC_06: "UC-06\nQuery jobs and paginated\nhistory" {
       shape: oval
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
     UC_07: "UC-07\nStop and restart service" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_08: "UC-08\nManage browser API\nconnections" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    UC_09: "UC-09\nGenerate and configure\nencryption keys" {
       shape: oval
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
@@ -79,7 +94,12 @@ diagram: "bak: Implemented Use Cases" {
   system.UC_03 -- TGT
   system.UC_04 -- TGT
   system.UC_05 -- TGT
+  CLIENT -- system.UC_08
+  CLIENT -- system.UC_09
+  KEYS -- system.UC_09
+  KEYS -- system.UC_05
   AUT -> CLIENT: {target-arrowhead.style.filled: false}
   system.UC_03 -> system.UC_06: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
   system.UC_05 -> system.UC_06: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_08 -> system.UC_02: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
 }

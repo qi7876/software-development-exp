@@ -1,55 +1,80 @@
 {
-  "version": "1.0",
-  "updated": "2026-10-14",
+  "version": "3.0",
+  "updated": "2026-10-30",
   "author": "项目开发者",
   "system": "bak Local Backup Service",
   "functional_requirements": [
     {
       "id": "FR-01",
       "name": "服务启动与配置",
-      "description": "bak 从已有工作目录读取 config.json；支持帮助、版本和工作目录参数，配置或启动失败可见。"
+      "description": "读取工作目录 config.json，支持帮助、版本和工作目录参数；加载可选 Web UI 配置、命名加密密钥及作业库，错误可见。"
     },
     {
       "id": "FR-02",
       "name": "认证与状态",
-      "description": "HTTP API 使用 Bearer secret key；状态返回 version，错误使用统一 JSON。"
+      "description": "Bearer key 保护 API；状态返回版本和加密密钥标识/指纹。公开静态控制台可连接远程 API，CORS 预检先于认证且不使用 cookie。"
     },
     {
       "id": "FR-03",
       "name": "全量备份",
-      "description": "备份已有源目录中的普通文件和目录，拒绝路径重叠与源内符号链接；Zstd 压缩并记录原始大小、SHA-256 和 UTC 时间。"
+      "description": "备份已有且与仓库不重叠的源目录；保存普通文件、空目录、Unix 元数据和符号链接目标，SHA-256 与原始大小描述原文。"
     },
     {
       "id": "FR-04",
       "name": "备份列表",
-      "description": "仅列出已提交元数据的备份编号和创建时间；时间降序、同时间编号升序；未初始化仓库返回空列表且不建库。"
+      "description": "仅列出已发布备份的编号、创建时间、压缩状态和加密密钥信息；时间降序、同时间编号升序，未建库目录返回空列表且不建库。"
     },
     {
       "id": "FR-05",
       "name": "恢复与校验",
-      "description": "恢复到已有、空且不与仓库重叠的目录；预先验证全部相对路径，验证解压大小和 SHA-256，不覆盖已有内容。"
+      "description": "恢复到独立的已有空目录，预先校验全部条目路径；自动解密/解压，校验认证最终块、大小及 SHA-256，并恢复 Unix 元数据和符号链接。"
     },
     {
       "id": "FR-06",
       "name": "持久化作业与历史",
-      "description": "提交备份和恢复先持久化再返回 202 与 Location；单个 worker 按 FIFO 执行，查询 queued/running/succeeded/failed 和结果或错误。"
+      "description": "请求先入库再返回 202/Location；单 worker FIFO 执行，单作业查询与游标分页历史显示请求、状态、结果、错误及执行时间。"
     },
     {
       "id": "FR-07",
       "name": "关闭与重启恢复",
-      "description": "正常关闭等待活动操作完成并留下排队作业；重启将中断的 running 作业标为失败、不重放，继续 queued 作业并保留终态历史。"
+      "description": "正常关闭等待活动作业完成、保留 queued；重启将中断 running 标为失败且不重放，继续 queued 并保留终态历史。"
+    },
+    {
+      "id": "FR-08",
+      "name": "浏览器控制台与连接管理",
+      "description": "提供创建备份、仓库恢复、任务记录及连接管理；浏览器保存连接名称、地址、API key 与选中连接，验证成功才切换服务。"
+    },
+    {
+      "id": "FR-09",
+      "name": "路径与元数据筛选",
+      "description": "相对路径、UID/GID、八进制权限的包含/排除正则与 atime/mtime 时间区间组合筛选；目录不匹配则剪除整个子树。"
+    },
+    {
+      "id": "FR-10",
+      "name": "Unix 元数据与统计",
+      "description": "原子记录根和条目的 UID/GID、权限、纳秒时间戳及符号链接目标，记录创建、过滤跳过和不支持类型跳过的互斥计数。"
+    },
+    {
+      "id": "FR-11",
+      "name": "可选压缩与内容加密",
+      "description": "压缩、加密独立组合为四种模式；Zstd 等级 1–22 默认 3，同时启用时先压缩后 XChaCha20-Poly1305 STREAM 加密。"
+    },
+    {
+      "id": "FR-12",
+      "name": "命名密钥生成与使用",
+      "description": "keygen 创建随机 256 位密钥文件且拒绝覆盖；启动加载命名密钥，任务与备份固定标识和指纹，密钥缺失或变化时明确失败。"
     }
   ],
   "nonfunctional_requirements": [
     {
       "id": "NFR-01",
       "name": "数据正确性",
-      "description": "恢复后相对路径、目录类型和文件内容一致；已有源和成功备份不被恢复修改。"
+      "description": "恢复后相对路径、条目类型、内容及支持的 Unix 元数据正确；不修改源和已有成功备份。"
     },
     {
       "id": "NFR-02",
       "name": "流式处理",
-      "description": "文件压缩、解压和校验使用缓冲区流式处理；元数据和遍历列表仍随条目数增长。"
+      "description": "文件编码、解码、认证和校验有界缓冲；遍历条目与元数据列表仍随条目数增长。"
     },
     {
       "id": "NFR-03",
@@ -69,7 +94,7 @@
     {
       "id": "NFR-06",
       "name": "安全边界",
-      "description": "API key 控制访问；恢复拒绝危险元数据路径与占用目录；HTTP 无内置 TLS，仓库内容未加密。"
+      "description": "API key 与加密密钥分离；加密只保护文件内容，文件名、大小、校验和、Unix 元数据及链接目标仍可见。浏览器 API key 以明文存入 localStorage；服务无内置 TLS。"
     },
     {
       "id": "NFR-07",
@@ -80,7 +105,7 @@
   "actors": [
     {
       "id": "CLIENT",
-      "name": "Operator (HTTP client)",
+      "name": "Operator (browser / HTTP)",
       "stereotype": "human"
     },
     {
@@ -98,6 +123,11 @@
       "id": "TGT",
       "name": "Local repository and destination",
       "stereotype": "system"
+    },
+    {
+      "id": "KEYS",
+      "name": "Server key files",
+      "stereotype": "system"
     }
   ],
   "diagrams": [
@@ -108,7 +138,8 @@
         "CLIENT",
         "AUT",
         "SRC",
-        "TGT"
+        "TGT",
+        "KEYS"
       ],
       "use_cases": [
         "UC-01",
@@ -117,7 +148,9 @@
         "UC-04",
         "UC-05",
         "UC-06",
-        "UC-07"
+        "UC-07",
+        "UC-08",
+        "UC-09"
       ],
       "associations": [
         [
@@ -162,6 +195,22 @@
         ],
         [
           "TGT",
+          "UC-05"
+        ],
+        [
+          "CLIENT",
+          "UC-08"
+        ],
+        [
+          "CLIENT",
+          "UC-09"
+        ],
+        [
+          "KEYS",
+          "UC-09"
+        ],
+        [
+          "KEYS",
           "UC-05"
         ]
       ]
@@ -173,14 +222,17 @@
         "CLIENT",
         "AUT",
         "SRC",
-        "TGT"
+        "TGT",
+        "KEYS"
       ],
       "use_cases": [
         "UC-01",
         "UC-02",
         "UC-03",
         "UC-06",
-        "UC-07"
+        "UC-07",
+        "UC-08",
+        "UC-09"
       ],
       "associations": [
         [
@@ -210,6 +262,18 @@
         [
           "TGT",
           "UC-03"
+        ],
+        [
+          "CLIENT",
+          "UC-08"
+        ],
+        [
+          "CLIENT",
+          "UC-09"
+        ],
+        [
+          "KEYS",
+          "UC-09"
         ]
       ]
     },
@@ -258,7 +322,9 @@
       "priority": "高",
       "goal": "启动配置明确、错误可见的本地备份服务。",
       "primary_actor": "CLIENT",
-      "supporting_actors": [],
+      "supporting_actors": [
+        "KEYS"
+      ],
       "trigger": "执行 bak -d <目录>。",
       "preconditions": [
         "已有工作目录和 config.json。"
@@ -271,7 +337,8 @@
       "parent": null,
       "requirements": [
         "FR-01",
-        "FR-07"
+        "FR-07",
+        "FR-12"
       ],
       "nfr": [
         "NFR-03",
@@ -279,27 +346,27 @@
         "NFR-07"
       ],
       "business_rules": [],
-      "notes": "web_ui 配置仍为必需对象，但控制台没有实现，应保持 enabled=false；logging 字段已废弃。帮助和版本参数直接退出。",
+      "notes": "web_ui 可省略，默认关闭；enabled=true 提供编译时嵌入的控制台。旧 archive_url/directory 字段被忽略；logging 已废弃。作业 schema v2、仓库 schema/format v3，旧数据库拒绝且不迁移。",
       "basic_flow": [
         {
           "id": "B1",
           "actor": "CLIENT",
-          "action": "操作方准备配置并启动 bak。"
+          "action": "准备配置并执行 bak -d <目录>。"
         },
         {
           "id": "B2",
           "actor": "系统",
-          "action": "系统解析启动参数并读取配置。"
+          "action": "解析参数、读取配置并加载全部命名密钥；无效密钥使启动失败。"
         },
         {
           "id": "B3",
           "actor": "系统",
-          "action": "系统打开 jobs.sqlite3，恢复中断作业。"
+          "action": "打开 jobs.sqlite3，将中断 running 作业标为失败。"
         },
         {
           "id": "B4",
           "actor": "系统",
-          "action": "系统绑定监听地址并启动 HTTP 服务和 worker。"
+          "action": "绑定监听地址，启动认证 API、可选静态 UI 和 FIFO worker。"
         }
       ],
       "alternative_flows": [],
@@ -327,14 +394,14 @@
       "name": "Query authenticated status",
       "kind": "main",
       "priority": "高",
-      "goal": "通过认证接口确认服务可访问和程序版本。",
+      "goal": "确认目标服务可连接，读取版本和可用加密密钥标识/指纹。",
       "primary_actor": "CLIENT",
       "supporting_actors": [],
       "trigger": "GET /api/status。",
       "preconditions": [
         "服务已启动。"
       ],
-      "success": "返回 HTTP 200 和包含 version 的 JSON。",
+      "success": "HTTP 200 返回 version 与 encryption_keys，不返回密钥内容。",
       "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
       "includes": [],
       "extension_points": [],
@@ -348,7 +415,7 @@
         "NFR-06"
       ],
       "business_rules": [],
-      "notes": "GET / 返回公开文本 bak is running。状态不包含旧 backup_available 字段，不表示特定作业成功。",
+      "notes": "GET / 根据 web_ui.enabled 返回公开控制台或运行提示；状态不代表特定作业成功。GET 路由支持 HEAD，CORS 预检不要求认证。",
       "basic_flow": [
         {
           "id": "B1",
@@ -363,7 +430,7 @@
         {
           "id": "B3",
           "actor": "系统",
-          "action": "系统返回当前软件版本。"
+          "action": "返回当前版本及命名加密密钥标识与指纹列表。"
         }
       ],
       "alternative_flows": [],
@@ -391,7 +458,7 @@
       "name": "Create full backup",
       "kind": "main",
       "priority": "高",
-      "goal": "将本地源目录完整备份到独立仓库。",
+      "goal": "按选定筛选与编码设置创建可恢复的全量备份。",
       "primary_actor": "CLIENT",
       "supporting_actors": [
         "SRC",
@@ -401,7 +468,7 @@
       "preconditions": [
         "有效 Bearer key；已有源和仓库目录，规范化路径不重叠。"
       ],
-      "success": "作业成功并返回 backup_id；已同步压缩内容和已提交元数据可供恢复。",
+      "success": "同步载荷后原子发布头、条目、根元数据和统计；成功作业仅返回 backup_id。",
       "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
       "includes": [
         "UC-06"
@@ -411,7 +478,11 @@
       "parent": null,
       "requirements": [
         "FR-03",
-        "FR-06"
+        "FR-06",
+        "FR-09",
+        "FR-10",
+        "FR-11",
+        "FR-12"
       ],
       "nfr": [
         "NFR-01",
@@ -422,39 +493,46 @@
       ],
       "business_rules": [
         "备份编号不可覆盖；本版本仅全量备份。",
-        "备份期间需保持源文件不变，程序不检测并发源修改。"
+        "备份期间需保持源文件不变，程序不检测并发源修改。",
+        "正则字段 AND、包含规则 OR、排除优先；时间 from 含、before 不含。目录拒绝后不遍历或计数其后代。",
+        "压缩等级默认 3，只影响备份编码；加密只保护文件内容。统计目前不出现在作业结果中。"
       ],
-      "notes": "操作通过当前 bak 的公开接口完成。",
+      "notes": "筛选适用于文件、目录和符号链接；源根本身不参与筛选。正则编译和时间区间校验在 worker 执行时发生，HTTP 202 后仍可能失败。",
       "basic_flow": [
         {
           "id": "B1",
           "actor": "CLIENT",
-          "action": "客户端提交 source 和 repository。"
+          "action": "提交 source、repository、完整 filter、compression 和可选 compression_level/encryption_key_id。"
         },
         {
           "id": "B2",
           "actor": "系统",
-          "action": "系统校验请求并持久化 queued 作业，返回 202 和 Location。"
+          "action": "校验请求、等级和命名密钥，固定密钥指纹，持久化 queued 并返回 202/Location。"
         },
         {
           "id": "B3",
           "actor": "系统",
-          "action": "worker 按 FIFO 领取作业并写入 running 状态。"
+          "action": "worker FIFO 领取作业；验证路径、仓库版本及密钥指纹，编译筛选规则。"
         },
         {
           "id": "B4",
           "actor": "系统",
-          "action": "系统遍历文件和目录，流式压缩、统计大小与哈希。"
+          "action": "读取 Unix 元数据并严格目录剪枝；记录支持条目与跳过统计。"
         },
         {
           "id": "B5",
           "actor": "系统",
-          "action": "系统同步文件和目录，再事务提交仓库元数据。"
+          "action": "对普通文件流式计算原文哈希和大小，按原样/压缩/加密/先压缩后加密写入。"
         },
         {
           "id": "B6",
           "actor": "系统",
-          "action": "系统持久化成功结果，客户端查询作业结果。"
+          "action": "完成压缩与最终认证块，依次同步文件和目录，事务发布仓库元数据。"
+        },
+        {
+          "id": "B7",
+          "actor": "系统",
+          "action": "持久化成功结果，客户端在任务记录中查询并可跳转仓库。"
         }
       ],
       "alternative_flows": [],
@@ -462,17 +540,18 @@
         {
           "id": "E1",
           "from": "B2",
-          "condition": "JSON 或路径字段无效",
+          "condition": "请求结构、压缩等级或密钥标识无效",
           "steps": [
-            "拒绝请求并返回对应 HTTP JSON 错误。"
+            "返回 400；请求不入队。"
           ]
         },
         {
           "id": "E2",
-          "from": "B4-B5",
-          "condition": "路径重叠、源内符号链接、IO 或元数据写入失败",
+          "from": "B3-B6",
+          "condition": "路径/格式错误、规则无效、密钥变化或 IO/提交失败",
           "steps": [
-            "作业失败，不发布未提交元数据；可能保留未发布目录。"
+            "作业失败并记录原因；无效规则和密钥在创建载荷前失败。",
+            "不发布未提交元数据；运行中失败可留下未发布目录。"
           ]
         }
       ]
@@ -491,7 +570,7 @@
       "preconditions": [
         "有效 Bearer key；仓库目录存在。"
       ],
-      "success": "返回 backups 数组，每项仅包含 backup_id 和 created_at。",
+      "success": "返回 backups 数组，包含 backup_id、created_at、compression 与 encryption（密钥标识/指纹或 null）。",
       "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
       "includes": [],
       "extension_points": [],
@@ -557,7 +636,7 @@
       "preconditions": [
         "有效 Bearer key；已有仓库和空目标目录，规范化路径不重叠。"
       ],
-      "success": "作业成功，result 包含 destination；恢复内容通过大小与 SHA-256 校验且已同步。",
+      "success": "原文大小、SHA-256 和加密流认证均通过，恢复 Unix 元数据与符号链接并同步，返回 destination。",
       "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
       "includes": [
         "UC-06"
@@ -567,7 +646,10 @@
       "parent": null,
       "requirements": [
         "FR-05",
-        "FR-06"
+        "FR-06",
+        "FR-10",
+        "FR-11",
+        "FR-12"
       ],
       "nfr": [
         "NFR-01",
@@ -578,34 +660,35 @@
       ],
       "business_rules": [
         "使用 create_new 避免覆盖已有路径。",
-        "当前不恢复权限、修改时间、符号链接；不自动清理失败输出。"
+        "符号链接按记录目标重建，不读取目标；目录元数据在子项后恢复，最后恢复根元数据。",
+        "密钥标识和指纹都须匹配；失败恢复可留下部分输出，不自动清理。"
       ],
-      "notes": "操作通过当前 bak 的公开接口完成。",
+      "notes": "恢复只需 repository、backup_id、destination；编码模式与密钥从元数据自动选择。界面缺少匹配密钥时禁用恢复，服务端执行仍独立校验。",
       "basic_flow": [
         {
           "id": "B1",
           "actor": "CLIENT",
-          "action": "客户端提交 repository、backup_id 和 destination。"
+          "action": "选择仓库备份并提交目标目录。"
         },
         {
           "id": "B2",
           "actor": "系统",
-          "action": "系统校验请求、持久化 queued 作业并返回 202 和 Location。"
+          "action": "验证请求、持久化 queued 并返回 202/Location。"
         },
         {
           "id": "B3",
           "actor": "系统",
-          "action": "worker 领取作业，验证空目标并读取指定备份元数据。"
+          "action": "worker 检查已有空目标和路径不重叠，读取指定备份元数据并匹配密钥。"
         },
         {
           "id": "B4",
           "actor": "系统",
-          "action": "系统验证全部条目路径后创建目录和文件，解压并检查大小与 SHA-256。"
+          "action": "在写入前验证全部相对路径，然后自动解密/解压、校验原文大小与哈希并重建符号链接。"
         },
         {
           "id": "B5",
           "actor": "系统",
-          "action": "系统同步恢复文件与目录，持久化成功结果，客户端查询作业结果。"
+          "action": "恢复文件、目录及根的 Unix 元数据，同步输出并保存终态结果。"
         }
       ],
       "alternative_flows": [],
@@ -621,26 +704,27 @@
         {
           "id": "E2",
           "from": "B3-B4",
-          "condition": "备份缺失、元数据非法或载荷损坏",
+          "condition": "备份缺失、密钥缺失/替换、非法元数据或载荷认证/校验失败",
           "steps": [
-            "缺失备份报 404，损坏数据失败；失败可能留下部分输出。"
+            "缺失备份报 404；密钥不匹配在恢复条目写入前失败，损坏数据不得报告成功。",
+            "失败可能留下部分输出。"
           ]
         }
       ]
     },
     {
       "id": "UC-06",
-      "name": "Query durable job result",
+      "name": "Query jobs and paginated history",
       "kind": "main",
       "priority": "高",
       "goal": "查询已接受作业的状态、结果或错误。",
       "primary_actor": "CLIENT",
       "supporting_actors": [],
-      "trigger": "GET /api/jobs/{job_id}。",
+      "trigger": "GET /api/jobs/{job_id} 或 GET /api/jobs?limit=20&before=CURSOR。",
       "preconditions": [
-        "有效 Bearer key；客户端持有作业编号。"
+        "有效 Bearer key；单作业查询需要编号，历史查询不要求预先持有编号。"
       ],
-      "success": "HTTP 200 返回持久化作业；终态包含 result 或 error。",
+      "success": "返回单作业或 jobs/next_cursor；历史包含请求和 queued_at/started_at/finished_at。",
       "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
       "includes": [],
       "extension_points": [],
@@ -656,22 +740,22 @@
         "NFR-05"
       ],
       "business_rules": [],
-      "notes": "作业失败时查询本身仍为 HTTP 200，error.code 是操作错误。没有进度或取消接口；客户端断开不取消已提交作业，重试 POST 会创建新作业。",
+      "notes": "默认每页 20 条、limit 为 1–100；按插入序列倒序，用字符串游标避免 JS 精度损失，新增记录不会造成旧页重复。浏览器每 3 秒刷新。失败作业查询仍为 HTTP 200，操作错误见 error.code。",
       "basic_flow": [
         {
           "id": "B1",
           "actor": "CLIENT",
-          "action": "客户端访问接受响应的 Location。"
+          "action": "打开任务记录、请求历史页或访问单个任务 Location。"
         },
         {
           "id": "B2",
           "actor": "系统",
-          "action": "系统认证并读取 jobs.sqlite3 中的作业。"
+          "action": "认证并校验分页参数，从 jobs.sqlite3 查询状态与时间戳。"
         },
         {
           "id": "B3",
           "actor": "系统",
-          "action": "系统返回 queued/running/succeeded/failed 及 result/error，客户端可继续轮询。"
+          "action": "返回结果或错误；历史同时返回下一页游标，浏览器可刷新或翻页。"
         }
       ],
       "alternative_flows": [],
@@ -679,9 +763,9 @@
         {
           "id": "E1",
           "from": "B2",
-          "condition": "作业不存在",
+          "condition": "任务不存在或分页参数无效",
           "steps": [
-            "返回 HTTP 404 JSON 错误。"
+            "不存在的单任务返回 404，非法分页参数返回 400。"
           ]
         },
         {
@@ -761,6 +845,149 @@
           "condition": "worker、结果写入或恢复数据库失败",
           "steps": [
             "服务失败退出，明确输出原因。"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UC-08",
+      "name": "Manage browser API connections",
+      "kind": "main",
+      "priority": "高",
+      "goal": "从内嵌控制台选择本机或远程服务并隔离不同服务的数据。",
+      "primary_actor": "CLIENT",
+      "supporting_actors": [],
+      "trigger": "打开连接管理并添加、编辑、选择或删除连接。",
+      "preconditions": [
+        "相关输入已准备。"
+      ],
+      "success": "目标操作完成并显示结果。",
+      "failure": "错误可见，不宣称成功。",
+      "includes": [
+        "UC-02"
+      ],
+      "extension_points": [],
+      "extends": null,
+      "parent": null,
+      "requirements": [
+        "FR-08",
+        "FR-02"
+      ],
+      "nfr": [
+        "NFR-03",
+        "NFR-06"
+      ],
+      "business_rules": [],
+      "notes": "localStorage 按浏览器 origin 保存连接名称、地址和明文 API key；重新打开验证选中服务。断开保留连接但停止自动重连，删除移除密钥。无独立前端部署和 API 代理。",
+      "basic_flow": [
+        {
+          "id": "B1",
+          "actor": "CLIENT",
+          "action": "打开控制台连接管理，输入名称、HTTP/HTTPS origin 和 API key。"
+        },
+        {
+          "id": "B2",
+          "actor": "系统",
+          "action": "通过 /api/status 验证候选服务，失败时保留当前连接。"
+        },
+        {
+          "id": "B3",
+          "actor": "系统",
+          "action": "验证成功后保存连接；终止旧页面请求、清空路径/条件/模式和结果，再启用新服务操作。"
+        },
+        {
+          "id": "B4",
+          "actor": "CLIENT",
+          "action": "在创建备份、仓库恢复和任务记录之间导航，或编辑、删除、断开连接。"
+        }
+      ],
+      "alternative_flows": [],
+      "exception_flows": [
+        {
+          "id": "E1",
+          "from": "B2",
+          "condition": "认证、跨域、混合内容或网络失败",
+          "steps": [
+            "显示连接失败；未成功验证前不替换原连接。"
+          ]
+        },
+        {
+          "id": "E2",
+          "from": "B3",
+          "condition": "浏览器存储不可用",
+          "steps": [
+            "显示存储错误，不将失败伪装为保存成功。"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UC-09",
+      "name": "Generate and configure encryption keys",
+      "kind": "main",
+      "priority": "高",
+      "goal": "独立管理服务端对称加密密钥，避免密钥进入浏览器和任务历史。",
+      "primary_actor": "CLIENT",
+      "supporting_actors": [
+        "KEYS"
+      ],
+      "trigger": "生成密钥并配置 encryption.keys 后启动服务。",
+      "preconditions": [
+        "相关输入已准备。"
+      ],
+      "success": "目标操作完成并显示结果。",
+      "failure": "错误可见，不宣称成功。",
+      "includes": [],
+      "extension_points": [],
+      "extends": null,
+      "parent": null,
+      "requirements": [
+        "FR-12"
+      ],
+      "nfr": [
+        "NFR-03",
+        "NFR-06"
+      ],
+      "business_rules": [],
+      "notes": "keygen 不要求 -d。256 位随机密钥不经 HTTP 上传；配置路径相对工作目录或为绝对路径。更换配置需重启并重新连接，丢失密钥无法恢复加密内容。",
+      "basic_flow": [
+        {
+          "id": "B1",
+          "actor": "CLIENT",
+          "action": "运行 bak keygen --output PATH，创建命名密钥文件。"
+        },
+        {
+          "id": "B2",
+          "actor": "CLIENT",
+          "action": "将标识和文件路径加入 encryption.keys，保留仍有备份依赖的旧密钥。"
+        },
+        {
+          "id": "B3",
+          "actor": "系统",
+          "action": "服务启动时读取 64 位十六进制密钥，生成指纹并加载不可变 Keyring。"
+        },
+        {
+          "id": "B4",
+          "actor": "CLIENT",
+          "action": "在备份中选择命名密钥；恢复自动匹配原标识和指纹。"
+        }
+      ],
+      "alternative_flows": [],
+      "exception_flows": [
+        {
+          "id": "E1",
+          "from": "B1",
+          "condition": "目标已存在或随机源/写入失败",
+          "steps": [
+            "拒绝覆盖或明确报错；Unix 新文件权限为 0600。"
+          ]
+        },
+        {
+          "id": "E2",
+          "from": "B3-B4",
+          "condition": "配置密钥无效、缺失或同名密钥被替换",
+          "steps": [
+            "无效文件导致启动失败；操作所需密钥缺失或指纹不同则明确失败。"
           ]
         }
       ]

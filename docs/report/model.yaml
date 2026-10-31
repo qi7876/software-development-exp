@@ -1,6 +1,6 @@
 {
-  "version": "2.0",
-  "updated": "2026-10-14",
+  "version": "3.0",
+  "updated": "2026-10-30",
   "title": "bak 当前实现系统设计",
   "diagrams": [
     {
@@ -8,21 +8,22 @@
       "kind": "component",
       "view": "container",
       "title": "bak: Runtime and Local Storage",
-      "purpose": "单一 bak 进程提供认证 HTTP 接口与作业执行；源、作业历史、仓库元数据和镜像载荷有独立责任。",
+      "purpose": "单一服务进程提供嵌入式 UI、认证 API 和 FIFO worker；浏览器、密钥文件、作业库与仓库各有独立状态边界。",
       "responsibilities": [
         {
-          "element": "本图",
-          "responsibility": "单一 bak 进程提供认证 HTTP 接口与作业执行；源、作业历史、仓库元数据和镜像载荷有独立责任。"
+          "element": "浏览器 / bak / 本地存储",
+          "responsibility": "单一服务进程提供嵌入式 UI、认证 API 和 FIFO worker；浏览器、密钥文件、作业库与仓库各有独立状态边界。"
         }
       ],
       "details": [
-        "工作目录中的 jobs.sqlite3 保存作业队列和历史；仓库根目录的 repository.sqlite3 保存已发布备份。",
-        "每个备份的压缩内容保留源相对路径；目录记录保留空目录。",
-        "客户端只有 HTTP API 入口，当前无 Web 控制台。"
+        "浏览器可连接同一或另一台 bak API；连接名称、地址和明文 API key 保存在浏览器 origin 的 localStorage。",
+        "工作目录作业库 schema v2，仓库 schema/format v3；保留命名密钥文件以恢复旧备份。",
+        "普通文件载荷按备份选择原样、Zstd、XChaCha20-Poly1305 或先压缩后加密；元数据和文件名仍是明文。"
       ],
       "constraints": [
-        "单工作目录仅运行一个服务实例；SQLite 位于本地文件系统。",
-        "两个数据库与外部文件不共享事务；正常文件同步不等于断电测试保证。"
+        "一个工作目录只运行一个服务实例，SQLite 使用本地文件系统。",
+        "作业库、仓库库和载荷文件不共享事务；旧数据库拒绝且不迁移。",
+        "静态 UI 公开，API 需 Bearer；服务无内置 TLS，加密不保护元数据。"
       ],
       "trace": {
         "use_cases": [
@@ -32,7 +33,9 @@
           "UC-04",
           "UC-05",
           "UC-06",
-          "UC-07"
+          "UC-07",
+          "UC-08",
+          "UC-09"
         ],
         "requirements": [
           "FR-01",
@@ -41,13 +44,17 @@
           "FR-04",
           "FR-05",
           "FR-06",
-          "FR-07"
+          "FR-07",
+          "FR-08",
+          "FR-09",
+          "FR-10",
+          "FR-11",
+          "FR-12"
         ],
         "nfr": [
           "NFR-01",
           "NFR-02",
           "NFR-03",
-          "NFR-04",
           "NFR-05",
           "NFR-06",
           "NFR-07"
@@ -64,73 +71,122 @@
       "elements": [
         {
           "id": "Client",
-          "name": "Users / curl",
-          "type": "actor",
+          "name": "Operator / automation",
           "package": "Clients",
-          "stereotype": "HTTP client"
+          "type": "actor",
+          "stereotype": "browser or HTTP"
+        },
+        {
+          "id": "Browser",
+          "name": "Embedded web console",
+          "package": "Clients",
+          "type": "component",
+          "stereotype": "HTML / CSS / JavaScript"
+        },
+        {
+          "id": "Profiles",
+          "name": "localStorage",
+          "package": "Clients",
+          "type": "folder",
+          "stereotype": "API connection profiles"
         },
         {
           "id": "Server",
-          "name": "bak\naxum + Tokio + SQLx",
-          "type": "component",
+          "name": "bak: axum + Tokio + SQLx",
           "package": "Single server process",
-          "stereotype": "implemented"
+          "type": "component",
+          "stereotype": "API and FIFO worker"
         },
         {
           "id": "Config",
           "name": "config.json",
-          "type": "folder",
           "package": "Working directory",
-          "stereotype": "startup input"
+          "type": "folder",
+          "stereotype": "startup configuration"
+        },
+        {
+          "id": "Keys",
+          "name": "Named key files",
+          "package": "Local filesystem",
+          "type": "folder",
+          "stereotype": "256-bit symmetric keys"
         },
         {
           "id": "Jobs",
           "name": "jobs.sqlite3",
-          "type": "database",
           "package": "Working directory",
-          "stereotype": "durable queue and history"
+          "type": "database",
+          "stereotype": "queue / history v2"
         },
         {
           "id": "Source",
           "name": "Source directory",
-          "type": "folder",
           "package": "Local filesystem",
-          "stereotype": "regular files and directories"
+          "type": "folder",
+          "stereotype": "files / directories / symlinks"
         },
         {
           "id": "Repo",
           "name": "repository.sqlite3",
-          "type": "database",
           "package": "Local repository",
-          "stereotype": "published metadata"
+          "type": "database",
+          "stereotype": "metadata v3"
         },
         {
           "id": "Files",
           "name": "backups/<backup_id>/",
-          "type": "folder",
           "package": "Local repository",
-          "stereotype": "mirrored Zstd files"
+          "type": "folder",
+          "stereotype": "encoded file contents"
         },
         {
           "id": "Dest",
           "name": "Empty restore directory",
-          "type": "folder",
           "package": "Local filesystem",
-          "stereotype": "verified output"
+          "type": "folder",
+          "stereotype": "verified Unix output"
         }
       ],
       "relations": [
         {
           "source": "Client",
+          "target": "Browser",
+          "label": "Use console",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Browser",
+          "target": "Profiles",
+          "label": "Save profiles and API keys",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Browser",
           "target": "Server",
-          "label": "HTTP + Bearer / JSON",
+          "label": "Bearer API / CORS; poll jobs",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Client",
+          "target": "Server",
+          "label": "HTTP automation",
           "direction": "auto",
           "style": "solid"
         },
         {
           "source": "Server",
           "target": "Config",
-          "label": "Read at startup",
+          "label": "Load at startup",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Server",
+          "target": "Keys",
+          "label": "Load immutable keyring",
           "direction": "auto",
           "style": "solid"
         },
@@ -144,28 +200,28 @@
         {
           "source": "Server",
           "target": "Source",
-          "label": "Stream input",
+          "label": "Filter and read entries",
           "direction": "auto",
           "style": "solid"
         },
         {
           "source": "Server",
           "target": "Repo",
-          "label": "Publish / list / read metadata",
+          "label": "Publish / list / read",
           "direction": "auto",
           "style": "solid"
         },
         {
           "source": "Server",
           "target": "Files",
-          "label": "Write compressed / read payloads",
+          "label": "Encode / decode payloads",
           "direction": "auto",
           "style": "solid"
         },
         {
           "source": "Server",
           "target": "Dest",
-          "label": "Restore and synchronize",
+          "label": "Restore / authenticate / sync",
           "direction": "auto",
           "style": "solid"
         }
@@ -184,13 +240,13 @@
         }
       ],
       "details": [
-        "server 管理 listener、信号、HTTP 与 worker 的监督和退出。",
-        "server::api 负责认证、请求验证和 JSON 响应；作业阻塞操作通过 spawn_blocking 执行。",
-        "跨组件测试在 tests 中启动真实二进制；组件测试与实现内联。"
+        "main/args/config 负责服务启动与 keygen 分支；启动加载 Keyring 后交给 JobManager。",
+        "server::ui 提供编译时静态资源，server::api 处理认证、CORS、校验和响应；worker 以 spawn_blocking 执行业务。",
+        "backup 使用 filter 严格目录剪枝；content 组合压缩/加密 IO；crypto 管理密钥及 STREAM 帧；repository 原子保存元数据。"
       ],
       "constraints": [
-        "无额外服务、独立业务 CLI、共享协议 crate 或预建抽象层。",
-        "服务停止领取新作业后等待活动作业完成；worker 或持久化错误使服务失败退出。"
+        "图中元素对应现有模块，无独立前端服务、API 代理或新增框架。",
+        "API 通过 JobManager 访问业务；main 同时使用 crypto 的密钥生成与加载入口。"
       ],
       "trace": {
         "use_cases": [
@@ -200,7 +256,9 @@
           "UC-04",
           "UC-05",
           "UC-06",
-          "UC-07"
+          "UC-07",
+          "UC-08",
+          "UC-09"
         ],
         "requirements": [
           "FR-01",
@@ -209,13 +267,17 @@
           "FR-04",
           "FR-05",
           "FR-06",
-          "FR-07"
+          "FR-07",
+          "FR-08",
+          "FR-09",
+          "FR-10",
+          "FR-11",
+          "FR-12"
         ],
         "nfr": [
           "NFR-01",
           "NFR-02",
           "NFR-03",
-          "NFR-04",
           "NFR-05",
           "NFR-06",
           "NFR-07"
@@ -290,6 +352,34 @@
           "type": "component",
           "package": "Job subsystem",
           "stereotype": "private SQLite setup"
+        },
+        {
+          "id": "UI",
+          "name": "server::ui",
+          "package": "Server boundary",
+          "type": "component",
+          "stereotype": "embedded assets"
+        },
+        {
+          "id": "Filter",
+          "name": "jobs::filter",
+          "package": "Job subsystem",
+          "type": "component",
+          "stereotype": "regex / time / pruning"
+        },
+        {
+          "id": "Content",
+          "name": "jobs::content",
+          "package": "Job subsystem",
+          "type": "component",
+          "stereotype": "optional Zstd / AEAD IO"
+        },
+        {
+          "id": "Crypto",
+          "name": "jobs::crypto",
+          "package": "Job subsystem",
+          "type": "component",
+          "stereotype": "keys / STREAM BE32"
         }
       ],
       "relations": [
@@ -390,6 +480,55 @@
           "label": "Open repository DB",
           "direction": "auto",
           "style": "solid"
+        },
+        {
+          "source": "Server",
+          "target": "UI",
+          "label": "Optional static console",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Main",
+          "target": "Crypto",
+          "label": "Generate / load keys",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Jobs",
+          "target": "Crypto",
+          "label": "Share Keyring",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Backup",
+          "target": "Filter",
+          "label": "Compile and match",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Backup",
+          "target": "Content",
+          "label": "Encode files",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Restore",
+          "target": "Content",
+          "label": "Decode files",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Content",
+          "target": "Crypto",
+          "label": "Authenticated stream wrappers",
+          "direction": "auto",
+          "style": "solid"
         }
       ]
     },
@@ -398,43 +537,57 @@
       "kind": "class",
       "view": "logical-class",
       "title": "Job and Repository Data Types",
-      "purpose": "静态图对应代码中的结构体和枚举，展示作业与仓库记录；不虚构计划任务或可复用内容块实体。",
+      "purpose": "作业保存请求和可选编码配置，仓库保存可恢复的类型、Unix 元数据和统计；模型直接对应 Rust 数据类型。",
       "responsibilities": [
         {
-          "element": "本图",
-          "responsibility": "静态图对应代码中的结构体和枚举，展示作业与仓库记录；不虚构计划任务或可复用内容块实体。"
+          "element": "JobInfo / BackupOptions",
+          "responsibility": "保存作业状态和执行配置；压缩与加密均以 Option 表示。"
+        },
+        {
+          "element": "Manifest / ManifestEntry",
+          "responsibility": "保存根元数据、编码方式、条目、符号链接目标与统计。"
         }
       ],
       "details": [
-        "JobState 是带成功结果或失败错误的枚举。",
-        "Manifest 作为内存类型读写 SQLite，名称不表示使用 JSON manifest 文件。",
-        "仓库条目按 ordinal 排序，文件载荷位置由相对路径决定。"
+        "BackupOptions.compression 为 Option<ZstdOptions>，None 无压缩参数；Some 保存 level。任务 JSON 边界仍使用 compression/compression_level。",
+        "Encryption 只包含 key_id 与 fingerprint，不保存密钥材料；Filter 的规则也随请求持久化。",
+        "ManifestEntry 是结构体，kind 才是区分 File/Directory/Symlink 的枚举。UnixMetadata 包含纳秒时间戳。"
       ],
       "constraints": [
-        "HTTP 作业 JSON 是状态与结果/错误的映射，不暴露内部类型或数据库连接。",
-        "元数据 schema 与压缩、校验算法有版本检查。"
+        "压缩等级只影响编码，不写入载荷 AAD 或仓库头；恢复自动选择模式。",
+        "SHA-256 与 original_size 始终针对原文，跳过统计只计已遇到的条目。"
       ],
       "trace": {
         "use_cases": [
           "UC-03",
           "UC-04",
           "UC-05",
-          "UC-06"
+          "UC-06",
+          "UC-09"
         ],
         "requirements": [
           "FR-03",
           "FR-04",
           "FR-05",
-          "FR-06"
+          "FR-06",
+          "FR-09",
+          "FR-10",
+          "FR-11",
+          "FR-12"
         ],
         "nfr": [
           "NFR-01",
-          "NFR-05"
+          "NFR-02",
+          "NFR-03",
+          "NFR-05",
+          "NFR-06",
+          "NFR-07"
         ]
       },
       "direction": "top to bottom",
       "packages": [
         "Job data",
+        "Encoding settings",
         "Repository data"
       ],
       "elements": [
@@ -456,7 +609,7 @@
           "package": "Job data",
           "stereotype": "enum",
           "attributes": [
-            "+ Backup { source, repository }",
+            "+ Backup { source, repository, filter, options }",
             "+ Restore { repository, backup_id, destination }"
           ],
           "operations": []
@@ -475,14 +628,48 @@
           "operations": []
         },
         {
+          "id": "Options",
+          "name": "BackupOptions",
+          "package": "Encoding settings",
+          "stereotype": "struct",
+          "attributes": [
+            "+ compression: Option<ZstdOptions>",
+            "+ encryption: Option<Encryption>"
+          ],
+          "operations": []
+        },
+        {
+          "id": "Zstd",
+          "name": "ZstdOptions",
+          "package": "Encoding settings",
+          "stereotype": "struct",
+          "attributes": [
+            "+ level: i32"
+          ],
+          "operations": []
+        },
+        {
+          "id": "Encryption",
+          "name": "Encryption",
+          "package": "Encoding settings",
+          "stereotype": "struct",
+          "attributes": [
+            "+ key_id: String",
+            "+ fingerprint: String"
+          ],
+          "operations": []
+        },
+        {
           "id": "Manifest",
           "name": "Manifest",
           "package": "Repository data",
           "stereotype": "struct",
           "attributes": [
-            "+ backup_id: String",
-            "+ created_at: String",
             "+ format_version: u32",
+            "+ compression_algorithm: String",
+            "+ encryption: Option<Encryption>",
+            "+ root_metadata: UnixMetadata",
+            "+ backup_stats: BackupStats",
             "+ entries: Vec<ManifestEntry>"
           ],
           "operations": []
@@ -491,21 +678,49 @@
           "id": "Entry",
           "name": "ManifestEntry",
           "package": "Repository data",
-          "stereotype": "enum",
+          "stereotype": "struct",
           "attributes": [
-            "+ File { path, original_size, checksum }",
-            "+ Directory { path }"
+            "+ relative_path: PathBuf",
+            "+ metadata: UnixMetadata",
+            "+ kind: ManifestEntryKind"
           ],
           "operations": []
         },
         {
-          "id": "Summary",
-          "name": "RepoBackupInfo",
+          "id": "Kind",
+          "name": "ManifestEntryKind",
+          "package": "Repository data",
+          "stereotype": "enum",
+          "attributes": [
+            "+ File { original_size, checksum }",
+            "+ Directory",
+            "+ Symlink { target }"
+          ],
+          "operations": []
+        },
+        {
+          "id": "Metadata",
+          "name": "UnixMetadata",
           "package": "Repository data",
           "stereotype": "struct",
           "attributes": [
-            "+ backup_id: String",
-            "+ created_at: String"
+            "+ uid: u32",
+            "+ gid: u32",
+            "+ mode: u32",
+            "+ atime: FileTimestamp",
+            "+ mtime: FileTimestamp"
+          ],
+          "operations": []
+        },
+        {
+          "id": "Stats",
+          "name": "BackupStats",
+          "package": "Repository data",
+          "stereotype": "struct",
+          "attributes": [
+            "+ entries_created: i64",
+            "+ skipped_unsupported: i64",
+            "+ skipped_filtered: i64"
           ],
           "operations": []
         }
@@ -514,26 +729,82 @@
         {
           "source": "JobInfo",
           "target": "JobRequest",
-          "label": "request",
           "type": "composition",
           "source_multiplicity": "1",
-          "target_multiplicity": "1"
+          "target_multiplicity": "1",
+          "label": "request"
         },
         {
           "source": "JobInfo",
           "target": "JobState",
-          "label": "state",
           "type": "composition",
           "source_multiplicity": "1",
-          "target_multiplicity": "1"
+          "target_multiplicity": "1",
+          "label": "state"
+        },
+        {
+          "source": "JobRequest",
+          "target": "Options",
+          "type": "composition",
+          "source_multiplicity": "1",
+          "target_multiplicity": "0..1",
+          "label": "backup options"
+        },
+        {
+          "source": "Options",
+          "target": "Zstd",
+          "type": "composition",
+          "source_multiplicity": "1",
+          "target_multiplicity": "0..1",
+          "label": "compression"
+        },
+        {
+          "source": "Options",
+          "target": "Encryption",
+          "type": "composition",
+          "source_multiplicity": "1",
+          "target_multiplicity": "0..1",
+          "label": "encryption"
         },
         {
           "source": "Manifest",
           "target": "Entry",
-          "label": "ordered entries",
           "type": "composition",
           "source_multiplicity": "1",
-          "target_multiplicity": "0..*"
+          "target_multiplicity": "0..*",
+          "label": "ordered entries"
+        },
+        {
+          "source": "Manifest",
+          "target": "Metadata",
+          "type": "composition",
+          "source_multiplicity": "1",
+          "target_multiplicity": "1",
+          "label": "source root"
+        },
+        {
+          "source": "Manifest",
+          "target": "Stats",
+          "type": "composition",
+          "source_multiplicity": "1",
+          "target_multiplicity": "1",
+          "label": "counts"
+        },
+        {
+          "source": "Entry",
+          "target": "Metadata",
+          "type": "composition",
+          "source_multiplicity": "1",
+          "target_multiplicity": "1",
+          "label": "entry attributes"
+        },
+        {
+          "source": "Entry",
+          "target": "Kind",
+          "type": "composition",
+          "source_multiplicity": "1",
+          "target_multiplicity": "1",
+          "label": "entry type"
         }
       ]
     },
@@ -542,20 +813,25 @@
       "kind": "class",
       "view": "logical-class",
       "title": "Facade, Modules and Data Access",
-      "purpose": "模块操作对应 Rust 函数，JobManager 是真实门面；关系表示调用与依赖，模块不是独立运行时服务。",
+      "purpose": "展示现有门面、密钥容器、筛选与编码管线的协作，不把模块表达为新增运行时服务。",
       "responsibilities": [
         {
-          "element": "本图",
-          "responsibility": "模块操作对应 Rust 函数，JobManager 是真实门面；关系表示调用与依赖，模块不是独立运行时服务。"
+          "element": "JobManager / Keyring",
+          "responsibility": "管理持久化队列、分页历史和不可变命名密钥。"
+        },
+        {
+          "element": "Content / backup / restore",
+          "responsibility": "将有界缓冲的编码 IO 与文件遍历、校验和同步组合。"
         }
       ],
       "details": [
-        "JobManager 管理 SqlitePool、工作目录与 Notify；通知用于唤醒，SQLite 是队列事实来源。",
-        "backup::run 和 restore::run 是同步操作，通过 Tokio 阻塞任务协作异步元数据 IO。"
+        "JobManager 持有 Arc<Keyring>，提交时固定标识与指纹，worker 执行前再次匹配。",
+        "Content 用 Option<ZstdOptions> 与 Option<Encryption> 选择实际 IO 管线，组合顺序固定为先压缩后加密。",
+        "Filter::compile 在备份执行时校验正则和时间范围，CompiledFilter::matches 决定目录是否继续遍历。"
       ],
       "constraints": [
-        "API 不直接访问 repository 私有模块。",
-        "元数据持久化使用 SQLx 事务；数据库池不在压缩期间持有写事务。"
+        "Zstd 参数范围 1–22 默认 3；无加密配置仍可运行不加密操作。",
+        "读取加密流必须验证最终认证块；失败不得报告成功，可能保留部分输出。"
       ],
       "trace": {
         "use_cases": [
@@ -565,7 +841,9 @@
           "UC-04",
           "UC-05",
           "UC-06",
-          "UC-07"
+          "UC-07",
+          "UC-08",
+          "UC-09"
         ],
         "requirements": [
           "FR-01",
@@ -574,155 +852,206 @@
           "FR-04",
           "FR-05",
           "FR-06",
-          "FR-07"
+          "FR-07",
+          "FR-08",
+          "FR-09",
+          "FR-10",
+          "FR-11",
+          "FR-12"
         ],
         "nfr": [
+          "NFR-01",
+          "NFR-02",
           "NFR-03",
-          "NFR-04",
-          "NFR-05"
+          "NFR-05",
+          "NFR-06",
+          "NFR-07"
         ]
       },
       "direction": "top to bottom",
       "packages": [
-        "HTTP and lifecycle",
-        "Jobs and operations"
+        "HTTP boundary",
+        "Job subsystem",
+        "File operations"
       ],
       "elements": [
         {
-          "id": "Server",
-          "name": "server",
-          "package": "HTTP and lifecycle",
-          "stereotype": "module",
-          "attributes": [],
-          "operations": [
-            "+ serve(config, jobs): Result"
-          ]
-        },
-        {
           "id": "API",
           "name": "server::api",
-          "package": "HTTP and lifecycle",
+          "package": "HTTP boundary",
           "stereotype": "module",
           "attributes": [],
           "operations": [
-            "+ router(jobs, key): Router"
+            "+ router(jobs, key, web_ui_enabled): Router"
           ]
         },
         {
           "id": "Manager",
           "name": "JobManager",
-          "package": "Jobs and operations",
+          "package": "Job subsystem",
           "stereotype": "struct",
           "attributes": [
             "- pool: SqlitePool",
             "- working_directory: PathBuf",
-            "- wake: Arc<Notify>"
+            "- keys: Arc<Keyring>"
           ],
           "operations": [
             "+ submit(request): JobInfo",
             "+ get_job(id): Option<JobInfo>",
+            "+ list_jobs(limit, before): Value",
             "+ list_backups(path): Vec<RepoBackupInfo>",
-            "+ run_worker(stop): Result",
-            "+ close(): Void"
+            "+ run_worker(stop): Result"
+          ]
+        },
+        {
+          "id": "Keys",
+          "name": "Keyring",
+          "package": "Job subsystem",
+          "stereotype": "struct",
+          "attributes": [
+            "- keys: BTreeMap"
+          ],
+          "operations": [
+            "+ load(directory, files): Keyring",
+            "+ select(id): Encryption",
+            "+ resolve(encryption): &[u8;32]"
+          ]
+        },
+        {
+          "id": "Filter",
+          "name": "CompiledFilter",
+          "package": "File operations",
+          "stereotype": "struct",
+          "attributes": [],
+          "operations": [
+            "+ matches(path, metadata): bool"
+          ]
+        },
+        {
+          "id": "Content",
+          "name": "Content",
+          "package": "File operations",
+          "stereotype": "struct",
+          "attributes": [],
+          "operations": [
+            "+ new(options, keys, backup_id): Content",
+            "+ writer(file, path): ContentWriter",
+            "+ reader(file, path): ContentReader"
           ]
         },
         {
           "id": "Backup",
           "name": "backup",
-          "package": "Jobs and operations",
+          "package": "File operations",
           "stereotype": "module",
           "attributes": [],
           "operations": [
-            "+ run(source, repository, backup_id): Result"
+            "+ run_with_options(...): Result"
           ]
         },
         {
           "id": "Restore",
           "name": "restore",
-          "package": "Jobs and operations",
+          "package": "File operations",
           "stereotype": "module",
           "attributes": [],
           "operations": [
-            "+ run(repository, backup_id, destination): Result"
+            "+ run_with_keys(repository, backup_id, destination, keys): Result"
           ]
         },
         {
           "id": "Repo",
           "name": "repository",
-          "package": "Jobs and operations",
+          "package": "File operations",
           "stereotype": "module",
           "attributes": [],
           "operations": [
             "+ Manifest::read(path, id): Manifest",
-            "+ Manifest::write(): Result",
+            "+ Manifest::write(path): Result",
             "+ list(path): Vec<RepoBackupInfo>"
           ]
         }
       ],
       "relations": [
         {
-          "source": "Server",
-          "target": "API",
-          "label": "router",
-          "type": "dependency",
-          "source_multiplicity": "",
-          "target_multiplicity": ""
-        },
-        {
-          "source": "Server",
-          "target": "Manager",
-          "label": "supervise worker",
-          "type": "dependency",
-          "source_multiplicity": "",
-          "target_multiplicity": ""
-        },
-        {
           "source": "API",
           "target": "Manager",
-          "label": "facade calls",
           "type": "dependency",
           "source_multiplicity": "",
-          "target_multiplicity": ""
+          "target_multiplicity": "",
+          "label": "calls"
+        },
+        {
+          "source": "Manager",
+          "target": "Keys",
+          "type": "aggregation",
+          "source_multiplicity": "1",
+          "target_multiplicity": "1",
+          "label": "shared keys"
         },
         {
           "source": "Manager",
           "target": "Backup",
-          "label": "blocking execution",
           "type": "dependency",
           "source_multiplicity": "",
-          "target_multiplicity": ""
+          "target_multiplicity": "",
+          "label": "executes"
         },
         {
           "source": "Manager",
           "target": "Restore",
-          "label": "blocking execution",
           "type": "dependency",
           "source_multiplicity": "",
-          "target_multiplicity": ""
+          "target_multiplicity": "",
+          "label": "executes"
         },
         {
-          "source": "Manager",
-          "target": "Repo",
-          "label": "listing",
+          "source": "Backup",
+          "target": "Filter",
           "type": "dependency",
           "source_multiplicity": "",
-          "target_multiplicity": ""
+          "target_multiplicity": "",
+          "label": "matches"
+        },
+        {
+          "source": "Backup",
+          "target": "Content",
+          "type": "dependency",
+          "source_multiplicity": "",
+          "target_multiplicity": "",
+          "label": "encode"
+        },
+        {
+          "source": "Restore",
+          "target": "Content",
+          "type": "dependency",
+          "source_multiplicity": "",
+          "target_multiplicity": "",
+          "label": "decode"
+        },
+        {
+          "source": "Content",
+          "target": "Keys",
+          "type": "dependency",
+          "source_multiplicity": "",
+          "target_multiplicity": "",
+          "label": "resolve key"
         },
         {
           "source": "Backup",
           "target": "Repo",
-          "label": "write metadata",
           "type": "dependency",
           "source_multiplicity": "",
-          "target_multiplicity": ""
+          "target_multiplicity": "",
+          "label": "publish"
         },
         {
           "source": "Restore",
           "target": "Repo",
-          "label": "read metadata",
           "type": "dependency",
           "source_multiplicity": "",
-          "target_multiplicity": ""
+          "target_multiplicity": "",
+          "label": "read"
         }
       ]
     },
@@ -739,25 +1068,36 @@
         }
       ],
       "details": [
-        "SIGKILL 没有正常关闭步骤；下一次 open 将遗留 running 标为 failed。",
-        "worker 或 HTTP 意外终止触发监督失败和非零退出。"
+        "配置和命名密钥只在启动时加载；无效密钥或旧作业库版本导致启动失败。",
+        "静态资源可公开访问；浏览器选择服务后通过认证状态接口获取版本与密钥指纹。",
+        "keygen 是独立命令，不启动 HTTP 服务；此图只展示服务启动与正常关闭。"
       ],
       "constraints": [
-        "中断操作不重放；文件副作用可能存在。",
-        "帮助和版本不启动服务。"
+        "配置不热加载，更换密钥配置后重启并重新连接。",
+        "终止只等待活动操作，不自动重放已中断操作。"
       ],
       "trace": {
         "use_cases": [
           "UC-01",
-          "UC-07"
+          "UC-02",
+          "UC-07",
+          "UC-08",
+          "UC-09"
         ],
         "requirements": [
           "FR-01",
-          "FR-07"
+          "FR-02",
+          "FR-06",
+          "FR-07",
+          "FR-08",
+          "FR-12"
         ],
         "nfr": [
+          "NFR-01",
+          "NFR-02",
           "NFR-03",
           "NFR-05",
+          "NFR-06",
           "NFR-07"
         ]
       },
@@ -771,6 +1111,11 @@
           "id": "Main",
           "name": "Startup",
           "type": "control"
+        },
+        {
+          "id": "Keys",
+          "name": "Keyring / key files",
+          "type": "entity"
         },
         {
           "id": "Jobs",
@@ -804,8 +1149,14 @@
         {
           "type": "message",
           "source": "Main",
+          "target": "Keys",
+          "text": "Load named keys and fingerprints"
+        },
+        {
+          "type": "message",
+          "source": "Main",
           "target": "Jobs",
-          "text": "Open job manager"
+          "text": "Open JobManager with shared Keyring"
         },
         {
           "type": "message",
@@ -830,6 +1181,26 @@
           "source": "Server",
           "target": "Jobs",
           "text": "Run FIFO worker"
+        },
+        {
+          "type": "opt",
+          "text": "Embedded console enabled"
+        },
+        {
+          "type": "message",
+          "source": "User",
+          "target": "Server",
+          "text": "Load public UI / verify selected API"
+        },
+        {
+          "type": "return",
+          "source": "Server",
+          "target": "User",
+          "text": "Authenticated version and key fingerprints"
+        },
+        {
+          "type": "end",
+          "text": ""
         },
         {
           "type": "opt",
@@ -878,12 +1249,13 @@
         }
       ],
       "details": [
-        "文件同步完成后才提交仓库元数据，目录存在本身不代表发布成功。",
-        "HTTP 与阻塞执行并行，客户端轮询不会取消作业。"
+        "提交时校验等级并固定命名密钥指纹；正则/时间范围在执行时编译，失败发生在载荷写入前。",
+        "目录剪枝同时作用于路径和元数据条件；符号链接只保存目标。",
+        "完成编码与同步后一次提交头、条目、根元数据和统计，再单独提交作业终态。"
       ],
       "constraints": [
-        "作业历史与仓库元数据分属不同数据库。",
-        "没有增量、取消、加密或自动失败清理。"
+        "备份源保持不变；无源一致性检测和失败自动清理。",
+        "任务 JSON 不含加密密钥；两库和外部文件不共享事务。"
       ],
       "trace": {
         "use_cases": [
@@ -891,16 +1263,20 @@
           "UC-06"
         ],
         "requirements": [
-          "FR-02",
           "FR-03",
-          "FR-06"
+          "FR-06",
+          "FR-09",
+          "FR-10",
+          "FR-11",
+          "FR-12"
         ],
         "nfr": [
           "NFR-01",
           "NFR-02",
           "NFR-03",
-          "NFR-04",
-          "NFR-05"
+          "NFR-05",
+          "NFR-06",
+          "NFR-07"
         ]
       },
       "participants": [
@@ -946,7 +1322,7 @@
           "type": "message",
           "source": "API",
           "target": "Jobs",
-          "text": "Validate request / submit"
+          "text": "Validate level / pin key fingerprint / submit"
         },
         {
           "type": "message",
@@ -976,7 +1352,13 @@
           "type": "message",
           "source": "Backup",
           "target": "Backup",
-          "text": "Walk / stream Zstd / SHA-256 / file sizes"
+          "text": "Match pinned key / compile filter / prune traversal"
+        },
+        {
+          "type": "message",
+          "source": "Backup",
+          "target": "Backup",
+          "text": "Encode raw / Zstd / AEAD / Zstd then AEAD"
         },
         {
           "type": "message",
@@ -992,7 +1374,7 @@
           "type": "message",
           "source": "Backup",
           "target": "Repo",
-          "text": "Transactionally commit header and entries"
+          "text": "Commit v3 header / entries / metadata / counts"
         },
         {
           "type": "return",
@@ -1059,12 +1441,13 @@
         }
       ],
       "details": [
-        "列表不检查载荷，空且未初始化的仓库不会因列表请求建库。",
-        "占用目标在写入前失败；损坏载荷可能留下已创建的部分输出。"
+        "备份列表返回编码模式与密钥信息；界面做匹配提示，worker 仍独立校验。",
+        "读取仓库头后匹配密钥，验证全部相对路径，再创建文件、目录和符号链接。",
+        "逆向解码并验证最终认证块、原文大小与哈希；子项完成后应用目录与根元数据。"
       ],
       "constraints": [
-        "恢复不覆盖已有内容，不修改源或成功备份。",
-        "没有选定路径恢复、冲突策略、临时文件原子替换或仓库解密。"
+        "恢复不接受编码参数，由备份记录自动决定。",
+        "密钥缺失/变化在条目写入前失败；后续失败可能留下部分输出。"
       ],
       "trace": {
         "use_cases": [
@@ -1073,17 +1456,20 @@
           "UC-06"
         ],
         "requirements": [
-          "FR-02",
           "FR-04",
           "FR-05",
-          "FR-06"
+          "FR-06",
+          "FR-10",
+          "FR-11",
+          "FR-12"
         ],
         "nfr": [
           "NFR-01",
           "NFR-02",
           "NFR-03",
           "NFR-05",
-          "NFR-06"
+          "NFR-06",
+          "NFR-07"
         ]
       },
       "participants": [
@@ -1177,7 +1563,7 @@
           "type": "message",
           "source": "Restore",
           "target": "Repo",
-          "text": "Read backup metadata"
+          "text": "Read v3 metadata / match key and fingerprint"
         },
         {
           "type": "message",
@@ -1193,13 +1579,13 @@
           "type": "message",
           "source": "Restore",
           "target": "Dest",
-          "text": "Create new / decode Zstd / check size and SHA-256"
+          "text": "Create new / decrypt then decompress / verify tags and hash"
         },
         {
           "type": "message",
           "source": "Restore",
           "target": "Dest",
-          "text": "Synchronize files and directories"
+          "text": "Recreate symlinks / apply Unix metadata / sync"
         },
         {
           "type": "return",
