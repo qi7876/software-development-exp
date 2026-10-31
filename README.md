@@ -33,7 +33,9 @@ Switching verifies the target before replacing the active connection. A failed c
 
 The backup form offers a collapsed **过滤条件** section for relative path, UID, GID, octal permissions, modification time, and access time. Regex inputs accept one pattern per line; blank lines are ignored. Fields combine with AND, include patterns with OR, and exclusions take precedence. Conditions apply to files, directories, and symlinks; a rejected directory skips its entire subtree, so include patterns must also permit ancestors. Local date/time inputs use the displayed browser timezone, with second precision, inclusive starts, and exclusive ends. Collapsing retains active conditions; Clear removes them. Inputs remain while navigating within one service and are cleared on disconnect or a successful service switch. Regex validation happens during job execution; invalid patterns appear as failed jobs.
 
-Backup storage has two independent runtime options: **压缩（Zstd）** and **加密（XChaCha20-Poly1305）**. The four combinations store raw bytes, Zstd bytes, encrypted bytes, or encrypted Zstd bytes. Selecting both always compresses before encrypting. Encryption requires choosing a configured server key. Compression level is adjustable from 1 to 22 (default 3) using a synchronized slider and number field. It affects only the current backup; higher levels usually trade more time for better compression, and levels 20–22 use more time and memory. Turning compression off disables the controls while retaining their value; reconnecting or switching service resets it to 3. Task details show the selected level for compressed backups. Restore requires no level setting. The repository and restore dialog show each backup's storage mode, and restore automatically uses its saved mode and key. The console disables restore when the service lacks the matching key fingerprint.
+Backup storage offers **压缩** and **加密（XChaCha20-Poly1305）** independently. Compression selects Zstd or the project's own streaming LZ77 codec, giving six storage modes including uncompressed files. Combining compression with encryption always compresses first. The UI defaults to Zstd level 3 without encryption; restoration automatically selects the saved codec and key.
+
+Zstd levels range from 1 to 22 (default 3), using a synchronized slider and number field. LZ77 instead exposes a history window of 4–1024 KiB (default 64) and a candidate search limit of 1–256 (default 32). These creation settings apply to this backup; restore reads its saved format automatically. Switching algorithms retains each algorithm's inputs and disables hidden controls; turning compression off retains the inputs. A successful service switch or disconnect resets the settings. Task details, backup summaries and the restore dialog show the actual codec and parameters. See the [LZ77 format and design](docs/architecture/lz77.md).
 
 Encryption protects regular-file contents only. Filenames, directory structure, Unix metadata, original sizes, SHA-256 checksums, and symbolic link targets remain visible. The API service reads plaintext and holds configured keys in memory; this is repository encryption, not end-to-end browser encryption. Failed restores can leave partial output.
 
@@ -78,7 +80,7 @@ Add to `config.json`:
 
 The `encryption` section is optional. Key paths may be absolute or relative to the service working directory. All configured keys load at startup; unreadable or invalid files prevent startup. Changes require a service restart and browser reconnection. Keep old keys under stable identifiers while their backups remain in use, and add a new identifier when rotating keys. Backups and queued jobs pin both the identifier and a SHA-256 fingerprint. Removing a key or replacing its contents makes operations requiring the original key fail; it never silently selects another key. Keep independent copies of the required key files: losing a key makes its encrypted backups unrecoverable. Keys are never stored in task history, repository metadata, API responses, or browser storage.
 
-This version is a breaking format change: repository databases require schema/format v3 and task databases require schema v2. Use a new service working directory and a new repository. Previous databases are rejected, not migrated or deleted; use the previous application version and original directories to access older backups.
+This version is a breaking format change: repository databases require schema/format v4 and task databases require schema v3. Use a new service working directory and a new repository. Previous databases are rejected, not migrated or deleted; use the previous application version and original directories to access older backups.
 
 ## HTTP API
 
@@ -88,7 +90,7 @@ Browser CORS preflights are handled before authentication. API requests allow an
 
 | Request | Behavior |
 | --- | --- |
-| `POST /api/backups` | Accept JSON with `source`, `repository`, `filter`, required `compression` (boolean), optional `compression_level` (integer 1–22, default 3), and optional `encryption_key_id` (string or null); return HTTP 202 after durably queuing a job. |
+| `POST /api/backups` | Accept JSON with `source`, `repository`, `filter`, optional `compression` (null or a tagged algorithm configuration), and optional `encryption_key_id` (string or null); return HTTP 202 after durably queuing a job. |
 | `POST /api/restores` | Accept JSON with `repository`, `backup_id`, and `destination`; return HTTP 202 after durably queuing a job. |
 | `GET /api/jobs/{job_id}` | Return HTTP 200 with the stored job, or HTTP 404 if it does not exist. |
 | `GET /api/jobs?limit=20&before=CURSOR` | Return newest jobs first in `{"jobs":[...],"next_cursor":null}`; omit `before` for the first page. |
@@ -97,7 +99,7 @@ Browser CORS preflights are handled before authentication. API requests allow an
 ```shell
 curl -i -H 'Authorization: Bearer example-local-test-key' \
   -H 'Content-Type: application/json' \
-  -d '{"source":"source","repository":"repository","compression":true,"encryption_key_id":null,"filter":{"relative_path":{"include":[],"exclude":[]},"uid":{"include":[],"exclude":[]},"gid":{"include":[],"exclude":[]},"mode":{"include":[],"exclude":[]},"atime":{},"mtime":{}}}' \
+  -d '{"source":"source","repository":"repository","compression":{"algorithm":"zstd","level":3},"encryption_key_id":null,"filter":{"relative_path":{"include":[],"exclude":[]},"uid":{"include":[],"exclude":[]},"gid":{"include":[],"exclude":[]},"mode":{"include":[],"exclude":[]},"atime":{},"mtime":{}}}' \
   http://127.0.0.1:8080/api/backups
 # Poll the Location header returned above:
 curl -H 'Authorization: Bearer example-local-test-key' \
@@ -108,7 +110,7 @@ Accepted responses include `Location: /api/jobs/{job_id}` and a job with fields 
 
 Request errors use `{"error":{"code":400,"message":"..."}}` with the corresponding HTTP status. JSON bodies are limited to 2 MiB; `application/json` and `application/*+json` are accepted. Invalid or missing fields return 400, oversized bodies 413, unsupported media types 415, and missing or invalid authentication 401 with `WWW-Authenticate: Bearer`. There is no cancellation endpoint.
 
-`compression_level` defaults to 3 when omitted. Explicit null, non-integer, or out-of-range levels return HTTP 400 before a job is queued, even when compression is disabled. Levels only affect compression during backup, not restore. The selected value persists in task requests; older tasks without a level use 3. Repository schema v3, job schema v2, and encrypted-payload v1 remain unchanged.
+`compression` is null or omitted for uncompressed backups. Select `{"algorithm":"zstd","level":3}` or `{"algorithm":"lz77","window_kib":64,"search_depth":32}` to enable a codec. Parameters omitted inside a selected algorithm use its defaults. Unknown algorithms, unknown fields, invalid types and out-of-range values return HTTP 400 before admission. The old boolean `compression` and separate `compression_level` are no longer accepted. The UI still defaults to Zstd; API clients choose explicitly. Complete settings persist in jobs and backup metadata, and restore takes no codec parameters. This is a breaking change: use new working directories and repositories; schema versions are jobs v3 / repository v4, with encrypted payload v2.
 
 An omitted or null `encryption_key_id` disables encryption. An unknown key returns HTTP 400 before admission. Accepted encrypted jobs persist the selected identifier and fingerprint, allowing restart without persisting the secret. Restore resolves its key from backup metadata.
 
@@ -120,15 +122,15 @@ Job listing defaults to 20 entries and accepts limits from 1 to 100. Pass the re
 
 ## Persistence and operation lifecycle
 
-The service creates schema-v2 `jobs.sqlite3` in the working directory. One worker executes committed jobs in FIFO insertion order while HTTP status and job queries remain responsive. Completed results and queued jobs survive restart. Client disconnection does not cancel a committed job; retrying a POST creates another job.
+The service creates schema-v3 `jobs.sqlite3` in the working directory. One worker executes committed jobs in FIFO insertion order while HTTP status and job queries remain responsive. Completed results and queued jobs survive restart. Client disconnection does not cancel a committed job; retrying a POST creates another job.
 
 At startup, jobs left `running` by an earlier service exit become failed with code 500 and an interruption message. They are never automatically retried because execution may have affected external files. Previously queued jobs then continue in order. On Ctrl-C or Unix SIGTERM, the service stops accepting requests and claiming jobs, waits for its active operation to finish and persist its outcome, and leaves queued jobs for the next start. A worker or outcome-persistence failure stops the service with a failure exit status rather than continuing to accept jobs with a broken worker.
 
 Run only one service instance per working directory. Both the working directory database and repository databases require local filesystems. SQLite uses WAL, `synchronous=FULL`, foreign keys, and a five-second busy timeout; pools allow at most four connections. Schema installation and versioning are transactional; unsupported versions prevent use.
 
-> Development status: repository format v3 backs up Unix metadata and symbolic link targets, with per-backup entry and skip counts. Restore applies Unix metadata and recreates symbolic links; backup filtering is implemented with strict directory pruning. See [the schema contract and remaining work](docs/architecture/repository-schema.md).
+> Development status: repository format v4 backs up Unix metadata and symbolic link targets, with per-backup entry and skip counts. Restore applies Unix metadata and recreates symbolic links; backup filtering is implemented with strict directory pruning. See [the schema contract and remaining work](docs/architecture/repository-schema.md).
 
-Full backups store headers and ordered file/directory entries in `repository.sqlite3` at each repository root. A complete metadata record is committed atomically and an existing backup ID cannot be overwritten. Format version 3 stores a mirrored tree under `backups/<backup_id>/`: each regular file retains its relative name and contains raw, Zstd-compressed, encrypted, or compressed-then-encrypted bytes according to its backup header. Directory entries preserve empty directories. Metadata records each file's original byte count and SHA-256 checksum of its uncompressed contents, plus a UTC RFC 3339 creation timestamp. Entry ordinals preserve metadata ordering; file locations are determined by relative paths.
+Full backups store headers and ordered file/directory entries in `repository.sqlite3` at each repository root. A complete metadata record is committed atomically and an existing backup ID cannot be overwritten. Format version 4 stores a mirrored tree under `backups/<backup_id>/`: each regular file retains its relative name and contains raw, Zstd- or LZ77-compressed, encrypted, or compressed-then-encrypted bytes according to its backup header. Directory entries preserve empty directories. Metadata records each file's original byte count and SHA-256 checksum of its uncompressed contents, plus a UTC RFC 3339 creation timestamp. Entry ordinals preserve metadata ordering; file locations are determined by relative paths.
 
 Backup execution finishes and synchronizes each compressed file, synchronizes the mirrored directories and their repository ancestors, then commits the metadata transaction before reporting success. SQLite metadata defines which backups are published; a directory alone does not establish a completed backup. JSON `manifest.json` files and old JSONL logs are left untouched, and are not read or migrated.
 
@@ -154,6 +156,7 @@ src/
     backup.rs      Full backup traversal and synchronization
     content.rs     Optional compression/encryption pipelines
     crypto.rs      Named keys and authenticated streaming encryption
+    lz77.rs        Project LZ77 matching, framing, streaming IO and codec tests
     restore.rs     Restore path validation, decoding, and integrity verification
     repository.rs  Repository metadata types, transactional persistence, and listing
     filesystem.rs  Shared path resolution, overlap checks, and directory synchronization
@@ -183,7 +186,7 @@ There is no byte-level progress reporting or cancellation.
 
 The current milestone is a minimal end-to-end workflow for local full backups and restores, with these acceptance criteria:
 
-- Preserve regular file contents, directory structure, and empty directories; optionally compress with Zstd and/or encrypt with XChaCha20-Poly1305, and verify plaintext SHA-256 integrity.
+- Preserve regular file contents, directory structure, and empty directories; optionally compress with Zstd or project LZ77 and/or encrypt with XChaCha20-Poly1305, and verify plaintext SHA-256 integrity.
 - Return a durable job ID immediately, execute one operation at a time, and retain queryable outcomes across restart.
 - Publish complete repository metadata transactionally after the referenced file contents are durable.
 - Restore into a separate empty directory and compare relative paths, entry types, and contents. Report clear failures and interruptions while preserving source files and existing successful backups.

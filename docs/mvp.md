@@ -2,7 +2,7 @@
 
 The MVP is a single-user backup service: connect from the embedded browser console, back up an existing source directory to an existing independent repository, browse completed backups, restore into an existing empty directory, and inspect persisted task results. The console can select local or remote HTTP/HTTPS APIs and persists connection profiles and keys in browser storage. Switching verifies the target and clears old service data. Backup and restore execution currently require Unix. The console supports wide desktop windows of at least 1200 CSS pixels; paths always refer to the selected service device. There is no frontend deployment or runtime asset download.
 
-The current format is version 3 with individually encoded files and repository metadata in SQLite. Zstd compression and XChaCha20-Poly1305 content encryption are independent per-backup choices; encrypted backups require named server keys. Hybrid small-file packs remain future work. Incremental backup is not planned.
+The current format is version 4 with individually encoded files and repository metadata in SQLite. Zstd/LZ77 compression and XChaCha20-Poly1305 content encryption are independent per-backup choices; encrypted backups require named server keys. Hybrid small-file packs remain future work. Incremental backup is not planned.
 
 ## Reliability before broader use
 

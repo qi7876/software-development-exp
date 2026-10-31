@@ -1,7 +1,7 @@
 {
-  "recorded_at": "2026-10-30T11:35:04.616979+08:00",
-  "production_revision": "5ac19b92bb68650d416a44cd234c7abf8184fa32",
-  "source_tree": "370b5c5a6cc3e7890f43771f94e26d212fe68715",
+  "recorded_at": "2026-10-31T15:53:51.863249+08:00",
+  "production_revision": "61ecd3c7832165c46eae0a7e3b898b484c70fe90",
+  "source_tree": "28597797df7061949756b611b98f1d2c503c9932",
   "environment": "macOS-27.2-arm64-arm-64bit-Mach-O",
   "checks": [
     {
@@ -16,7 +16,7 @@
     },
     {
       "command": "cargo test --all-targets",
-      "result": "67 项单元/组件测试、12 项真实 HTTP 集成测试通过",
+      "result": "73 项单元/组件测试和 12 项真实 HTTP 集成测试通过；1 项手动测量在普通测试中按设计跳过，已单独执行通过",
       "exit_code": 0
     },
     {
@@ -58,10 +58,16 @@
       "command": "uv run scripts/update_system_design.py --check",
       "result": "设计 D2/PNG 无漂移",
       "exit_code": 0
+    },
+    {
+      "command": "cargo test --profile profiling jobs::lz77::measurements::measure_samples -- --ignored --nocapture",
+      "result": "1 项手动测量通过，6 条样本记录见 lz77-measurements.json",
+      "exit_code": 0
     }
   ],
-  "scope": "当前功能和文档回归；没有重新执行性能、稳定性或 Instruments 测量。",
+  "scope": "LZ77 feature and report regression; codec-only measurements recorded separately, no rerun of historical end-to-end stability/Instruments measurements.",
   "historical_evidence": "verification.json (2026-10-14)",
   "entrypoint": "BAK_BROWSER_CHANNEL=chrome uv run scripts/check.py --report --web-ui",
-  "historical_measurements_rerun": false
+  "historical_measurements_rerun": false,
+  "codec_measurements": "lz77-measurements.json"
 }

@@ -233,7 +233,7 @@ def cycle(
         {
             "source": str(source),
             "repository": str(repository),
-            "compression": True,
+            "compression": {"algorithm": "zstd", "level": 3},
             "filter": {
                 "relative_path": {"include": [], "exclude": []},
                 "uid": {"include": [], "exclude": []},

@@ -34,6 +34,7 @@ GENERATED_CONTENT_WIDTH_CM = 14.0
 BODY_FONT_SIZE_PT = 10.5
 TABLE_FONT_SIZE_PT = 10.5
 VERIFICATION_PATH = ROOT / "docs" / "report" / "verification.json"
+CODEC_MEASUREMENTS_PATH = ROOT / "docs" / "report" / "lz77-measurements.json"
 CURRENT_VERIFICATION_PATH = ROOT / "docs" / "report" / "current-verification.json"
 
 
@@ -368,8 +369,8 @@ def _draw_workflow(path: Path) -> None:
     labels = (
         "Browser / API\n202 + job ID",
         "Durable FIFO\njob queue",
-        "Filter / encode\nZstd / AEAD",
-        "Sync / publish\nmetadata v3",
+        "Filter / encode\nZstd / LZ77 / AEAD",
+        "Sync / publish\nmetadata v4",
         "List published\nbackups",
         "Decode / verify\nUnix metadata",
     )
@@ -404,7 +405,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "bak 是面向个人用户的本地文件备份软件。当前提供全量备份、已发布备份列表和完整恢复，"
-        "支持筛选、Unix 元数据、符号链接、可选 Zstd 压缩和 XChaCha20-Poly1305 内容加密，"
+        "支持筛选、Unix 元数据、符号链接、可选 Zstd/LZ77 压缩和 XChaCha20-Poly1305 内容加密，"
         "通过认证流、原始大小与 SHA-256 校验验证恢复结果，并以持久化作业提供可查询状态。",
     )
     _heading(document, anchor, "1.2 综合描述", 2)
@@ -498,7 +499,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
             (
                 "POST /api/backups",
                 "JSON: source、repository、filter、compression；可选 "
-                "compression_level 和 encryption_key_id；先入库再返回 "
+                "compression 为 null 或算法配置对象，另可指定 encryption_key_id；先入库再返回 "
                 "202/Location。",
             ),
             (
@@ -579,8 +580,8 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "backups/<backup_id>/ 镜像保存源相对路径，"
         "载荷保留原名，内容可原样、只压缩、只加密或先压缩再加密；空目录和符号链接有独立条目。"
         "文件与目录同步后，一次提交头、条目、Unix 根元数据与统计。"
-        "作业库 schema v2、仓库 format/schema "
-        "v3，旧数据库拒绝且不迁移。",
+        "作业库 schema v3、仓库 format/schema "
+        "v4，旧数据库拒绝且不迁移。",
     )
     _paragraph(
         document,
@@ -618,8 +619,20 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "使用双向同步的滑块和数字输入框，仅在本次备份启用压缩时生效。"
         "内部 BackupOptions 的压缩和加密均为 "
         "Option；None 禁用，Some 保存 "
-        "ZstdOptions 或密钥标识/指纹。"
-        "等级不参与恢复或载荷认证数据，因此旧任务和已有加密备份兼容。",
+        "Zstd/LZ77 专属配置或密钥标识/指纹。"
+        "API、任务和仓库保存带 algorithm 标签的压缩配置，"
+        "null 表示不压缩；完整配置纳入加密载荷 v2 的认证数据。",
+    )
+    _paragraph(
+        document,
+        anchor,
+        "自实现 LZ77 使用哈希候选链和环形滑动窗口，匹配范围 "
+        "8–258 字节并支持重叠复制；不实现 "
+        "Huffman、DEFLATE 或 LZ4。"
+        "页面选择 LZ77 时显示窗口大小 4–1024 KiB（默认 "
+        "64）和候选搜索上限 1–256（默认 32），隐藏并禁用 "
+        "Zstd 等级输入。"
+        "切换算法保留各自参数，恢复自动从备份元数据选择解码器。",
     )
     _paragraph(
         document,
@@ -847,7 +860,7 @@ def _populate_system_design(
     for boundary in (
         "一个 bak 进程；HTTP、worker 和阻塞文件操作通过普通 Rust 调用与 Tokio 协作。",
         "API 只经 JobManager 门面访问业务；私有模块不为测试暴露。",
-        "仓库 format/schema v3、作业库 v2；"
+        "仓库 format/schema v4、作业库 v3；"
         "过滤和可选编码已实现，旧数据库与 JSON manifest "
         "不读取或迁移。",
         "作业和仓库分属两个数据库；元数据提交与作业终态提交之间存在独立失败边界。",
@@ -880,7 +893,7 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             (
                 "应用集成 / 端到端测试",
                 "tests/server.rs 运行实际二进制，以 HTTP "
-                "验证认证、四种编码模式、密钥、完整闭环、历史、响应和 "
+                "验证认证、六种编码模式、密钥、完整闭环、历史、响应和 "
                 "SIGTERM/SIGKILL 恢复；Playwright "
                 "使用真实服务验证 UI。",
             ),
@@ -940,7 +953,7 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
                 "正则优先级、时间边界、目录剪枝、计数、权限/时间、符号链接和根属性恢复。",
             ),
             (
-                "四模式与密钥",
+                "六模式与密钥",
                 "原样、压缩、加密和先压缩后加密；错误密钥、替换密钥、截断、块重排"
                 "、尾随数据及认证失败。",
             ),
@@ -970,7 +983,7 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             anchor,
             f"当前记录日期：{current['recorded_at']}；被测代码提交：{current['production_revision']}；"
             "详见 current-verification.json。"
-            "本轮更新功能与架构证据，没有重测性能、稳定性或 "
+            "功能与编解码小样本测量分别记录；未重跑历史端到端性能、稳定性或 "
             "Instruments。",
         )
         _table(
@@ -982,6 +995,44 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
         )
     else:
         _paragraph(document, anchor, "当前版本尚无功能回归记录，不能用历史测量代替。")
+    if CODEC_MEASUREMENTS_PATH.exists():
+        measurement = json.loads(CODEC_MEASUREMENTS_PATH.read_text())
+        _heading(document, anchor, "LZ77 与 Zstd 小样本编解码测量", 2)
+        _paragraph(
+            document,
+            anchor,
+            f"采集日期：{measurement['recorded_at']}；代码提交：{measurement['production_revision']}。"
+            "优化 profiling 构建，对三类 1 MiB "
+            "输入预热一次后测三次。LZ77 窗口 64 KiB、候选上限 "
+            "32，Zstd 等级 3。"
+            "仅计内存中编解码，数据生成和内容比较在计时外，不含 HTTP、磁盘、加密或同步成本。",
+        )
+        rows = []
+        for sample in measurement["samples"]:
+            rows.append(
+                (
+                    sample["dataset"],
+                    sample["algorithm"],
+                    str(sample["encoded_bytes"]),
+                    f"{statistics.median(sample['encode_seconds']) * 1000:.3f}",
+                    f"{statistics.median(sample['decode_seconds']) * 1000:.3f}",
+                )
+            )
+        _table(
+            document,
+            anchor,
+            ("数据集", "算法", "编码字节", "编码中位 ms", "解码中位 ms"),
+            rows,
+            (2.4, 2.0, 3.0, 3.3, 3.3),
+        )
+        _paragraph(
+            document,
+            anchor,
+            "这些是当前机器上的小样本，不是应用吞吐保证或合格线。自实现 "
+            "LZ77 没有熵编码；随机数据可能略微膨胀，"
+            "不能因往返正确就宣称速度或压缩率优于 Zstd。"
+            "完整样本与命令见 lz77-measurements.json。",
+        )
     _heading(document, anchor, "历史测量：性能、稳定性与内存", 2)
     _paragraph(
         document,

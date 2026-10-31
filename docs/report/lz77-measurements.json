@@ -1,0 +1,122 @@
+{
+  "recorded_at": "2026-10-31T15:47:32.993984+08:00",
+  "production_revision": "b81513099433b7a3ce69ac5ecfb53c97a9f81e28",
+  "environment": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "build_profile": "profiling (optimized, debug symbols)",
+  "command": "cargo test --profile profiling jobs::lz77::measurements::measure_samples -- --ignored --nocapture",
+  "parameters": {
+    "lz77": {
+      "window_kib": 64,
+      "search_depth": 32
+    },
+    "zstd": {
+      "level": 3
+    }
+  },
+  "seed": 20261031,
+  "warmup_cycles": 1,
+  "measured_cycles": 3,
+  "scope": "In-memory codec timing, with input generation and equality checks excluded; no HTTP, filesystem, encryption or synchronization costs.",
+  "limitations": [
+    "Three 1 MiB samples on one local machine; not application throughput or a performance acceptance threshold.",
+    "Standalone LZ77 without entropy coding is not expected to outperform Zstd."
+  ],
+  "samples": [
+    {
+      "algorithm": "lz77",
+      "dataset": "text",
+      "decode_seconds": [
+        0.005370417,
+        0.0055485,
+        0.005340792
+      ],
+      "encode_seconds": [
+        0.014815208,
+        0.012666917,
+        0.015305917
+      ],
+      "encoded_bytes": 127327,
+      "source_bytes": 1048576
+    },
+    {
+      "algorithm": "zstd",
+      "dataset": "text",
+      "decode_seconds": [
+        0.000104625,
+        0.00010325,
+        0.000103125
+      ],
+      "encode_seconds": [
+        0.000273917,
+        0.000269542,
+        0.000268292
+      ],
+      "encoded_bytes": 13664,
+      "source_bytes": 1048576
+    },
+    {
+      "algorithm": "lz77",
+      "dataset": "repeated",
+      "decode_seconds": [
+        0.005290208,
+        0.005270042,
+        0.005242709
+      ],
+      "encode_seconds": [
+        0.004391041,
+        0.004404958,
+        0.004493834
+      ],
+      "encoded_bytes": 28470,
+      "source_bytes": 1048576
+    },
+    {
+      "algorithm": "zstd",
+      "dataset": "repeated",
+      "decode_seconds": [
+        6.4417e-05,
+        6.2708e-05,
+        6.7584e-05
+      ],
+      "encode_seconds": [
+        0.000116583,
+        0.000116209,
+        0.000119042
+      ],
+      "encoded_bytes": 50,
+      "source_bytes": 1048576
+    },
+    {
+      "algorithm": "lz77",
+      "dataset": "random",
+      "decode_seconds": [
+        0.005212458,
+        0.00536475,
+        0.005179
+      ],
+      "encode_seconds": [
+        0.021230042,
+        0.021100625,
+        0.021062417
+      ],
+      "encoded_bytes": 1048638,
+      "source_bytes": 1048576
+    },
+    {
+      "algorithm": "zstd",
+      "dataset": "random",
+      "decode_seconds": [
+        6.025e-05,
+        5.7375e-05,
+        5.7167e-05
+      ],
+      "encode_seconds": [
+        0.000145459,
+        0.000144917,
+        0.000144625
+      ],
+      "encoded_bytes": 1048609,
+      "source_bytes": 1048576
+    }
+  ]
+}

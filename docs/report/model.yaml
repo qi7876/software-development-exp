@@ -1,6 +1,6 @@
 {
-  "version": "3.0",
-  "updated": "2026-10-30",
+  "version": "4.0",
+  "updated": "2026-10-31",
   "title": "bak 当前实现系统设计",
   "diagrams": [
     {
@@ -17,8 +17,8 @@
       ],
       "details": [
         "浏览器可连接同一或另一台 bak API；连接名称、地址和明文 API key 保存在浏览器 origin 的 localStorage。",
-        "工作目录作业库 schema v2，仓库 schema/format v3；保留命名密钥文件以恢复旧备份。",
-        "普通文件载荷按备份选择原样、Zstd、XChaCha20-Poly1305 或先压缩后加密；元数据和文件名仍是明文。"
+        "工作目录作业库 schema v3，仓库 schema/format v4；保留命名密钥文件以恢复旧备份。",
+        "普通文件选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 加密，形成六种模式；元数据和文件名仍为明文。"
       ],
       "constraints": [
         "一个工作目录只运行一个服务实例，SQLite 使用本地文件系统。",
@@ -116,7 +116,7 @@
           "name": "jobs.sqlite3",
           "package": "Working directory",
           "type": "database",
-          "stereotype": "queue / history v2"
+          "stereotype": "queue / history v3"
         },
         {
           "id": "Source",
@@ -130,7 +130,7 @@
           "name": "repository.sqlite3",
           "package": "Local repository",
           "type": "database",
-          "stereotype": "metadata v3"
+          "stereotype": "metadata v4"
         },
         {
           "id": "Files",
@@ -242,7 +242,7 @@
       "details": [
         "main/args/config 负责服务启动与 keygen 分支；启动加载 Keyring 后交给 JobManager。",
         "server::ui 提供编译时静态资源，server::api 处理认证、CORS、校验和响应；worker 以 spawn_blocking 执行业务。",
-        "backup 使用 filter 严格目录剪枝；content 组合压缩/加密 IO；crypto 管理密钥及 STREAM 帧；repository 原子保存元数据。"
+        "backup 使用 filter 严格目录剪枝；content 组合可选 Zstd/LZ77 和加密 IO；lz77 自行实现环形窗口与哈希匹配，crypto 管理密钥和 STREAM 帧，repository 原子保存完整编码配置。"
       ],
       "constraints": [
         "图中元素对应现有模块，无独立前端服务、API 代理或新增框架。",
@@ -372,7 +372,7 @@
           "name": "jobs::content",
           "package": "Job subsystem",
           "type": "component",
-          "stereotype": "optional Zstd / AEAD IO"
+          "stereotype": "optional Zstd / LZ77 / AEAD IO"
         },
         {
           "id": "Crypto",
@@ -380,6 +380,13 @@
           "package": "Job subsystem",
           "type": "component",
           "stereotype": "keys / STREAM BE32"
+        },
+        {
+          "id": "Lz77",
+          "name": "jobs::lz77",
+          "type": "component",
+          "package": "Job subsystem",
+          "stereotype": "hash-chain LZ77 codec"
         }
       ],
       "relations": [
@@ -529,6 +536,13 @@
           "label": "Authenticated stream wrappers",
           "direction": "auto",
           "style": "solid"
+        },
+        {
+          "source": "Content",
+          "target": "Lz77",
+          "label": "Streaming encoder / decoder",
+          "direction": "auto",
+          "style": "solid"
         }
       ]
     },
@@ -549,12 +563,12 @@
         }
       ],
       "details": [
-        "BackupOptions.compression 为 Option<ZstdOptions>，None 无压缩参数；Some 保存 level。任务 JSON 边界仍使用 compression/compression_level。",
+        "BackupOptions.compression 为 Option<CompressionOptions>；None 禁用，Some 为 Zstd 或 LZ77 专属配置，API、任务与仓库元数据均使用带 algorithm 标签的对象。",
         "Encryption 只包含 key_id 与 fingerprint，不保存密钥材料；Filter 的规则也随请求持久化。",
         "ManifestEntry 是结构体，kind 才是区分 File/Directory/Symlink 的枚举。UnixMetadata 包含纳秒时间戳。"
       ],
       "constraints": [
-        "压缩等级只影响编码，不写入载荷 AAD 或仓库头；恢复自动选择模式。",
+        "仓库保存完整算法配置，加密载荷 v2 对配置进行认证；恢复自动使用记录的解码器。",
         "SHA-256 与 original_size 始终针对原文，跳过统计只计已遇到的条目。"
       ],
       "trace": {
@@ -615,25 +629,12 @@
           "operations": []
         },
         {
-          "id": "JobState",
-          "name": "JobState",
-          "package": "Job data",
-          "stereotype": "enum",
-          "attributes": [
-            "+ Queued",
-            "+ Running",
-            "+ Succeeded: JobResult",
-            "+ Failed: JobError"
-          ],
-          "operations": []
-        },
-        {
           "id": "Options",
           "name": "BackupOptions",
           "package": "Encoding settings",
           "stereotype": "struct",
           "attributes": [
-            "+ compression: Option<ZstdOptions>",
+            "+ compression: Option<CompressionOptions>",
             "+ encryption: Option<Encryption>"
           ],
           "operations": []
@@ -666,7 +667,7 @@
           "stereotype": "struct",
           "attributes": [
             "+ format_version: u32",
-            "+ compression_algorithm: String",
+            "+ compression: Option<CompressionOptions>",
             "+ encryption: Option<Encryption>",
             "+ root_metadata: UnixMetadata",
             "+ backup_stats: BackupStats",
@@ -713,14 +714,24 @@
           "operations": []
         },
         {
-          "id": "Stats",
-          "name": "BackupStats",
-          "package": "Repository data",
+          "id": "Compression",
+          "name": "CompressionOptions",
+          "package": "Encoding settings",
+          "stereotype": "enum",
+          "attributes": [
+            "+ Zstd: ZstdOptions",
+            "+ Lz77: Lz77Options"
+          ],
+          "operations": []
+        },
+        {
+          "id": "Lz77",
+          "name": "Lz77Options",
+          "package": "Encoding settings",
           "stereotype": "struct",
           "attributes": [
-            "+ entries_created: i64",
-            "+ skipped_unsupported: i64",
-            "+ skipped_filtered: i64"
+            "+ window_kib: u16",
+            "+ search_depth: u16"
           ],
           "operations": []
         }
@@ -735,14 +746,6 @@
           "label": "request"
         },
         {
-          "source": "JobInfo",
-          "target": "JobState",
-          "type": "composition",
-          "source_multiplicity": "1",
-          "target_multiplicity": "1",
-          "label": "state"
-        },
-        {
           "source": "JobRequest",
           "target": "Options",
           "type": "composition",
@@ -752,7 +755,7 @@
         },
         {
           "source": "Options",
-          "target": "Zstd",
+          "target": "Compression",
           "type": "composition",
           "source_multiplicity": "1",
           "target_multiplicity": "0..1",
@@ -783,14 +786,6 @@
           "label": "source root"
         },
         {
-          "source": "Manifest",
-          "target": "Stats",
-          "type": "composition",
-          "source_multiplicity": "1",
-          "target_multiplicity": "1",
-          "label": "counts"
-        },
-        {
           "source": "Entry",
           "target": "Metadata",
           "type": "composition",
@@ -805,6 +800,22 @@
           "source_multiplicity": "1",
           "target_multiplicity": "1",
           "label": "entry type"
+        },
+        {
+          "source": "Compression",
+          "target": "Zstd",
+          "type": "composition",
+          "source_multiplicity": "1",
+          "target_multiplicity": "0..1",
+          "label": "zstd variant"
+        },
+        {
+          "source": "Compression",
+          "target": "Lz77",
+          "type": "composition",
+          "source_multiplicity": "1",
+          "target_multiplicity": "0..1",
+          "label": "lz77 variant"
         }
       ]
     },
@@ -826,11 +837,11 @@
       ],
       "details": [
         "JobManager 持有 Arc<Keyring>，提交时固定标识与指纹，worker 执行前再次匹配。",
-        "Content 用 Option<ZstdOptions> 与 Option<Encryption> 选择实际 IO 管线，组合顺序固定为先压缩后加密。",
+        "Content 选择可选 CompressionOptions 和 Encryption；LZ77 通过 Encoder/Decoder 流式处理，组合顺序固定先压缩后加密。",
         "Filter::compile 在备份执行时校验正则和时间范围，CompiledFilter::matches 决定目录是否继续遍历。"
       ],
       "constraints": [
-        "Zstd 参数范围 1–22 默认 3；无加密配置仍可运行不加密操作。",
+        "Zstd level 为 1–22；LZ77 窗口 4–1024 KiB，候选上限 1–256，编码与解码均有界缓冲。",
         "读取加密流必须验证最终认证块；失败不得报告成功，可能保留部分输出。"
       ],
       "trace": {
@@ -970,6 +981,17 @@
             "+ Manifest::write(path): Result",
             "+ list(path): Vec<RepoBackupInfo>"
           ]
+        },
+        {
+          "id": "Lz77",
+          "name": "lz77",
+          "package": "File operations",
+          "stereotype": "module",
+          "attributes": [],
+          "operations": [
+            "+ Encoder::new(writer, options): Encoder",
+            "+ Decoder::new(reader): Decoder"
+          ]
         }
       ],
       "relations": [
@@ -1052,6 +1074,14 @@
           "source_multiplicity": "",
           "target_multiplicity": "",
           "label": "read"
+        },
+        {
+          "source": "Content",
+          "target": "Lz77",
+          "type": "dependency",
+          "source_multiplicity": "",
+          "target_multiplicity": "",
+          "label": "encode / decode"
         }
       ]
     },
@@ -1251,7 +1281,8 @@
       "details": [
         "提交时校验等级并固定命名密钥指纹；正则/时间范围在执行时编译，失败发生在载荷写入前。",
         "目录剪枝同时作用于路径和元数据条件；符号链接只保存目标。",
-        "完成编码与同步后一次提交头、条目、根元数据和统计，再单独提交作业终态。"
+        "完成编码与同步后一次提交头、条目、根元数据和统计，再单独提交作业终态。",
+        "LZ77 的候选搜索、历史窗口和 IO 均有限制；完成编解码终止标记后再完成加密最终认证块。"
       ],
       "constraints": [
         "备份源保持不变；无源一致性检测和失败自动清理。",
@@ -1358,7 +1389,7 @@
           "type": "message",
           "source": "Backup",
           "target": "Backup",
-          "text": "Encode raw / Zstd / AEAD / Zstd then AEAD"
+          "text": "Encode raw / Zstd / LZ77 / AEAD / Zstd then AEAD"
         },
         {
           "type": "message",
@@ -1374,7 +1405,7 @@
           "type": "message",
           "source": "Backup",
           "target": "Repo",
-          "text": "Commit v3 header / entries / metadata / counts"
+          "text": "Commit v4 header / entries / metadata / counts"
         },
         {
           "type": "return",
@@ -1563,7 +1594,7 @@
           "type": "message",
           "source": "Restore",
           "target": "Repo",
-          "text": "Read v3 metadata / match key and fingerprint"
+          "text": "Read v4 metadata / match key and fingerprint"
         },
         {
           "type": "message",
@@ -1579,7 +1610,7 @@
           "type": "message",
           "source": "Restore",
           "target": "Dest",
-          "text": "Create new / decrypt then decompress / verify tags and hash"
+          "text": "Create new / decrypt / Zstd or LZ77 / verify tags and hash"
         },
         {
           "type": "message",
