@@ -224,7 +224,7 @@ impl TestServer {
     async fn backup(&self) -> TestResult<String> {
         self.submit(
             "/api/backups",
-            json!({"source": "source", "repository": "repo with space", "compression": true, "filter": unfiltered()}),
+            json!({"source": "source", "repository": "repo with space", "compression": {"algorithm":"zstd","level":3}, "filter": unfiltered()}),
         )
         .await
     }
@@ -370,7 +370,7 @@ async fn round_trip(files: BTreeMap<String, Vec<u8>>) -> TestResult {
     );
     assert_eq!(
         listed,
-        json!({"backups": [{"backup_id": backup_id, "created_at": created, "compression": true, "encryption": null}]})
+        json!({"backups": [{"backup_id": backup_id, "created_at": created, "compression": {"algorithm":"zstd","level":3}, "encryption": null}]})
     );
 
     server.restart().await?;
@@ -477,7 +477,7 @@ async fn filters_survive_restart_and_control_backup_and_restore_through_http() -
         .submit(
             "/api/backups",
             json!({
-                "source": "source", "repository": "repo with space", "compression": true, "filter": filter
+                "source": "source", "repository": "repo with space", "compression": {"algorithm":"zstd","level":3}, "filter": filter
             }),
         )
         .await?;
@@ -523,7 +523,7 @@ async fn invalid_filter_jobs_fail_before_creating_repository_contents() -> TestR
             .submit(
                 "/api/backups",
                 json!({
-                    "source": "source", "repository": "repo with space", "compression": true, "filter": filter
+                    "source": "source", "repository": "repo with space", "compression": {"algorithm":"zstd","level":3}, "filter": filter
                 }),
             )
             .await?;
@@ -549,7 +549,7 @@ async fn job_history_paginates_without_duplicates_and_survives_restart() -> Test
         let id = server
             .submit(
                 "/api/backups",
-                json!({"source": source, "repository": "repo with space", "compression": true, "filter": unfiltered()}),
+                json!({"source": source, "repository": "repo with space", "compression": {"algorithm":"zstd","level":3}, "filter": unfiltered()}),
             )
             .await?;
         server.wait_job(&id, false).await?;
@@ -561,7 +561,7 @@ async fn job_history_paginates_without_duplicates_and_survives_restart() -> Test
     let item = &first["jobs"][0];
     assert_eq!(
         item["request"],
-        json!({"kind": "Backup", "encryption": null, "compression_level": 3, "source": "missing-third", "repository": "repo with space", "compression": true, "filter": unfiltered()})
+        json!({"kind": "Backup", "encryption": null, "source": "missing-third", "repository": "repo with space", "compression": {"algorithm":"zstd","level":3}, "filter": unfiltered()})
     );
     // Sequence defines ordering; sampled wall-clock timestamps need not be monotonic.
     for field in ["queued_at", "started_at", "finished_at"] {
@@ -613,7 +613,7 @@ async fn startup_authentication_and_failed_job_reporting() -> TestResult {
         .submit(
             "/api/backups",
             json!({
-                "source": "missing-source", "repository": "repo with space", "compression": true, "filter": unfiltered(),
+                "source": "missing-source", "repository": "repo with space", "compression": {"algorithm":"zstd","level":3}, "filter": unfiltered(),
             }),
         )
         .await?;
@@ -866,7 +866,7 @@ async fn http_stays_responsive_and_shutdown_finishes_only_the_active_job() -> Te
 }
 
 #[tokio::test]
-async fn four_storage_modes_keys_and_authenticated_corruption_through_http() -> TestResult {
+async fn six_storage_modes_keys_and_authenticated_corruption_through_http() -> TestResult {
     let mut server = TestServer::start().await?;
     server.stop().await?;
     for name in ["current", "previous"] {
@@ -906,15 +906,23 @@ async fn four_storage_modes_keys_and_authenticated_corruption_through_http() -> 
     let original = read_tree(&server.path("source"))?;
     let mut encrypted_backups = BTreeMap::new();
     for (index, (compression, key_id)) in [
-        (false, None),
-        (true, None),
-        (false, Some("current")),
-        (true, Some("previous")),
+        (Value::Null, None),
+        (json!({"algorithm":"zstd","level":1}), None),
+        (
+            json!({"algorithm":"lz77","window_kib":8,"search_depth":16}),
+            None,
+        ),
+        (Value::Null, Some("current")),
+        (json!({"algorithm":"zstd","level":7}), Some("current")),
+        (
+            json!({"algorithm":"lz77","window_kib":64,"search_depth":32}),
+            Some("previous"),
+        ),
     ]
     .into_iter()
     .enumerate()
     {
-        let job = server.submit("/api/backups", json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":compression, "encryption_key_id": key_id, "compression_level": if index == 1 {1} else {7}})).await?;
+        let job = server.submit("/api/backups", json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":compression, "encryption_key_id": key_id})).await?;
         let completed = server.wait_job(&job, false).await?;
         assert_eq!(completed["state"], "succeeded", "{completed}");
         let id = completed["result"]["backup_id"]
@@ -938,13 +946,15 @@ async fn four_storage_modes_keys_and_authenticated_corruption_through_http() -> 
             .join("random");
         let encoded = std::fs::read(&payload)?;
         if key_id.is_none() {
-            if compression {
+            if compression["algorithm"] == "zstd" {
                 assert_eq!(zstd::decode_all(encoded.as_slice())?, random);
-            } else {
+            } else if compression.is_null() {
                 assert_eq!(encoded, random);
+            } else {
+                assert!(encoded.starts_with(b"BAKLZ77\x01"));
             }
         } else {
-            assert!(encoded.starts_with(b"BAKENC\0\x01"));
+            assert!(encoded.starts_with(b"BAKENC\0\x02"));
             assert_ne!(encoded, random);
         }
         let destination = format!("restore-{index}");
@@ -977,7 +987,7 @@ async fn four_storage_modes_keys_and_authenticated_corruption_through_http() -> 
         }
     }
     let unknown = server.client.post(server.url("/api/backups")).bearer_auth(SECRET)
-        .json(&json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":false, "encryption_key_id":"unknown"})).send().await?;
+        .json(&json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":null, "encryption_key_id":"unknown"})).send().await?;
     assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
     let history = serde_json::to_string(&server.get("/api/jobs?limit=100").await?)?;
     for name in ["current", "previous"] {
@@ -1036,7 +1046,7 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
             .create_if_missing(true),
     )
     .await?;
-    sqlx::raw_sql("CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve'); PRAGMA user_version = 2;").execute(&mut connection).await?;
+    sqlx::raw_sql("CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve'); PRAGMA user_version = 3;").execute(&mut connection).await?;
     connection.close().await?;
     let id = server.backup().await?;
     let failed = server.wait_job(&id, false).await?;
@@ -1045,7 +1055,7 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
         failed["error"]["message"]
             .as_str()
             .ok_or("missing error")?
-            .contains("schema version 2")
+            .contains("schema version 3")
     );
     assert!(!server.path("repo with space/backups").exists());
     let mut connection =
@@ -1060,55 +1070,51 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
         sqlx::query_scalar::<_, i64>("PRAGMA user_version")
             .fetch_one(&mut connection)
             .await?,
-        2
+        3
     );
     connection.close().await?;
     server.stop().await
 }
 
 #[tokio::test]
-async fn compression_levels_validate_before_admission_and_persist() -> TestResult {
+async fn compression_configuration_validates_before_admission_and_persists() -> TestResult {
     let mut server = TestServer::start().await?;
-    for compression in [false, true] {
-        for invalid in [
-            json!(0),
-            json!(23),
-            json!(-1),
-            json!(1.5),
-            json!("3"),
-            Value::Null,
-        ] {
-            let response = server.client.post(server.url("/api/backups")).bearer_auth(SECRET)
-                .json(&json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":compression, "compression_level":invalid})).send().await?;
-            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        }
+    let invalid = [
+        json!(true),
+        json!({"algorithm":"unknown"}),
+        json!({"algorithm":"zstd","level":0}),
+        json!({"algorithm":"zstd","level":23}),
+        json!({"algorithm":"zstd","level":1.5}),
+        json!({"algorithm":"zstd","level":"3"}),
+        json!({"algorithm":"zstd","level":null}),
+        json!({"algorithm":"lz77","window_kib":3}),
+        json!({"algorithm":"lz77","window_kib":1025}),
+        json!({"algorithm":"lz77","search_depth":0}),
+        json!({"algorithm":"lz77","search_depth":257}),
+        json!({"algorithm":"lz77","level":3}),
+        json!({"algorithm":"zstd","window_kib":64}),
+    ];
+    for compression in invalid {
+        let response=server.client.post(server.url("/api/backups")).bearer_auth(SECRET)
+            .json(&json!({"source":"source","repository":"repo with space","filter":unfiltered(),"compression":compression})).send().await?;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
     assert_eq!(server.get("/api/jobs").await?["jobs"], json!([]));
-    assert!(!server.path("repo with space/backups").exists());
-    for level in [None, Some(1), Some(22)] {
-        let mut payload = json!({"source":"missing-source", "repository":"repo with space", "filter":unfiltered(), "compression":true});
-        if let Some(level) = level {
-            payload["compression_level"] = json!(level);
-        }
-        let id = server.submit("/api/backups", payload).await?;
-        let failed = server.wait_job(&id, false).await?;
-        assert_eq!(failed["state"], "failed");
-        assert!(
-            failed["error"]["message"]
-                .as_str()
-                .ok_or("missing error")?
-                .contains("missing-source")
-        );
-        let history = server.get("/api/jobs").await?;
-        assert_eq!(
-            history["jobs"][0]["request"]["compression_level"],
-            level.unwrap_or(3)
-        );
+    for compression in [
+        Value::Null,
+        json!({"algorithm":"zstd"}),
+        json!({"algorithm":"zstd","level":22}),
+        json!({"algorithm":"lz77"}),
+        json!({"algorithm":"lz77","window_kib":1024,"search_depth":256}),
+    ] {
+        let id=server.submit("/api/backups",json!({"source":"missing-source","repository":"repo with space","filter":unfiltered(),"compression":compression})).await?;
+        assert_eq!(server.wait_job(&id, false).await?["state"], "failed");
     }
     server.restart().await?;
+    let last = server.get("/api/jobs").await?;
     assert_eq!(
-        server.get("/api/jobs").await?["jobs"][0]["request"]["compression_level"],
-        22
+        last["jobs"][0]["request"]["compression"],
+        json!({"algorithm":"lz77","window_kib":1024,"search_depth":256})
     );
     server.stop().await
 }

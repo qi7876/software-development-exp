@@ -1,9 +1,12 @@
 mod backup;
 mod content;
 pub(crate) mod crypto;
-pub(crate) use content::{BackupOptions, ZstdOptions};
+#[cfg(test)]
+use content::ZstdOptions;
+pub(crate) use content::{BackupOptions, CompressionOptions};
 mod filesystem;
 mod filter;
+mod lz77;
 mod repository;
 mod restore;
 mod storage;
@@ -22,7 +25,7 @@ use tokio::sync::{Notify, watch};
 use uuid::Uuid;
 
 const JOBS_SCHEMA: storage::Schema = storage::Schema {
-    version: 2,
+    version: 3,
     sql: "
 CREATE TABLE jobs (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -684,7 +687,7 @@ mod encryption_tests {
         let directory = crate::test_support::TestDirectory::new()?;
         let path = directory.path().join("jobs.sqlite3");
         let schema = storage::Schema {
-            version: 1,
+            version: 2,
             sql: "CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve');",
         };
         let pool = storage::open(&path, schema, true).await?;
@@ -724,7 +727,7 @@ mod encryption_tests {
                     repository: "repository".into(),
                     filter: Box::new(crate::test_support::unfiltered()?),
                     options: BackupOptions {
-                        compression: Some(ZstdOptions { level: 7 }),
+                        compression: Some(CompressionOptions::Zstd(ZstdOptions { level: 7 })),
                         encryption: Some(encryption.clone()),
                     },
                 })
@@ -769,7 +772,7 @@ mod encryption_tests {
             let saved = serde_json::to_string(&outcome.request)?;
             assert!(saved.contains(&encryption.fingerprint));
             assert_eq!(
-                serde_json::from_str::<Value>(&saved)?["compression_level"],
+                serde_json::from_str::<Value>(&saved)?["compression"]["level"],
                 7
             );
             assert!(!saved.contains(&hex::encode([7; 32])));

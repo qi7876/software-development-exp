@@ -2,7 +2,7 @@ use crate::jobs::repository::ManifestEntryKind;
 
 use super::{
     JobError,
-    content::{BackupOptions, Content, ZstdOptions},
+    content::{BackupOptions, Content},
     crypto::Keyring,
     filesystem::{get_absolute_directory_path, paths_overlap},
     repository::{Manifest, ManifestEntry},
@@ -396,7 +396,7 @@ pub(super) fn run_with_keys(
     let manifest = handle.block_on(Manifest::read(&absolute_repository_path, backup_id))?;
 
     let options = BackupOptions {
-        compression: (manifest.compression_algorithm == "zstd").then_some(ZstdOptions::default()),
+        compression: manifest.compression.clone(),
         encryption: manifest.encryption.clone(),
     };
     let content = Content::new(&options, keys, backup_id)?;

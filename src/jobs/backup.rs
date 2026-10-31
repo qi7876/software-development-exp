@@ -402,16 +402,11 @@ pub(super) fn run_with_options(
     sync_directory(&absolute_repository_path)?;
 
     let manifest = Manifest {
-        format_version: 3,
+        format_version: 4,
         backup_id: backup_id.to_owned(),
         created_at,
         source: absolute_source_path,
-        compression_algorithm: if options.compression.is_some() {
-            "zstd"
-        } else {
-            "none"
-        }
-        .to_string(),
+        compression: options.compression.clone(),
         encryption: options.encryption.clone(),
         checksum_algorithm: "sha256".to_string(),
         entries: manifest_entries,
@@ -745,8 +740,11 @@ mod tests {
         let manifest = Manifest::read(&repository, "backup-001").await?;
         assert_eq!(manifest.backup_id, "backup-001");
         assert_eq!(manifest.source, std::fs::canonicalize(&source)?);
-        assert_eq!(manifest.format_version, 3);
-        assert_eq!(manifest.compression_algorithm, "zstd");
+        assert_eq!(manifest.format_version, 4);
+        assert!(matches!(
+            manifest.compression,
+            Some(super::super::content::CompressionOptions::Zstd(_))
+        ));
         assert_eq!(manifest.checksum_algorithm, "sha256");
         let created_at = chrono::DateTime::parse_from_rfc3339(&manifest.created_at)?;
         assert_eq!(created_at.offset().local_minus_utc(), 0);

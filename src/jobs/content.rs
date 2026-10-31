@@ -8,92 +8,59 @@ use std::{
     path::Path,
 };
 
+use super::lz77;
+pub(crate) use super::lz77::Lz77Options;
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(try_from = "BackupOptionsWire", into = "BackupOptionsWire")]
 pub(crate) struct BackupOptions {
-    pub(crate) compression: Option<ZstdOptions>,
+    pub(crate) compression: Option<CompressionOptions>,
     pub(crate) encryption: Option<Encryption>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "algorithm", rename_all = "lowercase")]
+pub(crate) enum CompressionOptions {
+    Zstd(ZstdOptions),
+    Lz77(Lz77Options),
+}
+impl CompressionOptions {
+    pub(crate) fn validate(&self) -> Result<(), JobError> {
+        match self {
+            Self::Zstd(options) if !(1..=22).contains(&options.level) => Err(JobError::new(
+                http::StatusCode::BAD_REQUEST,
+                "Zstd level must be 1..=22",
+            )),
+            Self::Zstd(_) => Ok(()),
+            Self::Lz77(options) => options
+                .validate()
+                .map_err(|error| JobError::new(http::StatusCode::BAD_REQUEST, error.to_string())),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub(crate) struct ZstdOptions {
     pub(crate) level: i32,
 }
-
 impl Default for ZstdOptions {
     fn default() -> Self {
-        Self {
-            level: Self::default_level(),
-        }
+        Self { level: 3 }
     }
 }
-
-impl ZstdOptions {
-    pub(crate) fn default_level() -> i32 {
-        3
-    }
-
-    pub(crate) fn validate(&self) -> Result<(), JobError> {
-        if !(1..=22).contains(&self.level) {
-            return Err(JobError::new(
-                http::StatusCode::BAD_REQUEST,
-                "compression_level must be an integer from 1 to 22",
-            ));
-        }
-        Ok(())
-    }
-}
-
 impl Default for BackupOptions {
     fn default() -> Self {
         Self {
-            compression: Some(ZstdOptions::default()),
+            compression: Some(CompressionOptions::Zstd(ZstdOptions::default())),
             encryption: None,
         }
     }
 }
-
 impl BackupOptions {
     pub(crate) fn validate(&self) -> Result<(), JobError> {
         if let Some(compression) = &self.compression {
             compression.validate()?;
         }
         Ok(())
-    }
-}
-
-// Preserve the existing task JSON while keeping disabled compression parameter-free internally.
-#[derive(serde::Serialize, serde::Deserialize)]
-struct BackupOptionsWire {
-    compression: bool,
-    #[serde(default = "ZstdOptions::default_level")]
-    compression_level: i32,
-    encryption: Option<Encryption>,
-}
-
-impl TryFrom<BackupOptionsWire> for BackupOptions {
-    type Error = JobError;
-    fn try_from(wire: BackupOptionsWire) -> Result<Self, Self::Error> {
-        let compression = ZstdOptions {
-            level: wire.compression_level,
-        };
-        compression.validate()?;
-        Ok(Self {
-            compression: wire.compression.then_some(compression),
-            encryption: wire.encryption,
-        })
-    }
-}
-
-impl From<BackupOptions> for BackupOptionsWire {
-    fn from(options: BackupOptions) -> Self {
-        Self {
-            compression: options.compression.is_some(),
-            compression_level: options
-                .compression
-                .map_or_else(ZstdOptions::default_level, |compression| compression.level),
-            encryption: options.encryption,
-        }
     }
 }
 
@@ -123,11 +90,11 @@ impl<'a> Content<'a> {
     }
 
     fn context(&self, path: &Path) -> io::Result<Vec<u8>> {
-        // Tuple order and serde's path representation are part of encrypted format v1.
+        // Tuple order and serde's path representation are part of encrypted format v2.
         serde_json::to_vec(&(
             self.backup_id,
             path,
-            self.options.compression.is_some(),
+            &self.options.compression,
             self.options.encryption.as_ref().map(|e| &e.fingerprint),
         ))
         .map_err(io::Error::other)
@@ -138,12 +105,14 @@ impl<'a> Content<'a> {
             Some(key) => Sink::Encrypted(EncryptWriter::new(file, key, &self.context(path)?)?),
             None => Sink::Plain(file),
         };
-        if let Some(compression) = &self.options.compression {
-            Ok(ContentWriter::Compressed(
-                zstd::stream::write::Encoder::new(writer, compression.level)?,
-            ))
-        } else {
-            Ok(ContentWriter::Direct(writer))
+        match &self.options.compression {
+            None => Ok(ContentWriter::Direct(writer)),
+            Some(CompressionOptions::Zstd(options)) => Ok(ContentWriter::Zstd(
+                zstd::stream::write::Encoder::new(writer, options.level)?,
+            )),
+            Some(CompressionOptions::Lz77(options)) => {
+                Ok(ContentWriter::Lz77(lz77::Encoder::new(writer, options)?))
+            }
         }
     }
 
@@ -152,12 +121,14 @@ impl<'a> Content<'a> {
             Some(key) => Box::new(DecryptReader::new(file, key, &self.context(path)?)?),
             None => Box::new(file),
         };
-        if self.options.compression.is_some() {
-            Ok(ContentReader::Compressed(zstd::stream::read::Decoder::new(
-                reader,
-            )?))
-        } else {
-            Ok(ContentReader::Direct(reader))
+        match &self.options.compression {
+            None => Ok(ContentReader::Direct(reader)),
+            Some(CompressionOptions::Zstd(_)) => Ok(ContentReader::Zstd(
+                zstd::stream::read::Decoder::new(reader)?,
+            )),
+            Some(CompressionOptions::Lz77(_)) => {
+                Ok(ContentReader::Lz77(lz77::Decoder::new(reader)?))
+            }
         }
     }
 }
@@ -183,13 +154,15 @@ impl Write for Sink {
 
 pub(super) enum ContentWriter {
     Direct(Sink),
-    Compressed(zstd::stream::write::Encoder<'static, Sink>),
+    Zstd(zstd::stream::write::Encoder<'static, Sink>),
+    Lz77(lz77::Encoder<Sink>),
 }
 impl ContentWriter {
     pub(super) fn finish(self) -> io::Result<File> {
         let sink = match self {
             Self::Direct(sink) => sink,
-            Self::Compressed(encoder) => encoder.finish()?,
+            Self::Zstd(encoder) => encoder.finish()?,
+            Self::Lz77(encoder) => encoder.finish()?,
         };
         match sink {
             Sink::Plain(file) => Ok(file),
@@ -201,26 +174,30 @@ impl Write for ContentWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self {
             Self::Direct(w) => w.write(buf),
-            Self::Compressed(w) => w.write(buf),
+            Self::Zstd(w) => w.write(buf),
+            Self::Lz77(w) => w.write(buf),
         }
     }
     fn flush(&mut self) -> io::Result<()> {
         match self {
             Self::Direct(w) => w.flush(),
-            Self::Compressed(w) => w.flush(),
+            Self::Zstd(w) => w.flush(),
+            Self::Lz77(w) => w.flush(),
         }
     }
 }
 
 pub(super) enum ContentReader {
     Direct(Box<dyn Read>),
-    Compressed(zstd::stream::read::Decoder<'static, BufReader<Box<dyn Read>>>),
+    Zstd(zstd::stream::read::Decoder<'static, BufReader<Box<dyn Read>>>),
+    Lz77(lz77::Decoder<Box<dyn Read>>),
 }
 impl Read for ContentReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self {
             Self::Direct(r) => r.read(buf),
-            Self::Compressed(r) => r.read(buf),
+            Self::Zstd(r) => r.read(buf),
+            Self::Lz77(r) => r.read(buf),
         }
     }
 }
@@ -228,7 +205,8 @@ impl ContentReader {
     pub(super) fn finish(self) -> io::Result<()> {
         let mut inner: Box<dyn Read> = match self {
             Self::Direct(r) => r,
-            Self::Compressed(decoder) => Box::new(decoder.finish()),
+            Self::Zstd(decoder) => Box::new(decoder.finish()),
+            Self::Lz77(decoder) => decoder.finish()?,
         };
         let mut byte = [0];
         if inner.read(&mut byte)? != 0 {
@@ -252,7 +230,7 @@ mod tests {
         let keys = Keyring::default();
         for level in [1, 3, 22, 0, 23, -1] {
             let options = BackupOptions {
-                compression: Some(ZstdOptions { level }),
+                compression: Some(CompressionOptions::Zstd(ZstdOptions { level })),
                 encryption: None,
             };
             let result = Content::new(&options, &keys, "test");
@@ -272,7 +250,7 @@ mod tests {
         let mut encodings = Vec::new();
         for level in [1, 3, 9] {
             let options = BackupOptions {
-                compression: Some(ZstdOptions { level }),
+                compression: Some(CompressionOptions::Zstd(ZstdOptions { level })),
                 ..BackupOptions::default()
             };
             let content = Content::new(&options, &keys, "test")?;
@@ -298,46 +276,19 @@ mod tests {
     }
 
     #[test]
-    fn task_json_preserves_enabled_and_disabled_compression() -> TestResult {
-        for level in [None, Some(9)] {
+    fn compression_configurations_round_trip() -> TestResult {
+        for compression in [
+            None,
+            Some(CompressionOptions::Zstd(ZstdOptions::default())),
+            Some(CompressionOptions::Lz77(Lz77Options::default())),
+        ] {
             let options = BackupOptions {
-                compression: level.map(|level| ZstdOptions { level }),
+                compression: compression.clone(),
                 encryption: None,
             };
-            let value = serde_json::to_value(&options)?;
-            assert_eq!(
-                value,
-                serde_json::json!({"compression": level.is_some(), "compression_level": level.unwrap_or(3), "encryption": null})
-            );
-            let restored: BackupOptions = serde_json::from_value(value)?;
-            assert_eq!(restored.compression.map(|options| options.level), level);
+            let restored: BackupOptions = serde_json::from_value(serde_json::to_value(&options)?)?;
+            assert_eq!(restored.compression, compression);
         }
-        assert!(
-            serde_json::from_value::<BackupOptions>(
-                serde_json::json!({"compression":false, "compression_level":23, "encryption":null})
-            )
-            .is_err()
-        );
-        let keys = Keyring::default();
-        let disabled = BackupOptions {
-            compression: None,
-            encryption: None,
-        };
-        assert!(Content::new(&disabled, &keys, "test").is_ok());
-        Ok(())
-    }
-
-    #[test]
-    fn old_queued_requests_keep_default_level() -> TestResult {
-        let value = serde_json::json!({ "kind":"Backup", "source":"source", "repository":"repo", "filter": crate::test_support::unfiltered_config(), "compression":true, "encryption":null });
-        let request: crate::jobs::JobRequest = serde_json::from_value(value)?;
-        let crate::jobs::JobRequest::Backup { options, .. } = request else {
-            return Err("unexpected request kind".into());
-        };
-        assert!(matches!(
-            options.compression,
-            Some(ZstdOptions { level: 3 })
-        ));
         Ok(())
     }
 }
