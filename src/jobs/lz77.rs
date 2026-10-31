@@ -505,6 +505,32 @@ mod tests {
     }
 
     #[test]
+    fn maximum_window_and_wide_distances() -> TestResult {
+        let mut state = 29u32;
+        let mut input = vec![0; 1024 * 1024];
+        for value in &mut input {
+            state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+            *value = (state >> 24) as u8;
+        }
+        let prefix = input[..258].to_vec();
+        input.extend(prefix);
+        let encoded = encode(
+            &input,
+            &Lz77Options {
+                window_kib: 1024,
+                search_depth: 256,
+            },
+            128 * 1024,
+            false,
+        )?;
+        let (restored, distances) = reference_decode(&encoded)?;
+        assert_eq!(restored, input);
+        assert!(distances.contains(&(1024 * 1024)));
+        assert_eq!(decode(&encoded)?, input);
+        Ok(())
+    }
+
+    #[test]
     fn invalid_frames_and_parameters_are_rejected() -> TestResult {
         let valid = [header(4), vec![0, 1, 0, b'a', 1, 1, 0, 0, 0, 8, 0, 255]].concat();
         for length in 0..valid.len() {
@@ -605,7 +631,7 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases:32, ..ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases:32, rng_seed:proptest::test_runner::RngSeed::Fixed(20261031), ..ProptestConfig::default() })]
         #[test]
         fn arbitrary_bytes_round_trip(input in proptest::collection::vec(any::<u8>(),0..20000), window in 4u16..=64, depth in 1u16..=64, chunk in 1usize..=1024) {
             let options=Lz77Options {window_kib:window,search_depth:depth};
