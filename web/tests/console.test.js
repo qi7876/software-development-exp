@@ -282,7 +282,7 @@ test(
         body: JSON.stringify({
           source: `missing-<img src=x onerror=alert(1)>-${index}`,
           filter: emptyFilter(),
-          compression: true,
+          compression: { algorithm: "zstd", level: 3 },
           repository: "repo with space",
         }),
       });
@@ -411,6 +411,9 @@ test(
     await page.locator("#source").fill("/local-only/source");
     await page.locator("#backup-repository").fill("/local-only/repository");
     await page.locator("#compression-level").fill("8");
+    await page.locator("#compression-algorithm").selectOption("lz77");
+    await page.locator("#lz77-window").fill("128");
+    await page.locator("#lz77-search-depth").fill("64");
     await page.locator("#compression").uncheck();
     await page.locator("#encryption").check();
     await page.locator("#encryption-key").selectOption("current");
@@ -435,6 +438,11 @@ test(
     assert.equal(await page.locator("#encryption").isChecked(), true);
     assert.equal(await page.locator("#encryption-key").inputValue(), "current");
     assert.equal(await page.locator("#compression-level").inputValue(), "8");
+    assert.equal(
+      await page.locator("#compression-algorithm").inputValue(),
+      "lz77",
+    );
+    assert.equal(await page.locator("#lz77-window").inputValue(), "128");
     assert.equal((await stored()).connections.length, 1);
 
     await save("远程", remote.url, "remote-api-key");
@@ -457,6 +465,12 @@ test(
       await page.locator("#compression-level-slider").inputValue(),
       "3",
     );
+    assert.equal(
+      await page.locator("#compression-algorithm").inputValue(),
+      "zstd",
+    );
+    assert.equal(await page.locator("#lz77-window").inputValue(), "64");
+    assert.equal(await page.locator("#lz77-search-depth").inputValue(), "32");
     assert.equal((await stored()).connections.length, 2);
     assert.equal(
       (await page.locator("#connection-list").textContent()).includes(
@@ -784,7 +798,7 @@ test(
 );
 
 test(
-  "console selects all four storage modes and matches restore keys",
+  "console selects all six storage modes and matches restore keys",
   { timeout: 90000 },
   async (t) => {
     const { directory, url } = await startServer(t, secret, true, true);
@@ -814,28 +828,52 @@ test(
     );
     let encryptedId;
     const modes = [
-      [false, false, "不压缩、不加密"],
-      [true, false, "仅压缩"],
-      [false, true, "仅加密"],
-      [true, true, "压缩后加密"],
+      [null, false, "不压缩 · 不加密"],
+      [{ algorithm: "zstd", level: 7 }, false, "Zstd · 等级 7 · 不加密"],
+      [
+        { algorithm: "lz77", window_kib: 8, search_depth: 16 },
+        false,
+        "LZ77 · 8 KiB · 16 候选 · 不加密",
+      ],
+      [null, true, "不压缩 · 加密"],
+      [{ algorithm: "zstd", level: 9 }, true, "Zstd · 等级 9 · 加密"],
+      [
+        { algorithm: "lz77", window_kib: 64, search_depth: 32 },
+        true,
+        "LZ77 · 64 KiB · 32 候选 · 加密",
+      ],
     ];
     for (let index = 0; index < modes.length; index++) {
       const [compression, encryption, mode] = modes[index];
       await page.locator('nav a[href="#backup"]').click();
       await page.locator("#source").fill("source");
       await page.locator("#backup-repository").fill("repo with space");
-      await page.locator("#compression").setChecked(compression);
-      const level = index === 1 ? 7 : 9;
-      if (compression)
-        await page.locator("#compression-level").fill(String(level));
+      await page.locator("#compression").setChecked(Boolean(compression));
+      if (compression) {
+        await page
+          .locator("#compression-algorithm")
+          .selectOption(compression.algorithm);
+        if (compression.algorithm === "zstd")
+          await page
+            .locator("#compression-level")
+            .fill(String(compression.level));
+        else {
+          await page
+            .locator("#lz77-window")
+            .fill(String(compression.window_kib));
+          await page
+            .locator("#lz77-search-depth")
+            .fill(String(compression.search_depth));
+        }
+      }
       await page.locator("#encryption").setChecked(encryption);
       if (encryption)
         await page
           .locator("#encryption-key")
-          .selectOption(index === 2 ? "current" : "previous");
+          .selectOption(index === 3 ? "current" : "previous");
       assert.equal(
         await page.locator("#encoding-order").isVisible(),
-        compression && encryption,
+        Boolean(compression) && encryption,
       );
       assert.equal(
         await page.locator("#encryption-scope").isVisible(),
@@ -843,7 +881,10 @@ test(
       );
       await page.locator('nav a[href="#repository"]').click();
       await page.locator('nav a[href="#backup"]').click();
-      assert.equal(await page.locator("#compression").isChecked(), compression);
+      assert.equal(
+        await page.locator("#compression").isChecked(),
+        Boolean(compression),
+      );
       assert.equal(await page.locator("#encryption").isChecked(), encryption);
       const responsePromise = page.waitForResponse(
         (response) =>
@@ -853,11 +894,10 @@ test(
       await page.locator("#backup-button").click();
       const response = await responsePromise;
       const payload = response.request().postDataJSON();
-      assert.equal(payload.compression, compression);
-      assert.equal(payload.compression_level, compression ? level : undefined);
+      assert.deepEqual(payload.compression, compression);
       assert.equal(
         payload.encryption_key_id,
-        encryption ? (index === 2 ? "current" : "previous") : null,
+        encryption ? (index === 3 ? "current" : "previous") : null,
       );
       await page.locator("#backup-job-link").click();
       await page.waitForFunction(
@@ -867,16 +907,16 @@ test(
       if (compression) {
         await details.locator("summary").click();
         assert.equal(
-          await details.locator("dt").filter({ hasText: "压缩等级" }).count(),
+          await details.locator("dt").filter({ hasText: "压缩配置" }).count(),
           1,
         );
         assert.equal(
           await details.locator("dd").last().textContent(),
-          String(level),
+          mode.replace(/ · (不)?加密$/, ""),
         );
       } else {
         assert.equal(
-          await details.locator("dt").filter({ hasText: "压缩等级" }).count(),
+          await details.locator("dt").filter({ hasText: "压缩配置" }).count(),
           0,
         );
       }
@@ -885,7 +925,7 @@ test(
         headers: { Authorization: `Bearer ${secret}` },
       });
       const backupId = (await jobResponse.json()).result.backup_id;
-      if (index === 3) encryptedId = backupId;
+      if (index === 5) encryptedId = backupId;
       await page
         .getByRole("button", { name: "查看备份", exact: true })
         .first()
@@ -1051,6 +1091,36 @@ test(
     await page.locator('nav a[href="#repository"]').click();
     await page.locator('nav a[href="#backup"]').click();
     assert.equal(await number.inputValue(), "12");
+    await page.locator("#compression-algorithm").selectOption("lz77");
+    assert.equal(await number.isVisible(), false);
+    assert.equal(await number.isDisabled(), true);
+    assert.equal(await page.locator("#lz77-fields").isVisible(), true);
+    assert.equal(await page.locator("#lz77-window").inputValue(), "64");
+    assert.equal(await page.locator("#lz77-search-depth").inputValue(), "32");
+    for (const [id, invalid, valid] of [
+      ["lz77-window", "3", "128"],
+      ["lz77-window", "1025", "128"],
+      ["lz77-search-depth", "0", "64"],
+      ["lz77-search-depth", "257", "64"],
+    ]) {
+      const control = page.locator(`#${id}`);
+      await control.fill(invalid);
+      await page.locator("#backup-button").click();
+      assert.equal(
+        await control.evaluate((input) => input.validity.valid),
+        false,
+      );
+      await control.fill(valid);
+    }
+    assert.equal(submissions, 0);
+    await page.locator("#compression-algorithm").selectOption("zstd");
+    assert.equal(await number.inputValue(), "12");
+    await number.fill("23");
+    await page.locator("#compression-algorithm").selectOption("lz77");
+    await page.locator('nav a[href="#repository"]').click();
+    await page.locator('nav a[href="#backup"]').click();
+    assert.equal(await page.locator("#lz77-window").inputValue(), "128");
+    assert.equal(await page.locator("#lz77-search-depth").inputValue(), "64");
     if (process.env.BAK_COMPRESSION_SCREENSHOT)
       await page.screenshot({
         path: process.env.BAK_COMPRESSION_SCREENSHOT,
@@ -1069,20 +1139,35 @@ test(
       ),
       true,
     );
-    // An inactive, invalid level must neither block submission nor be sent.
-    await number.fill("23");
+    // Hidden invalid Zstd settings must not block an LZ77 request.
+    const lzRequest = page.waitForRequest(
+      (req) => req.method() === "POST" && req.url().endsWith("/api/backups"),
+    );
+    await page.locator("#backup-button").click();
+    assert.deepEqual((await lzRequest).postDataJSON().compression, {
+      algorithm: "lz77",
+      window_kib: 128,
+      search_depth: 64,
+    });
+    await page.locator("#backup-job-link").waitFor();
+    await page.waitForFunction(
+      () => !document.getElementById("backup-button").disabled,
+    );
     await page.locator("#compression").uncheck();
     const requestPromise = page.waitForRequest(
       (req) => req.method() === "POST" && req.url().endsWith("/api/backups"),
     );
     await page.locator("#backup-button").click();
-    assert.equal(
-      (await requestPromise).postDataJSON().compression_level,
-      undefined,
-    );
+    assert.equal((await requestPromise).postDataJSON().compression, null);
     await page.locator("#backup-job-link").waitFor();
     await page.locator("#disconnect-button").click();
     assert.equal(await number.inputValue(), "3");
     assert.equal(await slider.inputValue(), "3");
+    assert.equal(
+      await page.locator("#compression-algorithm").inputValue(),
+      "zstd",
+    );
+    assert.equal(await page.locator("#lz77-window").inputValue(), "64");
+    assert.equal(await page.locator("#lz77-search-depth").inputValue(), "32");
   },
 );

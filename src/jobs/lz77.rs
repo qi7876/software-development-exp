@@ -621,3 +621,80 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod measurements {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    #[ignore = "manual optimized in-memory codec measurement"]
+    fn measure_samples() -> Result<(), Box<dyn std::error::Error>> {
+        const SIZE: usize = 1024 * 1024;
+        let mut text = Vec::new();
+        for line in 0..20000 {
+            text.extend_from_slice(format!("File {line}: bak stores files, directories, Unix metadata and authenticated backup contents.\n").as_bytes());
+        }
+        text.truncate(SIZE);
+        let mut state = 20261031u32;
+        let random: Vec<u8> = (0..SIZE)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                (state >> 24) as u8
+            })
+            .collect();
+        for (dataset, data) in [
+            ("text", text),
+            ("repeated", vec![b'a'; SIZE]),
+            ("random", random),
+        ] {
+            for algorithm in ["lz77", "zstd"] {
+                let mut encode_seconds = Vec::new();
+                let mut decode_seconds = Vec::new();
+                let mut encoded_bytes = 0;
+                // First cycle is a warm-up; fixture generation and correctness comparison are untimed.
+                for cycle in 0..4 {
+                    let started = Instant::now();
+                    let encoded = if algorithm == "lz77" {
+                        let mut encoder = Encoder::new(Vec::new(), &Lz77Options::default())?;
+                        for chunk in data.chunks(128 * 1024) {
+                            encoder.write_all(chunk)?;
+                        }
+                        encoder.finish()?
+                    } else {
+                        let mut encoder = zstd::stream::write::Encoder::new(Vec::new(), 3)?;
+                        for chunk in data.chunks(128 * 1024) {
+                            encoder.write_all(chunk)?;
+                        }
+                        encoder.finish()?
+                    };
+                    let encoding = started.elapsed().as_secs_f64();
+                    let started = Instant::now();
+                    let mut decoded = Vec::new();
+                    if algorithm == "lz77" {
+                        let mut decoder = Decoder::new(encoded.as_slice())?;
+                        decoder.read_to_end(&mut decoded)?;
+                        decoder.finish()?;
+                    } else {
+                        zstd::stream::read::Decoder::new(encoded.as_slice())?
+                            .read_to_end(&mut decoded)?;
+                    }
+                    let decoding = started.elapsed().as_secs_f64();
+                    assert_eq!(decoded, data);
+                    encoded_bytes = encoded.len();
+                    if cycle > 0 {
+                        encode_seconds.push(encoding);
+                        decode_seconds.push(decoding);
+                    }
+                }
+                println!(
+                    "LZ77_SAMPLE {}",
+                    serde_json::json!({"dataset":dataset,"algorithm":algorithm,"source_bytes":data.len(),"encoded_bytes":encoded_bytes,"encode_seconds":encode_seconds,"decode_seconds":decode_seconds})
+                );
+            }
+        }
+        Ok(())
+    }
+}

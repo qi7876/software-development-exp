@@ -986,6 +986,38 @@ async fn six_storage_modes_keys_and_authenticated_corruption_through_http() -> T
             std::fs::write(&payload, &encoded)?;
         }
     }
+    // Valid but changed codec parameters must invalidate the encrypted AAD binding.
+    let mut connection = SqliteConnection::connect_with(
+        &SqliteConnectOptions::new().filename(server.path("repo with space/repository.sqlite3")),
+    )
+    .await?;
+    let bound_id = &encrypted_backups["previous"];
+    let original_config: String =
+        sqlx::query_scalar("SELECT compression FROM backups WHERE backup_id = ?")
+            .bind(bound_id)
+            .fetch_one(&mut connection)
+            .await?;
+    sqlx::query("UPDATE backups SET compression = ? WHERE backup_id = ?")
+        .bind(json!({"algorithm":"lz77","window_kib":64,"search_depth":33}).to_string())
+        .bind(bound_id)
+        .execute(&mut connection)
+        .await?;
+    std::fs::create_dir(server.path("restore-changed-codec"))?;
+    let restore=server.submit("/api/restores",json!({"repository":"repo with space","backup_id":bound_id,"destination":"restore-changed-codec"})).await?;
+    let failed = server.wait_job(&restore, false).await?;
+    assert_eq!(failed["state"], "failed");
+    assert!(
+        failed["error"]["message"]
+            .as_str()
+            .ok_or("missing error")?
+            .contains("authentication")
+    );
+    sqlx::query("UPDATE backups SET compression = ? WHERE backup_id = ?")
+        .bind(original_config)
+        .bind(bound_id)
+        .execute(&mut connection)
+        .await?;
+    connection.close().await?;
     let unknown = server.client.post(server.url("/api/backups")).bearer_auth(SECRET)
         .json(&json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":null, "encryption_key_id":"unknown"})).send().await?;
     assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);

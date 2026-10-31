@@ -651,3 +651,11 @@ dialog::backdrop {
   width: 76px;
   flex-shrink: 0;
 }
+
+.compression-parameters {
+  margin-top: 16px;
+  max-width: 420px;
+}
+.compression-parameters label {
+  font-size: 13px;
+}
