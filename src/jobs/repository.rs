@@ -1,6 +1,6 @@
 use super::{
-    JobError, backup::BackupStats, crypto::Encryption, filesystem::get_absolute_directory_path,
-    storage,
+    JobError, backup::BackupStats, content::CompressionOptions, crypto::Encryption,
+    filesystem::get_absolute_directory_path, storage,
 };
 use http::StatusCode;
 use sqlx::Row;
@@ -10,20 +10,20 @@ use std::path::{Path, PathBuf};
 pub(crate) struct RepoBackupInfo {
     pub(super) backup_id: String,
     pub(super) created_at: String,
-    pub(super) compression: bool,
+    pub(super) compression: Option<CompressionOptions>,
     pub(super) encryption: Option<Encryption>,
 }
 
 pub(super) const REPO_SCHEMA: storage::Schema = storage::Schema {
-    version: 3,
+    version: 4,
     sql: "
 CREATE TABLE backups (
     backup_id TEXT PRIMARY KEY NOT NULL,
-    format_version INTEGER NOT NULL CHECK (format_version = 3),
+    format_version INTEGER NOT NULL CHECK (format_version = 4),
     created_at TEXT NOT NULL,
     source TEXT NOT NULL,
-    compression TEXT NOT NULL CHECK (compression IN ('none', 'zstd')),
-    encryption TEXT NOT NULL CHECK (encryption IN ('none', 'xchacha20poly1305-stream-be32-v1')),
+    compression TEXT NOT NULL CHECK (json_valid(compression)),
+    encryption TEXT NOT NULL CHECK (encryption IN ('none', 'xchacha20poly1305-stream-be32-v2')),
     encryption_key_id TEXT,
     encryption_key_fingerprint TEXT,
 
@@ -40,7 +40,7 @@ CREATE TABLE backups (
     skipped_filtered INTEGER NOT NULL CHECK (skipped_filtered >= 0),
     CHECK (
         (encryption = 'none' AND encryption_key_id IS NULL AND encryption_key_fingerprint IS NULL) OR
-        (encryption = 'xchacha20poly1305-stream-be32-v1' AND encryption_key_id IS NOT NULL AND length(encryption_key_id) > 0 AND encryption_key_fingerprint IS NOT NULL AND length(encryption_key_fingerprint) = 64)
+        (encryption = 'xchacha20poly1305-stream-be32-v2' AND encryption_key_id IS NOT NULL AND length(encryption_key_id) > 0 AND encryption_key_fingerprint IS NOT NULL AND length(encryption_key_fingerprint) = 64)
     )
 );
 CREATE TABLE entries (
@@ -76,7 +76,7 @@ pub(super) struct Manifest {
     pub(super) backup_id: String,
     pub(super) created_at: String,
     pub(super) source: PathBuf,
-    pub(super) compression_algorithm: String,
+    pub(super) compression: Option<CompressionOptions>,
     pub(super) encryption: Option<Encryption>,
     pub(super) checksum_algorithm: String,
     pub(super) root_metadata: UnixMetadata,
@@ -180,6 +180,19 @@ impl UnixMetadata {
     }
 }
 
+fn compression_from_row(
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<Option<CompressionOptions>, JobError> {
+    let compression: Option<CompressionOptions> =
+        serde_json::from_str(&row.try_get::<String, _>("compression")?)?;
+    if let Some(options) = &compression {
+        options.validate().map_err(|error| {
+            JobError::internal(format!("invalid compression metadata: {}", error.message))
+        })?;
+    }
+    Ok(compression)
+}
+
 fn encryption_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Option<Encryption>, JobError> {
     let id: Option<String> = row.try_get("encryption_key_id")?;
     let fingerprint: Option<String> = row.try_get("encryption_key_fingerprint")?;
@@ -189,7 +202,7 @@ fn encryption_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Option<Encryptio
         fingerprint,
     ) {
         ("none", None, None) => Ok(None),
-        ("xchacha20poly1305-stream-be32-v1", Some(key_id), Some(fingerprint))
+        ("xchacha20poly1305-stream-be32-v2", Some(key_id), Some(fingerprint))
             if !key_id.trim().is_empty()
                 && fingerprint.len() == 64
                 && hex::decode(&fingerprint).is_ok() =>
@@ -226,7 +239,7 @@ impl Manifest {
                 backup_id: row.try_get("backup_id")?,
                 created_at: row.try_get("created_at")?,
                 source: serde_json::from_str(&row.try_get::<String, _>("source")?)?,
-                compression_algorithm: row.try_get("compression")?,
+                compression: compression_from_row(&row)?,
                 encryption: encryption_from_row(&row)?,
                 checksum_algorithm: row.try_get("checksum_algorithm")?,
                 root_metadata: UnixMetadata::from_row(&row, "root_")?,
@@ -296,12 +309,12 @@ impl Manifest {
                 entries_created, skipped_unsupported, skipped_filtered, encryption, encryption_key_id, encryption_key_fingerprint
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                 .bind(&self.backup_id).bind(i64::from(self.format_version)).bind(&self.created_at)
-                .bind(serde_json::to_string(&self.source)?).bind(&self.compression_algorithm).bind(&self.checksum_algorithm)
+                .bind(serde_json::to_string(&self.source)?).bind(serde_json::to_string(&self.compression)?).bind(&self.checksum_algorithm)
                 .bind(i64::from(root.uid)).bind(i64::from(root.gid)).bind(i64::from(root.mode))
                 .bind(root.atime.seconds).bind(i64::from(root.atime.nanoseconds))
                 .bind(root.mtime.seconds).bind(i64::from(root.mtime.nanoseconds))
                 .bind(self.backup_stats.entries_created).bind(self.backup_stats.skipped_unsupported).bind(self.backup_stats.skipped_filtered)
-                .bind(if self.encryption.is_some() { "xchacha20poly1305-stream-be32-v1" } else { "none" })
+                .bind(if self.encryption.is_some() { "xchacha20poly1305-stream-be32-v2" } else { "none" })
                 .bind(self.encryption.as_ref().map(|e| &e.key_id)).bind(self.encryption.as_ref().map(|e| &e.fingerprint))
                 .execute(&mut *transaction).await?;
             for (ordinal, entry) in self.entries.iter().enumerate() {
@@ -355,10 +368,12 @@ impl Manifest {
     }
 
     fn validate_format(&self) -> Result<(), JobError> {
-        if self.format_version != 3
-            || !matches!(self.compression_algorithm.as_str(), "zstd" | "none")
-            || self.checksum_algorithm != "sha256"
-        {
+        if let Some(compression) = &self.compression {
+            compression.validate().map_err(|error| {
+                JobError::internal(format!("invalid compression metadata: {}", error.message))
+            })?;
+        }
+        if self.format_version != 4 || self.checksum_algorithm != "sha256" {
             return Err(JobError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "unsupported manifest format, compression or checksum algorithm",
@@ -419,7 +434,7 @@ pub(super) fn list(repository: &Path) -> Result<Vec<RepoBackupInfo>, JobError> {
                 summaries.push(RepoBackupInfo {
                     backup_id: row.try_get("backup_id")?,
                     created_at: row.try_get("created_at")?,
-                    compression: match row.try_get::<String, _>("compression")?.as_str() { "zstd" => true, "none" => false, _ => return Err(JobError::internal("unsupported compression algorithm")) },
+                    compression: compression_from_row(&row)?,
                     encryption: encryption_from_row(&row)?,
                 });
             }
@@ -446,7 +461,7 @@ mod tests {
     type TestResult = Result<(), Box<dyn Error>>;
 
     #[tokio::test]
-    async fn v3_schema_enforces_metadata_and_entry_types() -> TestResult {
+    async fn v4_schema_enforces_metadata_and_entry_types() -> TestResult {
         let directory = TestDirectory::new()?;
         let pool = storage::open(
             &directory.path().join("repository.sqlite3"),
@@ -458,7 +473,7 @@ mod tests {
             sqlx::query_scalar::<_, i64>("PRAGMA user_version")
                 .fetch_one(&pool)
                 .await?,
-            3
+            4
         );
         sqlx::query(
             "INSERT INTO backups (
@@ -466,7 +481,7 @@ mod tests {
             root_uid, root_gid, root_mode, root_atime_seconds, root_atime_nanoseconds,
             root_mtime_seconds, root_mtime_nanoseconds,
             entries_created, skipped_unsupported, skipped_filtered, encryption
-        ) VALUES ('backup', 3, '2026-10-23T00:00:00Z', '\"/source\"', 'zstd', 'sha256',
+        ) VALUES ('backup', 4, '2026-10-23T00:00:00Z', '\"/source\"', '{\"algorithm\":\"zstd\",\"level\":3}', 'sha256',
             4294967295, 0, 4095, -1, 999999999, 0, 0, 3, 2, 1, 'none')",
         )
         .execute(&pool)
@@ -532,11 +547,13 @@ mod tests {
 
     fn header(repository: &Path, backup_id: &str, second: u8) -> Manifest {
         Manifest {
-            format_version: 3,
+            format_version: 4,
             backup_id: backup_id.to_owned(),
             created_at: format!("2026-10-13T00:00:{second:02}.000Z"),
             source: repository.to_owned(),
-            compression_algorithm: "zstd".into(),
+            compression: Some(CompressionOptions::Zstd(
+                super::super::content::ZstdOptions::default(),
+            )),
             encryption: None,
             checksum_algorithm: "sha256".into(),
             root_metadata: metadata(100),
@@ -728,11 +745,13 @@ mod tests {
 
     fn manifest() -> Manifest {
         Manifest {
-            format_version: 3,
+            format_version: 4,
             backup_id: "backup-001".into(),
             created_at: "2026-10-09T00:00:00Z".into(),
             source: "/source".into(),
-            compression_algorithm: "zstd".into(),
+            compression: Some(CompressionOptions::Zstd(
+                super::super::content::ZstdOptions::default(),
+            )),
             encryption: None,
             checksum_algorithm: "sha256".into(),
             root_metadata: metadata(100),

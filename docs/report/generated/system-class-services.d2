@@ -65,6 +65,11 @@ diagram: "Facade, Modules and Data Access" {
       "+ Manifest::write(path)": "Result"
       "+ list(path)": "Vec<RepoBackupInfo>"
     }
+    Lz77: "<<module>>\nlz77" {
+      shape: class
+      "+ Encoder::new(writer, options)": "Encoder"
+      "+ Decoder::new(reader)": "Decoder"
+    }
   }
   package_0.API -> package_1.Manager: "calls" {
     target-arrowhead.shape: arrow
@@ -105,6 +110,10 @@ diagram: "Facade, Modules and Data Access" {
     style.stroke-dash: 5
   }
   package_2.Restore -> package_2.Repo: "read" {
+    target-arrowhead.shape: arrow
+    style.stroke-dash: 5
+  }
+  package_2.Content -> package_2.Lz77: "encode / decode" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }

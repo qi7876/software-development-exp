@@ -188,6 +188,9 @@ function resetSession() {
   clearFilter();
   state.encryptionKeys = [];
   $("compression").checked = true;
+  $("compression-algorithm").value = "zstd";
+  $("lz77-window").value = "64";
+  $("lz77-search-depth").value = "32";
   $("compression-level").value = "3";
   $("compression-level-slider").value = "3";
   $("encryption").checked = false;
@@ -585,14 +588,30 @@ async function submitted(job, id) {
   if (id === "backup-message") $("backup-job-link").hidden = false;
 }
 
+function compressionDescription(compression) {
+  if (!compression) return "不压缩";
+  if (compression.algorithm === "zstd")
+    return `Zstd · 等级 ${compression.level}`;
+  return `LZ77 · ${compression.window_kib} KiB · ${compression.search_depth} 候选`;
+}
 function storageMode(backup) {
-  if (backup.encryption) return backup.compression ? "压缩后加密" : "仅加密";
-  return backup.compression ? "仅压缩" : "不压缩、不加密";
+  return `${compressionDescription(backup.compression)} · ${backup.encryption ? "加密" : "不加密"}`;
+}
+function compressionOptions() {
+  if (!$("compression").checked) return null;
+  if ($("compression-algorithm").value === "zstd")
+    return { algorithm: "zstd", level: Number($("compression-level").value) };
+  return {
+    algorithm: "lz77",
+    window_kib: Number($("lz77-window").value),
+    search_depth: Number($("lz77-search-depth").value),
+  };
 }
 
 function updateCompressionLevelWarning() {
   $("compression-level-warning").hidden =
     !$("compression").checked ||
+    $("compression-algorithm").value !== "zstd" ||
     Number($("compression-level-slider").value) < 20;
 }
 $("compression-level-slider").addEventListener("input", () => {
@@ -606,7 +625,14 @@ $("compression-level").addEventListener("input", () => {
 });
 
 function updateEncodingOptions() {
-  $("compression-level-fields").disabled = !$("compression").checked;
+  const compressed = $("compression").checked;
+  const zstd = $("compression-algorithm").value === "zstd";
+  $("compression-algorithm-field").hidden = !compressed;
+  $("compression-algorithm").disabled = !compressed;
+  $("compression-level-fields").hidden = !zstd;
+  $("compression-level-fields").disabled = !compressed || !zstd;
+  $("lz77-fields").hidden = zstd;
+  $("lz77-fields").disabled = !compressed || zstd;
   updateCompressionLevelWarning();
   $("encryption").disabled = !state.encryptionKeys.length;
   const encrypted = $("encryption").checked;
@@ -618,6 +644,7 @@ function updateEncodingOptions() {
   $("encoding-order").hidden = !encrypted || !$("compression").checked;
 }
 $("compression").addEventListener("change", updateEncodingOptions);
+$("compression-algorithm").addEventListener("change", updateEncodingOptions);
 $("encryption").addEventListener("change", updateEncodingOptions);
 
 const regexFilterFields = ["relative_path", "uid", "gid", "mode"];
@@ -727,10 +754,7 @@ $("backup-form").addEventListener("submit", async (event) => {
         source,
         repository,
         filter,
-        compression: $("compression").checked,
-        ...($("compression").checked
-          ? { compression_level: Number($("compression-level").value) }
-          : {}),
+        compression: compressionOptions(),
         encryption_key_id: $("encryption").checked
           ? $("encryption-key").value
           : null,
@@ -898,7 +922,10 @@ function renderJobs() {
     if (job.kind === "restore")
       values.unshift(["备份编号", job.request.backup_id]);
     if (job.kind === "backup" && job.request.compression)
-      values.push(["压缩等级", String(job.request.compression_level ?? 3)]);
+      values.push([
+        "压缩配置",
+        compressionDescription(job.request.compression),
+      ]);
     for (const [label, value] of values)
       fields.append(
         node("dt", "", label),

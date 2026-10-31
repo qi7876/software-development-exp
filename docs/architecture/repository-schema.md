@@ -1,6 +1,6 @@
-# Repository schema v3
+# Repository schema v4
 
-The v3 model and SQL read/write bindings persist root and entry metadata,
+The v4 model and SQL read/write bindings persist root and entry metadata,
 symbolic link targets, and statistics in one transaction. Backup collects these
 attributes before reading contents or descending into directories. Symbolic links
 have no payload in the repository: their original target is stored only in SQLite.
@@ -12,8 +12,8 @@ source root attributes on the destination root. Synchronization uses the already
 opened directory handle so restrictive restored permissions do not prevent it.
 Repositories are trusted and source trees must remain unchanged during backup.
 
-Repository databases require `PRAGMA user_version = 3`; no migration is provided.
-Use a new repository for v3 and a new working directory for job schema v2. No migration is provided; old data is not deleted. Job schema v2 distinguishes requests with pinned encryption settings from older request JSON.
+Repository databases require `PRAGMA user_version = 4`; no migration is provided.
+Use a new repository for v4 and a new working directory for job schema v3. No migration is provided; old data is not deleted. Job schema v3 distinguishes requests with pinned encryption settings from older request JSON.
 
 ## Storage contract
 
@@ -23,9 +23,9 @@ statistics columns are required, with no fabricated defaults.
 
 | Columns | Representation |
 | --- | --- |
-| `format_version` | Must be 3 |
-| `compression` | `none` or `zstd` |
-| `encryption` | `none` or `xchacha20poly1305-stream-be32-v1` |
+| `format_version` | Must be 4 |
+| `compression` | JSON `null`, `{"algorithm":"zstd","level":3}`, or `{"algorithm":"lz77","window_kib":64,"search_depth":32}` |
+| `encryption` | `none` or `xchacha20poly1305-stream-be32-v2` |
 | `encryption_key_id`, `encryption_key_fingerprint` | Both null without encryption; otherwise the stable key identifier and 64-digit SHA-256 fingerprint |
 | `root_uid`, `root_gid`; entry `uid`, `gid` | Numeric IDs, 0 through 4294967295 |
 | `root_mode`; entry `mode` | Permission and special bits only, 0 through 4095 (octal 07777), without file type bits |
@@ -70,6 +70,6 @@ or upgrade any existing database or backup contents.
 
 ## Content encoding and keys
 
-Each backup chooses compression and encryption independently. Four modes may coexist in the same repository. Files retain their relative names; only their contents are encrypted. Sizes, checksums, Unix metadata, and link targets remain plaintext. The repository is still trusted metadata, not an encrypted catalog.
+Each backup chooses no compression, Zstd or LZ77, independently of encryption. Six modes may coexist in the same repository. Files retain their relative names; only their contents are encrypted. Sizes, checksums, Unix metadata, and link targets remain plaintext. The repository is still trusted metadata, not an encrypted catalog.
 
 The payload format, authenticated framing, and key lifecycle are described in [content encryption](content-encryption.md). Restore automatically selects its decoding pipeline and requires the saved key identifier and fingerprint before creating restored entries. SHA-256 and size checks still cover original plaintext bytes.

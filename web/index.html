@@ -79,11 +79,7 @@
             </div>
             <div class="backup-options">
               <label class="checkbox-label"
-                ><input
-                  id="compression"
-                  type="checkbox"
-                  checked
-                />压缩（Zstd）</label
+                ><input id="compression" type="checkbox" checked />压缩</label
               >
               <label class="checkbox-label"
                 ><input
@@ -93,6 +89,16 @@
                   aria-describedby="encryption-help"
                 />加密（XChaCha20-Poly1305）</label
               >
+              <div
+                id="compression-algorithm-field"
+                class="compression-parameters"
+              >
+                <label for="compression-algorithm">压缩算法</label>
+                <select id="compression-algorithm">
+                  <option value="zstd">Zstd</option>
+                  <option value="lz77">LZ77（自实现）</option>
+                </select>
+              </div>
               <fieldset
                 id="compression-level-fields"
                 class="compression-level-fields"
@@ -125,6 +131,44 @@
                 </p>
                 <p id="compression-level-warning" class="field-help" hidden>
                   高等级会增加耗时和内存占用。
+                </p>
+              </fieldset>
+              <fieldset
+                id="lz77-fields"
+                class="compression-parameters"
+                hidden
+                disabled
+              >
+                <div class="filter-columns">
+                  <div>
+                    <label for="lz77-window">窗口大小（KiB）</label
+                    ><input
+                      id="lz77-window"
+                      type="number"
+                      min="4"
+                      max="1024"
+                      step="1"
+                      value="64"
+                      required
+                      aria-describedby="lz77-help"
+                    />
+                  </div>
+                  <div>
+                    <label for="lz77-search-depth">搜索上限（候选数）</label
+                    ><input
+                      id="lz77-search-depth"
+                      type="number"
+                      min="1"
+                      max="256"
+                      step="1"
+                      value="32"
+                      required
+                      aria-describedby="lz77-help"
+                    />
+                  </div>
+                </div>
+                <p id="lz77-help" class="field-help">
+                  仅影响本次备份。窗口决定可用历史和内存；搜索上限越高，匹配查找越充分、耗时越长。
                 </p>
               </fieldset>
               <div id="encryption-key-field" hidden>

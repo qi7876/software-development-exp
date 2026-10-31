@@ -15,7 +15,7 @@ use std::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
-const MAGIC: &[u8; 8] = b"BAKENC\0\x01";
+const MAGIC: &[u8; 8] = b"BAKENC\0\x02";
 const PREFIX: usize = 19; // STREAM BE32 reserves four counter bytes and one final-block byte.
 pub(super) const CHUNK: usize = 128 * 1024;
 const TAG: usize = 16;

@@ -74,12 +74,17 @@ diagram: "bak: Module Responsibilities" {
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    Content: "<<optional Zstd / AEAD IO>>\njobs::content" {
+    Content: "<<optional Zstd / LZ77 /\nAEAD IO>>\njobs::content" {
       shape: rectangle
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
     Crypto: "<<keys / STREAM BE32>>\njobs::crypto" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Lz77: "<<hash-chain LZ77 codec>>\njobs::lz77" {
       shape: rectangle
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
@@ -106,4 +111,5 @@ diagram: "bak: Module Responsibilities" {
   package_2.Backup -> package_2.Content: "Encode files"
   package_2.Restore -> package_2.Content: "Decode files"
   package_2.Content -> package_2.Crypto: "Authenticated stream wrappers"
+  package_2.Content -> package_2.Lz77: "Streaming encoder / decoder"
 }

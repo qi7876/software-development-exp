@@ -22,20 +22,13 @@ diagram: "Job and Repository Data Types" {
       "+ Backup { source, repository, filter, options }"
       "+ Restore { repository, backup_id, destination }"
     }
-    JobState: "<<enum>>\nJobState" {
-      shape: class
-      "+ Queued"
-      "+ Running"
-      "+ Succeeded": "JobResult"
-      "+ Failed": "JobError"
-    }
   }
   package_1: "Encoding settings" {
     style.font-size: 36
     style.fill: white
     Options: "<<struct>>\nBackupOptions" {
       shape: class
-      "+ compression": "Option<ZstdOptions>"
+      "+ compression": "Option<CompressionOptions>"
       "+ encryption": "Option<Encryption>"
     }
     Zstd: "<<struct>>\nZstdOptions" {
@@ -47,6 +40,16 @@ diagram: "Job and Repository Data Types" {
       "+ key_id": "String"
       "+ fingerprint": "String"
     }
+    Compression: "<<enum>>\nCompressionOptions" {
+      shape: class
+      "+ Zstd": "ZstdOptions"
+      "+ Lz77": "Lz77Options"
+    }
+    Lz77: "<<struct>>\nLz77Options" {
+      shape: class
+      "+ window_kib": "u16"
+      "+ search_depth": "u16"
+    }
   }
   package_2: "Repository data" {
     style.font-size: 36
@@ -54,7 +57,7 @@ diagram: "Job and Repository Data Types" {
     Manifest: "<<struct>>\nManifest" {
       shape: class
       "+ format_version": "u32"
-      "+ compression_algorithm": "String"
+      "+ compression": "Option<CompressionOptions>"
       "+ encryption": "Option<Encryption>"
       "+ root_metadata": "UnixMetadata"
       "+ backup_stats": "BackupStats"
@@ -80,20 +83,8 @@ diagram: "Job and Repository Data Types" {
       "+ atime": "FileTimestamp"
       "+ mtime": "FileTimestamp"
     }
-    Stats: "<<struct>>\nBackupStats" {
-      shape: class
-      "+ entries_created": "i64"
-      "+ skipped_unsupported": "i64"
-      "+ skipped_filtered": "i64"
-    }
   }
   package_0.JobInfo <- package_0.JobRequest: "request" {
-    source-arrowhead.label: "1"
-    target-arrowhead.label: "1"
-    source-arrowhead.shape: diamond
-    source-arrowhead.style.filled: true
-  }
-  package_0.JobInfo <- package_0.JobState: "state" {
     source-arrowhead.label: "1"
     target-arrowhead.label: "1"
     source-arrowhead.shape: diamond
@@ -105,7 +96,7 @@ diagram: "Job and Repository Data Types" {
     source-arrowhead.shape: diamond
     source-arrowhead.style.filled: true
   }
-  package_1.Options <- package_1.Zstd: "compression" {
+  package_1.Options <- package_1.Compression: "compression" {
     source-arrowhead.label: "1"
     target-arrowhead.label: "0..1"
     source-arrowhead.shape: diamond
@@ -129,12 +120,6 @@ diagram: "Job and Repository Data Types" {
     source-arrowhead.shape: diamond
     source-arrowhead.style.filled: true
   }
-  package_2.Manifest <- package_2.Stats: "counts" {
-    source-arrowhead.label: "1"
-    target-arrowhead.label: "1"
-    source-arrowhead.shape: diamond
-    source-arrowhead.style.filled: true
-  }
   package_2.Entry <- package_2.Metadata: "entry attributes" {
     source-arrowhead.label: "1"
     target-arrowhead.label: "1"
@@ -144,6 +129,18 @@ diagram: "Job and Repository Data Types" {
   package_2.Entry <- package_2.Kind: "entry type" {
     source-arrowhead.label: "1"
     target-arrowhead.label: "1"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
+  }
+  package_1.Compression <- package_1.Zstd: "zstd variant" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "0..1"
+    source-arrowhead.shape: diamond
+    source-arrowhead.style.filled: true
+  }
+  package_1.Compression <- package_1.Lz77: "lz77 variant" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "0..1"
     source-arrowhead.shape: diamond
     source-arrowhead.style.filled: true
   }

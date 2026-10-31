@@ -1,6 +1,6 @@
 {
-  "version": "3.0",
-  "updated": "2026-10-30",
+  "version": "4.0",
+  "updated": "2026-10-31",
   "author": "项目开发者",
   "system": "bak Local Backup Service",
   "functional_requirements": [
@@ -57,7 +57,7 @@
     {
       "id": "FR-11",
       "name": "可选压缩与内容加密",
-      "description": "压缩、加密独立组合为四种模式；Zstd 等级 1–22 默认 3，同时启用时先压缩后 XChaCha20-Poly1305 STREAM 加密。"
+      "description": "压缩选择无、Zstd 或自实现流式 LZ77，并可独立加密，构成六种模式。Zstd 等级 1–22；LZ77 窗口 4–1024 KiB、搜索上限 1–256。同时启用固定先压缩后加密。"
     },
     {
       "id": "FR-12",
@@ -346,7 +346,7 @@
         "NFR-07"
       ],
       "business_rules": [],
-      "notes": "web_ui 可省略，默认关闭；enabled=true 提供编译时嵌入的控制台。旧 archive_url/directory 字段被忽略；logging 已废弃。作业 schema v2、仓库 schema/format v3，旧数据库拒绝且不迁移。",
+      "notes": "web_ui 可省略，默认关闭；enabled=true 提供编译时嵌入的控制台。旧 archive_url/directory 字段被忽略；logging 已废弃。作业 schema v3、仓库 schema/format v4，旧数据库拒绝且不迁移。",
       "basic_flow": [
         {
           "id": "B1",
@@ -495,14 +495,14 @@
         "备份编号不可覆盖；本版本仅全量备份。",
         "备份期间需保持源文件不变，程序不检测并发源修改。",
         "正则字段 AND、包含规则 OR、排除优先；时间 from 含、before 不含。目录拒绝后不遍历或计数其后代。",
-        "压缩等级默认 3，只影响备份编码；加密只保护文件内容。统计目前不出现在作业结果中。"
+        "Zstd 等级默认 3；LZ77 默认窗口 64 KiB、搜索上限 32，只影响备份编码；加密只保护文件内容。统计目前不出现在作业结果中。"
       ],
-      "notes": "筛选适用于文件、目录和符号链接；源根本身不参与筛选。正则编译和时间区间校验在 worker 执行时发生，HTTP 202 后仍可能失败。",
+      "notes": "筛选适用于文件、目录和符号链接；源根本身不参与筛选。正则编译和时间区间校验在 worker 执行时发生，HTTP 202 后仍可能失败。 LZ77 为自实现哈希候选链和滑动窗口格式，非 DEFLATE/ZIP/LZ4。界面默认 Zstd，API 显式选择算法；旧布尔压缩请求不再接受。",
       "basic_flow": [
         {
           "id": "B1",
           "actor": "CLIENT",
-          "action": "提交 source、repository、完整 filter、compression 和可选 compression_level/encryption_key_id。"
+          "action": "提交 source、repository、完整 filter，可选的带 algorithm 标签的 compression 对象和 encryption_key_id；null/省略 compression 表示不压缩。"
         },
         {
           "id": "B2",
@@ -522,7 +522,7 @@
         {
           "id": "B5",
           "actor": "系统",
-          "action": "对普通文件流式计算原文哈希和大小，按原样/压缩/加密/先压缩后加密写入。"
+          "action": "流式计算原文大小与哈希，对普通文件选择无压缩、Zstd 或 LZ77，再按需加密；不缓存整个文件。"
         },
         {
           "id": "B6",
@@ -663,7 +663,7 @@
         "符号链接按记录目标重建，不读取目标；目录元数据在子项后恢复，最后恢复根元数据。",
         "密钥标识和指纹都须匹配；失败恢复可留下部分输出，不自动清理。"
       ],
-      "notes": "恢复只需 repository、backup_id、destination；编码模式与密钥从元数据自动选择。界面缺少匹配密钥时禁用恢复，服务端执行仍独立校验。",
+      "notes": "恢复只需 repository、backup_id、destination；编码模式与密钥从元数据自动选择。界面缺少匹配密钥时禁用恢复，服务端执行仍独立校验。 LZ77 验证自定义头部、窗口、回引用、结束标记和尾随数据；完整压缩配置纳入加密载荷 v2 的认证数据。",
       "basic_flow": [
         {
           "id": "B1",

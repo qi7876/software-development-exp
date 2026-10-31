@@ -24,11 +24,11 @@ diagram: "Published Listing and Verified Restore" {
   API -> Client: "202 + Location" {style.stroke-dash: 5}
   Jobs -> Restore: "Claim job / execute through\nspawn_blocking"
   Restore -> Dest: "Validate existing empty, non-overlapping\ndirectory"
-  Restore -> Repo: "Read v3 metadata / match key and\nfingerprint"
+  Restore -> Repo: "Read v4 metadata / match key and\nfingerprint"
   Restore -> Restore: "Validate all entry paths before writes"
   fragment_11: alt {
     branch_11: "[All payloads and integrity checks\nsucceed]" {
-      Restore -> Dest: "Create new / decrypt then decompress /\nverify tags and hash"
+      Restore -> Dest: "Create new / decrypt / Zstd or LZ77 /\nverify tags and hash"
       Restore -> Dest: "Recreate symlinks / apply Unix metadata\n/ sync"
       Restore -> Jobs: "destination result; persist success" {style.stroke-dash: 5}
     }
