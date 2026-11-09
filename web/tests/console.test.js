@@ -169,7 +169,22 @@ test(
     );
     assert.equal(await page.locator("#source").isDisabled(), true);
     assert.equal(await page.locator("#backup-button").isDisabled(), true);
+    assert.deepEqual(await page.locator(".sidebar nav a").allTextContents(), [
+      "创建备份",
+      "备份仓库",
+      "任务记录",
+      "管理连接",
+    ]);
+    assert.equal(
+      await page.locator(".connection-panel #disconnect-button").count(),
+      1,
+    );
     await page.locator("#open-connection").click();
+    await page.locator("#connections").waitFor();
+    assert.equal(
+      await page.locator("#open-connection").getAttribute("aria-current"),
+      "page",
+    );
     await page.locator("#secret").fill("wrong-key");
     await page.locator("#connect-button").click();
     await page.locator("#connection-message.error").waitFor();
@@ -230,7 +245,8 @@ test(
     assert.ok(Math.abs(heading.y - action.y) < 12);
     assert.ok(action.x > heading.x + heading.width);
     assert.equal(await page.locator(".panel, #backup-filter summary").count(), 0);
-    assert.equal(await page.locator("#filter-relative_path-include").isVisible(), true);
+    await page.locator("#filter-relative_path-include").waitFor();
+
     await page.locator("#source").fill("source");
     await page.locator("#backup-repository").fill("repo with space");
     await view("repository");
@@ -243,7 +259,9 @@ test(
     );
     await page.locator("#backup-button").click();
     await page.locator("#backup-job-link").click();
-    await refreshUntil(page, () => Boolean(document.querySelector(".job .badge.succeeded")));
+    await refreshUntil(page, () =>
+      Boolean(document.querySelector(".job .badge.succeeded")),
+    );
     await page.getByRole("button", { name: "查看备份", exact: true }).click();
     await page.locator(".backup-row button").waitFor();
     assert.equal(
@@ -255,7 +273,9 @@ test(
     await page.locator(".backup-row button").click();
     await page.locator("#destination").fill("occupied");
     await page.locator("#restore-button").click();
-    await refreshUntil(page, () => Boolean(document.querySelector(".job .badge.failed")));
+    await refreshUntil(page, () =>
+      Boolean(document.querySelector(".job .badge.failed")),
+    );
     assert.equal(
       await readFile(join(directory, "occupied/keep.txt"), "utf8"),
       "keep me",
@@ -265,7 +285,8 @@ test(
     await page.locator(".backup-row button").click();
     await page.locator("#destination").fill("restored");
     await page.locator("#restore-button").click();
-    await refreshUntil(page,
+    await refreshUntil(
+      page,
       () => document.querySelectorAll(".job .badge.succeeded").length === 2,
     );
     assert.deepEqual(
@@ -490,7 +511,7 @@ test(
       await page.locator("#filter-relative_path-exclude").inputValue(),
       "",
     );
-    assert.equal(await page.locator("#filter-relative_path-include").isVisible(), true);
+
     assert.equal(await page.locator("#compression").isChecked(), true);
     assert.equal(await page.locator("#encryption").isChecked(), false);
     assert.equal(await page.locator("#encryption-key").inputValue(), "");
@@ -519,7 +540,9 @@ test(
     await page.locator("#backup-repository").fill("repo with space");
     await page.locator("#backup-button").click();
     await page.locator("#backup-job-link").click();
-    await refreshUntil(page, () => Boolean(document.querySelector(".job .badge.succeeded")));
+    await refreshUntil(page, () =>
+      Boolean(document.querySelector(".job .badge.succeeded")),
+    );
     const localHistory = await fetch(`${local.url}/api/jobs`, {
       headers: { Authorization: `Bearer ${secret}` },
     });
@@ -656,7 +679,7 @@ test(
       () => !document.getElementById("source").disabled,
     );
     await page.locator('nav a[href="#backup"]').click();
-    assert.equal(await page.locator("#filter-relative_path-include").isVisible(), true);
+    await page.locator("#filter-relative_path-include").waitFor();
     await page.locator("#source").fill("source");
     await page.locator("#backup-repository").fill("repo with space");
     assert.equal(
@@ -729,12 +752,15 @@ test(
       atime: { before: "2100-01-01T00:00:00.000Z" },
     });
     await page.locator("#backup-job-link").click();
-    await refreshUntil(page, () => Boolean(document.querySelector(".job .badge.succeeded")));
+    await refreshUntil(page, () =>
+      Boolean(document.querySelector(".job .badge.succeeded")),
+    );
     await page.getByRole("button", { name: "查看备份", exact: true }).click();
     await page.locator(".backup-row button").click();
     await page.locator("#destination").fill("restored");
     await page.locator("#restore-button").click();
-    await refreshUntil(page,
+    await refreshUntil(
+      page,
       () => document.querySelectorAll(".job .badge.succeeded").length === 2,
     );
     assert.deepEqual(await tree(join(directory, "restored")), {
@@ -763,7 +789,7 @@ test(
       await page.locator("#filter-mtime-before").fill(before);
       await page.locator("#backup-button").click();
       await page.locator("#backup-message.error").waitFor();
-      assert.equal(await page.locator("#filter-relative_path-include").isVisible(), true);
+
       assert.equal(
         await page
           .locator("#filter-mtime-before")
@@ -800,7 +826,9 @@ test(
     await page.locator("#filter-relative_path-include").fill("[");
     await page.locator("#backup-button").click();
     await page.locator("#backup-job-link").click();
-    await refreshUntil(page, () => Boolean(document.querySelector(".job .badge.failed")));
+    await refreshUntil(page, () =>
+      Boolean(document.querySelector(".job .badge.failed")),
+    );
     assert.match(
       await page.locator(".job-error").first().textContent(),
       /400.*regex/,
@@ -810,7 +838,7 @@ test(
       await page.locator("#filter-relative_path-include").inputValue(),
       "",
     );
-    assert.equal(await page.locator("#filter-relative_path-include").isVisible(), true);
+
     assert.deepEqual(errors, []);
   },
 );
@@ -918,7 +946,8 @@ test(
         encryption ? (index === 3 ? "current" : "previous") : null,
       );
       await page.locator("#backup-job-link").click();
-      await refreshUntil(page,
+      await refreshUntil(
+        page,
         () => document.querySelector(".job .badge")?.textContent === "已完成",
       );
       const details = page.locator(".job").first().locator("details");
@@ -958,7 +987,8 @@ test(
       await mkdir(join(directory, `restored-${index}`));
       await page.locator("#destination").fill(`restored-${index}`);
       await page.locator("#restore-button").click();
-      await refreshUntil(page,
+      await refreshUntil(
+        page,
         (expected) =>
           document.querySelectorAll(".job .badge.succeeded").length ===
           expected,

@@ -198,9 +198,6 @@ h2 {
   width: 100%;
   font-size: 12px;
 }
-.connection-panel button + button {
-  margin-top: 8px;
-}
 .connection-name {
   margin-top: 8px;
   font-weight: 600;

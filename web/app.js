@@ -68,8 +68,6 @@ function openConnection() {
   navigate("connections");
 }
 
-$("open-connection").addEventListener("click", openConnection);
-
 function message(id, text = "", error = false) {
   const element = $(id);
   element.textContent = text;
