@@ -40,6 +40,15 @@ async function refreshUntil(page, predicate, argument) {
   assert.fail("Jobs did not reach the expected state after manual refreshes");
 }
 
+async function deleteCurrentConnection(page) {
+  await page.locator("#open-connection").click();
+  await page
+    .locator(".connection-row")
+    .filter({ hasText: "当前连接" })
+    .getByRole("button", { name: "删除", exact: true })
+    .click();
+}
+
 async function tree(root) {
   const result = {};
   for (const entry of await readdir(root, { withFileTypes: true })) {
@@ -174,8 +183,8 @@ test(
       ["创建备份", "备份仓库", "任务记录", "管理连接"],
     );
     assert.equal(
-      await page.locator(".connection-panel #disconnect-button").count(),
-      1,
+      await page.getByRole("button", { name: "断开连接", exact: true }).count(),
+      0,
     );
     await page.locator("#open-connection").click();
     await page.locator("#connections").waitFor();
@@ -414,7 +423,7 @@ test(
       ),
       true,
     );
-    await page.locator("#disconnect-button").click();
+    await deleteCurrentConnection(page);
     assert.equal(await page.locator(".job").count(), 0);
     assert.equal(await page.locator("#source").isDisabled(), true);
     await connect();
@@ -613,15 +622,7 @@ test(
     await page.waitForFunction(
       () => document.querySelectorAll(".job").length === 1,
     );
-    await page.locator("#disconnect-button").click();
-    assert.equal((await stored()).selectedUrl, null);
-    assert.equal((await stored()).connections.length, 2);
-    await page.reload();
-    assert.equal(
-      await page.locator("#connection-state").textContent(),
-      "未连接",
-    );
-    await switchTo("远程备份", remote.url);
+    await manager();
 
     await page
       .locator(".connection-row")
@@ -855,7 +856,7 @@ test(
       await page.locator(".job-error").first().textContent(),
       /400.*regex/,
     );
-    await page.locator("#disconnect-button").click();
+    await deleteCurrentConnection(page);
     assert.equal(
       await page.locator("#filter-relative_path-include").inputValue(),
       "",
@@ -1063,7 +1064,7 @@ test(
       ),
       true,
     );
-    await page.locator("#disconnect-button").click();
+    await deleteCurrentConnection(page);
     assert.equal(await page.locator("#compression-algorithm").inputValue(), "zstd");
     assert.equal(await page.locator("#encryption-algorithm").inputValue(), "none");
     assert.equal(await page.locator("#encryption-key").inputValue(), "");
@@ -1075,10 +1076,8 @@ test(
       await route.fulfill({ response, json: body });
     });
     await page.locator("#open-connection").click();
-    await page
-      .locator(".connection-row")
-      .getByRole("button", { name: "连接", exact: true })
-      .click();
+    await page.locator("#secret").fill(secret);
+    await page.locator("#connect-button").click();
     await page.waitForFunction(
       () => !document.getElementById("source").matches(":disabled"),
     );
@@ -1243,7 +1242,7 @@ test(
     await page.locator("#backup-button").click();
     assert.equal((await requestPromise).postDataJSON().compression, null);
     await page.locator("#backup-job-link").waitFor();
-    await page.locator("#disconnect-button").click();
+    await deleteCurrentConnection(page);
     assert.equal(await number.inputValue(), "3");
     assert.equal(await slider.inputValue(), "3");
     assert.equal(

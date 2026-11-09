@@ -169,7 +169,6 @@ function resetSession() {
   state.page = 0;
   state.displayedPage = 0;
   state.next = null;
-  $("disconnect-button").hidden = true;
   $("connection-state").textContent = "未连接";
   $("version").textContent = "";
   $("connection-name").textContent = "";
@@ -365,7 +364,6 @@ async function connectProfile(connection, save = false) {
     state.connected = true;
     state.selectedUrl = connection.url;
     saveConnections();
-    $("disconnect-button").hidden = false;
     $("connection-state").textContent = "已连接";
     $("connection-name").textContent = connection.name;
     $("connection-host").textContent = connection.url;
@@ -418,13 +416,6 @@ $("cancel-edit-connection").addEventListener("click", () => {
   cancelConnectionAttempt();
   resetEditor();
   message("connection-message");
-});
-$("disconnect-button").addEventListener("click", () => {
-  cancelConnectionAttempt();
-  resetSession();
-  state.selectedUrl = null;
-  saveConnections();
-  renderConnections();
 });
 
 function restoreConnections() {

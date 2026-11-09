@@ -400,6 +400,7 @@ dialog {
   margin-top: 8px;
 }
 .filter-row legend {
+  padding: 0;
   font-weight: 500;
 }
 .filter-columns label {
