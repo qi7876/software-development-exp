@@ -4,8 +4,9 @@
     "Microsoft YaHei", sans-serif;
   font-size: 15px;
   line-height: 1.6;
-  color: #262626;
+  color: #000;
   background: #fff;
+  accent-color: #000;
   --muted: #666;
   --border: #ddd;
 }
@@ -26,6 +27,17 @@ textarea {
 }
 button {
   white-space: nowrap;
+}
+a {
+  color: inherit;
+}
+:where(button, input, select, textarea, a, summary):focus-visible {
+  outline: 2px solid #000;
+  outline-offset: 2px;
+}
+::selection {
+  color: #fff;
+  background: #000;
 }
 .icon {
   width: 18px;
@@ -173,13 +185,6 @@ fieldset {
   color: var(--muted);
   font-size: 12px;
 }
-.connection-host {
-  margin: 4px 0 12px;
-  overflow-wrap: anywhere;
-  font-family: monospace;
-  font-size: 12px;
-  color: var(--muted);
-}
 main {
   margin-left: 208px;
   padding: clamp(16px, 3vw, 40px);
@@ -249,11 +254,7 @@ main {
 }
 .message.error,
 .job-error {
-  color: #b42318;
   font-weight: 500;
-}
-.message.success {
-  color: #2f6b45;
 }
 .action-link {
   display: inline-block;
@@ -353,12 +354,6 @@ main {
   color: var(--muted);
   font-size: 13px;
   font-weight: 500;
-}
-.badge.succeeded {
-  color: #2f6b45;
-}
-.badge.failed {
-  color: #b42318;
 }
 .job dl,
 .restore-summary {

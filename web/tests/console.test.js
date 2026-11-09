@@ -469,8 +469,10 @@ test(
     async function connected(url) {
       await page.waitForFunction(
         (target) =>
-          document.getElementById("connection-host").textContent === target &&
-          document.getElementById("connection-state").textContent === "已连接",
+          document.getElementById("connection-state").textContent === "已连接" &&
+          [...document.querySelectorAll(".connection-row")].some(
+            (row) => row.textContent.includes(target) && row.textContent.includes("当前连接"),
+          ),
         url,
       );
       await page.waitForFunction(
@@ -517,7 +519,12 @@ test(
     await save(remote.url, "wrong-key");
     await page.locator("#connection-message.error").waitFor();
     assert.equal(
-      await page.locator("#connection-host").textContent(),
+      await page
+        .locator(".connection-row")
+        .filter({ hasText: "当前连接" })
+        .locator("td")
+        .first()
+        .textContent(),
       local.url,
     );
     assert.equal(
@@ -635,7 +642,12 @@ test(
       .getByRole("button", { name: "删除", exact: true })
       .click();
     assert.equal(
-      await page.locator("#connection-host").textContent(),
+      await page
+        .locator(".connection-row")
+        .filter({ hasText: "当前连接" })
+        .locator("td")
+        .first()
+        .textContent(),
       remote.url,
     );
     await page

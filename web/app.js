@@ -172,7 +172,6 @@ function resetSession() {
   $("connection-state").textContent = "未连接";
   $("connection-status").dataset.state = "disconnected";
   $("version").textContent = "";
-  $("connection-host").textContent = "";
   ["source", "backup-repository", "repository-path", "destination"].forEach(
     (id) => {
       $(id).value = "";
@@ -363,7 +362,6 @@ async function connectProfile(connection, save = false) {
     saveConnections();
     $("connection-state").textContent = "已连接";
     $("connection-status").dataset.state = "connected";
-    $("connection-host").textContent = connection.url;
     $("version").textContent = `v${status.version}`;
     document.querySelectorAll("[data-connected]").forEach((element) => {
       element.disabled = false;
@@ -374,7 +372,7 @@ async function connectProfile(connection, save = false) {
     updateEncodingOptions();
     $("refresh-jobs").disabled = false;
     renderConnections();
-    message("connection-message", `已连接 ${connection.url}。`);
+    message("connection-message", "已连接。");
     await refreshJobs();
   } catch (error) {
     if (attempt === state.connectionAttempt)
