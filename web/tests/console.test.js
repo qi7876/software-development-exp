@@ -1139,24 +1139,12 @@ test(
     assert.equal(await number.inputValue(), "1");
     await page.keyboard.press("End");
     assert.equal(await number.inputValue(), "22");
-    assert.equal(
-      await page.locator("#compression-level-warning").isVisible(),
-      true,
-    );
     await page.keyboard.press("ArrowLeft");
     assert.equal(await number.inputValue(), "21");
     await number.fill("19");
     assert.equal(await slider.inputValue(), "19");
-    assert.equal(
-      await page.locator("#compression-level-warning").isVisible(),
-      false,
-    );
     await number.press("ArrowUp");
     assert.equal(await slider.inputValue(), "20");
-    assert.equal(
-      await page.locator("#compression-level-warning").isVisible(),
-      true,
-    );
     await number.press("ArrowDown");
     assert.equal(await slider.inputValue(), "19");
     let submissions = 0;

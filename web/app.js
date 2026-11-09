@@ -602,19 +602,12 @@ function compressionOptions() {
   };
 }
 
-function updateCompressionLevelWarning() {
-  $("compression-level-warning").hidden =
-    $("compression-algorithm").value !== "zstd" ||
-    Number($("compression-level-slider").value) < 20;
-}
 $("compression-level-slider").addEventListener("input", () => {
   $("compression-level").value = $("compression-level-slider").value;
-  updateCompressionLevelWarning();
 });
 $("compression-level").addEventListener("input", () => {
   if ($("compression-level").validity.valid)
     $("compression-level-slider").value = $("compression-level").value;
-  updateCompressionLevelWarning();
 });
 
 function updateEncodingOptions() {
@@ -625,7 +618,6 @@ function updateEncodingOptions() {
   $("compression-level-fields").disabled = !zstd;
   $("lz77-fields").hidden = !lz77;
   $("lz77-fields").disabled = !lz77;
-  updateCompressionLevelWarning();
   const hasKeys = state.encryptionKeys.length > 0;
   $("encryption-xchacha").disabled = !hasKeys;
   const encrypted = $("encryption-algorithm").value !== "none";
