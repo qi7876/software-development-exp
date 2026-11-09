@@ -27,6 +27,34 @@ const emptyFilter = () => ({
   mtime: {},
 });
 
+// Drive the same explicit refresh action a user takes while a job completes.
+async function refreshUntil(page, predicate, argument) {
+  const deadline = Date.now() + 15000;
+  do {
+    await page.locator("#refresh-jobs").click();
+    await page.waitForFunction(
+      () => !document.getElementById("refresh-jobs").disabled,
+    );
+    if (await page.evaluate(predicate, argument)) return;
+  } while (Date.now() < deadline);
+  assert.fail("Jobs did not reach the expected state after manual refreshes");
+}
+
+async function clearFilterInputs(page) {
+  for (const input of await page.locator("#backup-filter input, #backup-filter textarea").all()) {
+    await input.fill("");
+  }
+}
+
+async function deleteCurrentConnection(page) {
+  await page.locator("#open-connection").click();
+  await page
+    .locator(".connection-row")
+    .filter({ hasText: "当前连接" })
+    .getByRole("button", { name: "删除", exact: true })
+    .click();
+}
+
 async function tree(root) {
   const result = {};
   for (const entry of await readdir(root, { withFileTypes: true })) {
@@ -155,7 +183,21 @@ test(
       0,
     );
     assert.equal(await page.locator("#source").isDisabled(), true);
+    assert.equal(await page.locator("#backup-button").isDisabled(), true);
+    assert.deepEqual(
+      (await page.locator(".sidebar nav a").allTextContents()).map((text) => text.trim()),
+      ["创建备份", "备份仓库", "任务记录", "管理连接"],
+    );
+    assert.equal(
+      await page.getByRole("button", { name: "断开连接", exact: true }).count(),
+      0,
+    );
     await page.locator("#open-connection").click();
+    await page.locator("#connections").waitFor();
+    assert.equal(
+      await page.locator("#open-connection").getAttribute("aria-current"),
+      "page",
+    );
     await page.locator("#secret").fill("wrong-key");
     await page.locator("#connect-button").click();
     await page.locator("#connection-message.error").waitFor();
@@ -192,7 +234,56 @@ test(
       );
     }
     await connect();
+    await view("jobs");
+    let jobRequests = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/jobs") jobRequests++;
+    });
+    await page.clock.install();
+    await page.clock.fastForward(12000);
+    assert.equal(jobRequests, 0);
+    await page.locator("#refresh-jobs").click();
+    await page.waitForFunction(
+      () => !document.getElementById("refresh-jobs").disabled,
+    );
+    assert.equal(jobRequests, 1);
+    assert.match(await page.locator("#jobs-updated").textContent(), /最近更新/);
+    await page.clock.resume();
     await view("backup");
+    const sidebar = await page.locator(".sidebar").boundingBox();
+    const main = await page.locator("main").boundingBox();
+    const heading = await page.locator("#backup-title").boundingBox();
+    const action = await page.locator("#backup-button").boundingBox();
+    assert.ok(sidebar.x + sidebar.width <= main.x);
+    assert.ok(Math.abs(heading.y - action.y) < 12);
+    assert.ok(action.x > heading.x + heading.width);
+    assert.equal(await page.locator(".panel, #backup-filter summary").count(), 0);
+    await page.locator("#filter-relative_path-include").waitFor();
+    for (const width of [768, 1024, 1440, 1920]) {
+      await page.setViewportSize({ width, height: 1000 });
+      for (const name of ["connections", "repository", "jobs", "backup"]) {
+        await view(name);
+        assert.equal(
+          await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+          true,
+          `${name} overflows at ${width}px`,
+        );
+        const content = await page.locator(`#${name}`).boundingBox();
+        assert.ok(content.width <= 1040);
+        assert.ok(content.x + content.width <= width);
+      }
+      const source = await page.locator("#source").boundingBox();
+      const repository = await page.locator("#backup-repository").boundingBox();
+      if (width === 768) {
+        assert.equal(source.x, repository.x);
+        assert.ok(repository.y > source.y);
+      } else {
+        assert.ok(repository.x > source.x);
+        assert.equal(repository.y, source.y);
+      }
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+
     await page.locator("#source").fill("source");
     await page.locator("#backup-repository").fill("repo with space");
     await view("repository");
@@ -205,7 +296,9 @@ test(
     );
     await page.locator("#backup-button").click();
     await page.locator("#backup-job-link").click();
-    await page.locator(".job .badge.succeeded").waitFor();
+    await refreshUntil(page, () =>
+      Boolean(document.querySelector(".job .badge.succeeded")),
+    );
     await page.getByRole("button", { name: "查看备份", exact: true }).click();
     await page.locator(".backup-row button").waitFor();
     assert.equal(
@@ -217,7 +310,9 @@ test(
     await page.locator(".backup-row button").click();
     await page.locator("#destination").fill("occupied");
     await page.locator("#restore-button").click();
-    await page.locator(".job .badge.failed").waitFor();
+    await refreshUntil(page, () =>
+      Boolean(document.querySelector(".job .badge.failed")),
+    );
     assert.equal(
       await readFile(join(directory, "occupied/keep.txt"), "utf8"),
       "keep me",
@@ -227,7 +322,8 @@ test(
     await page.locator(".backup-row button").click();
     await page.locator("#destination").fill("restored");
     await page.locator("#restore-button").click();
-    await page.waitForFunction(
+    await refreshUntil(
+      page,
       () => document.querySelectorAll(".job .badge.succeeded").length === 2,
     );
     assert.deepEqual(
@@ -333,7 +429,7 @@ test(
       ),
       true,
     );
-    await page.locator("#disconnect-button").click();
+    await deleteCurrentConnection(page);
     assert.equal(await page.locator(".job").count(), 0);
     assert.equal(await page.locator("#source").isDisabled(), true);
     await connect();
@@ -373,8 +469,10 @@ test(
     async function connected(url) {
       await page.waitForFunction(
         (target) =>
-          document.getElementById("connection-host").textContent === target &&
-          document.getElementById("connection-state").textContent === "已连接",
+          document.getElementById("connection-state").textContent === "已连接" &&
+          [...document.querySelectorAll(".connection-row")].some(
+            (row) => row.textContent.includes(target) && row.textContent.includes("当前连接"),
+          ),
         url,
       );
       await page.waitForFunction(
@@ -383,17 +481,16 @@ test(
           !document.getElementById("refresh-jobs").disabled,
       );
     }
-    async function save(name, url, key) {
-      await page.locator("#profile-name").fill(name);
+    async function save(url, key) {
       await page.locator("#api-url").fill(url);
       await page.locator("#secret").fill(key);
       await page.locator("#connect-button").click();
     }
-    async function switchTo(name, url) {
+    async function switchTo(url) {
       await manager();
       await page
         .locator(".connection-row")
-        .filter({ hasText: name })
+        .filter({ hasText: url })
         .getByRole("button", { name: "连接", exact: true })
         .click();
       await connected(url);
@@ -405,7 +502,7 @@ test(
     }
 
     await manager();
-    await save("本机", local.url.replace("http://", ""), secret);
+    await save(local.url.replace("http://", ""), secret);
     await connected(local.url);
     await page.locator('nav a[href="#backup"]').click();
     await page.locator("#source").fill("/local-only/source");
@@ -414,16 +511,20 @@ test(
     await page.locator("#compression-algorithm").selectOption("lz77");
     await page.locator("#lz77-window").fill("128");
     await page.locator("#lz77-search-depth").fill("64");
-    await page.locator("#compression").uncheck();
-    await page.locator("#encryption").check();
+    await page.locator("#compression-algorithm").selectOption("none");
+    await page.locator("#encryption-algorithm").selectOption("xchacha20-poly1305");
     await page.locator("#encryption-key").selectOption("current");
-    await page.locator("#filter-summary").click();
     await page.locator("#filter-relative_path-exclude").fill("local-only");
     await manager();
-    await save("远程", remote.url, "wrong-key");
+    await save(remote.url, "wrong-key");
     await page.locator("#connection-message.error").waitFor();
     assert.equal(
-      await page.locator("#connection-host").textContent(),
+      await page
+        .locator(".connection-row")
+        .filter({ hasText: "当前连接" })
+        .locator("td")
+        .first()
+        .textContent(),
       local.url,
     );
     assert.equal(
@@ -434,18 +535,18 @@ test(
       await page.locator("#filter-relative_path-exclude").inputValue(),
       "local-only",
     );
-    assert.equal(await page.locator("#compression").isChecked(), false);
-    assert.equal(await page.locator("#encryption").isChecked(), true);
+    assert.equal(await page.locator("#compression-algorithm").inputValue(), "none");
+    assert.equal(await page.locator("#encryption-algorithm").inputValue(), "xchacha20-poly1305");
     assert.equal(await page.locator("#encryption-key").inputValue(), "current");
     assert.equal(await page.locator("#compression-level").inputValue(), "8");
     assert.equal(
       await page.locator("#compression-algorithm").inputValue(),
-      "lz77",
+      "none",
     );
     assert.equal(await page.locator("#lz77-window").inputValue(), "128");
     assert.equal((await stored()).connections.length, 1);
 
-    await save("远程", remote.url, "remote-api-key");
+    await save(remote.url, "remote-api-key");
     await connected(remote.url);
     assert.equal(await page.locator("#source").inputValue(), "");
     assert.equal(await page.locator("#backup-repository").inputValue(), "");
@@ -453,12 +554,9 @@ test(
       await page.locator("#filter-relative_path-exclude").inputValue(),
       "",
     );
-    assert.equal(
-      await page.locator("#backup-filter").getAttribute("open"),
-      null,
-    );
-    assert.equal(await page.locator("#compression").isChecked(), true);
-    assert.equal(await page.locator("#encryption").isChecked(), false);
+
+    assert.equal(await page.locator("#compression-algorithm").inputValue(), "zstd");
+    assert.equal(await page.locator("#encryption-algorithm").inputValue(), "none");
     assert.equal(await page.locator("#encryption-key").inputValue(), "");
     assert.equal(await page.locator("#compression-level").inputValue(), "3");
     assert.equal(
@@ -485,7 +583,9 @@ test(
     await page.locator("#backup-repository").fill("repo with space");
     await page.locator("#backup-button").click();
     await page.locator("#backup-job-link").click();
-    await page.locator(".job .badge.succeeded").waitFor();
+    await refreshUntil(page, () =>
+      Boolean(document.querySelector(".job .badge.succeeded")),
+    );
     const localHistory = await fetch(`${local.url}/api/jobs`, {
       headers: { Authorization: `Bearer ${secret}` },
     });
@@ -495,29 +595,29 @@ test(
     });
     assert.equal((await remoteHistory.json()).jobs.length, 1);
 
-    await switchTo("本机", local.url);
+    await switchTo(local.url);
     assert.equal(await page.locator(".job").count(), 0);
     assert.equal(
       await page.locator("#repository-label").textContent(),
       "尚未载入仓库",
     );
-    await switchTo("远程", remote.url);
+    await switchTo(remote.url);
     await page.waitForFunction(
       () => document.querySelectorAll(".job").length === 1,
     );
     await page
       .locator(".connection-row")
-      .filter({ hasText: "远程" })
+      .filter({ hasText: remote.url })
       .getByRole("button", { name: "编辑", exact: true })
       .click();
     assert.equal(await page.locator("#secret").inputValue(), "remote-api-key");
-    await save("远程备份", remote.url, "wrong-key");
+    await save(remote.url, "wrong-key");
     await page.locator("#connection-message.error").waitFor();
     assert.equal(
       (await stored()).connections.find((item) => item.url === remote.url).key,
       "remote-api-key",
     );
-    await save("远程备份", remote.url, "remote-api-key");
+    await save(remote.url, "remote-api-key");
     await connected(remote.url);
     assert.equal((await stored()).connections.length, 2);
     if (process.env.BAK_UI_SCREENSHOT) {
@@ -534,28 +634,25 @@ test(
     await page.waitForFunction(
       () => document.querySelectorAll(".job").length === 1,
     );
-    await page.locator("#disconnect-button").click();
-    assert.equal((await stored()).selectedUrl, null);
-    assert.equal((await stored()).connections.length, 2);
-    await page.reload();
-    assert.equal(
-      await page.locator("#connection-state").textContent(),
-      "未连接",
-    );
-    await switchTo("远程备份", remote.url);
+    await manager();
 
     await page
       .locator(".connection-row")
-      .filter({ hasText: "本机" })
+      .filter({ hasText: local.url })
       .getByRole("button", { name: "删除", exact: true })
       .click();
     assert.equal(
-      await page.locator("#connection-host").textContent(),
+      await page
+        .locator(".connection-row")
+        .filter({ hasText: "当前连接" })
+        .locator("td")
+        .first()
+        .textContent(),
       remote.url,
     );
     await page
       .locator(".connection-row")
-      .filter({ hasText: "远程备份" })
+      .filter({ hasText: remote.url })
       .getByRole("button", { name: "删除", exact: true })
       .click();
     assert.deepEqual(await stored(), { connections: [], selectedUrl: null });
@@ -581,7 +678,7 @@ test(
         throw new DOMException("Storage blocked", "SecurityError");
       };
     });
-    await save("仅本次连接", local.url, secret);
+    await save(local.url, secret);
     await connected(local.url);
     await page.locator("#storage-message.error").waitFor();
     assert.equal(
@@ -619,24 +716,12 @@ test(
     await page.locator("#secret").fill(secret);
     await page.locator("#connect-button").click();
     await page.waitForFunction(
-      () => !document.getElementById("source").disabled,
+      () => !document.getElementById("source").matches(":disabled"),
     );
     await page.locator('nav a[href="#backup"]').click();
-    assert.equal(
-      await page.locator("#backup-filter").getAttribute("open"),
-      null,
-    );
+    await page.locator("#filter-relative_path-include").waitFor();
     await page.locator("#source").fill("source");
     await page.locator("#backup-repository").fill("repo with space");
-    await page.locator("#filter-summary").focus();
-    await page.keyboard.press("Enter");
-    assert.equal(
-      await page
-        .locator("#filter-time-help")
-        .textContent()
-        .then((text) => text.includes("Asia/Shanghai")),
-      true,
-    );
     await page
       .locator("#filter-relative_path-include")
       .fill("^docs(/|$)\n\n  ");
@@ -680,7 +765,6 @@ test(
       await page.locator("#filter-mode-include").inputValue(),
       "^[0-7]{4}$",
     );
-    await page.locator("#filter-summary").click();
     const requestPromise = page.waitForRequest(
       (req) => req.method() === "POST" && req.url().endsWith("/api/backups"),
     );
@@ -701,12 +785,15 @@ test(
       atime: { before: "2100-01-01T00:00:00.000Z" },
     });
     await page.locator("#backup-job-link").click();
-    await page.locator(".job .badge.succeeded").waitFor();
+    await refreshUntil(page, () =>
+      Boolean(document.querySelector(".job .badge.succeeded")),
+    );
     await page.getByRole("button", { name: "查看备份", exact: true }).click();
     await page.locator(".backup-row button").click();
     await page.locator("#destination").fill("restored");
     await page.locator("#restore-button").click();
-    await page.waitForFunction(
+    await refreshUntil(
+      page,
       () => document.querySelectorAll(".job .badge.succeeded").length === 2,
     );
     assert.deepEqual(await tree(join(directory, "restored")), {
@@ -714,8 +801,7 @@ test(
     });
 
     await page.locator('nav a[href="#backup"]').click();
-    await page.locator("#filter-summary").click();
-    await page.locator("#clear-filter").click();
+    await clearFilterInputs(page);
     assert.equal(
       await page.locator("#filter-summary").textContent(),
       "过滤条件",
@@ -734,13 +820,9 @@ test(
     for (const before of ["2026-01-01T00:00", "2025-01-01T00:00"]) {
       await page.locator("#filter-mtime-from").fill("2026-01-01T00:00");
       await page.locator("#filter-mtime-before").fill(before);
-      await page.locator("#filter-summary").click();
       await page.locator("#backup-button").click();
       await page.locator("#backup-message.error").waitFor();
-      assert.equal(
-        await page.locator("#backup-filter").getAttribute("open"),
-        "",
-      );
+
       assert.equal(
         await page
           .locator("#filter-mtime-before")
@@ -755,13 +837,11 @@ test(
     });
     await dstPage.goto(url);
     await dstPage.waitForFunction(
-      () => !document.getElementById("source").disabled,
+      () => !document.getElementById("source").matches(":disabled"),
     );
     await dstPage.locator("#source").fill("source");
     await dstPage.locator("#backup-repository").fill("repo with space");
-    await dstPage.locator("#filter-summary").click();
     await dstPage.locator("#filter-atime-from").fill("2026-03-08T02:30");
-    await dstPage.locator("#filter-summary").click();
     await dstPage.locator("#backup-button").click();
     await dstPage.locator("#backup-message.error").waitFor();
     assert.match(
@@ -775,24 +855,23 @@ test(
       true,
     );
     await dstPage.close();
-    await page.locator("#clear-filter").click();
+    await clearFilterInputs(page);
     await page.locator("#filter-relative_path-include").fill("[");
     await page.locator("#backup-button").click();
     await page.locator("#backup-job-link").click();
-    await page.locator(".job .badge.failed").waitFor();
+    await refreshUntil(page, () =>
+      Boolean(document.querySelector(".job .badge.failed")),
+    );
     assert.match(
       await page.locator(".job-error").first().textContent(),
       /400.*regex/,
     );
-    await page.locator("#disconnect-button").click();
+    await deleteCurrentConnection(page);
     assert.equal(
       await page.locator("#filter-relative_path-include").inputValue(),
       "",
     );
-    assert.equal(
-      await page.locator("#backup-filter").getAttribute("open"),
-      null,
-    );
+
     assert.deepEqual(errors, []);
   },
 );
@@ -816,16 +895,29 @@ test(
     await page.locator("#secret").fill(secret);
     await page.locator("#connect-button").click();
     await page.waitForFunction(
-      () => !document.getElementById("source").disabled,
+      () => !document.getElementById("source").matches(":disabled"),
     );
     await page.locator('nav a[href="#backup"]').click();
-    assert.equal(await page.locator("#compression").isChecked(), true);
-    assert.equal(await page.locator("#encryption").isChecked(), false);
-    assert.equal(await page.locator("#encryption").isEnabled(), true);
+    assert.equal(await page.locator("#compression-algorithm").inputValue(), "zstd");
+    assert.equal(await page.locator("#encryption-algorithm").inputValue(), "none");
+    assert.equal(await page.locator("#encryption-xchacha").isEnabled(), true);
     assert.deepEqual(
       await page.locator("#encryption-key option").allTextContents(),
       ["选择服务端密钥", "current", "previous"],
     );
+    assert.equal(await page.locator('input[type="checkbox"]').count(), 0);
+    assert.deepEqual(
+      await page.locator("#compression-algorithm option").allTextContents(),
+      ["None", "Zstd", "LZ77"],
+    );
+    await page.locator("#encryption-algorithm").selectOption("xchacha20-poly1305");
+    await page.locator("#encryption-key").selectOption("current");
+    assert.equal(await page.locator("#encryption-key").getAttribute("required"), "");
+    await page.locator("#encryption-algorithm").selectOption("none");
+    assert.equal(await page.locator("#encryption-key").isVisible(), false);
+    assert.equal(await page.locator("#encryption-key").isDisabled(), true);
+    assert.equal(await page.locator("#encryption-key").getAttribute("required"), null);
+    assert.equal(await page.locator("#encryption-key").inputValue(), "current");
     let encryptedId;
     const modes = [
       [null, false, "不压缩 · 不加密"],
@@ -848,11 +940,16 @@ test(
       await page.locator('nav a[href="#backup"]').click();
       await page.locator("#source").fill("source");
       await page.locator("#backup-repository").fill("repo with space");
-      await page.locator("#compression").setChecked(Boolean(compression));
+      await page.locator("#compression-algorithm").selectOption(compression?.algorithm || "none");
+      assert.equal(
+        await page.locator("#compression-level-fields").isVisible(),
+        compression?.algorithm === "zstd",
+      );
+      assert.equal(
+        await page.locator("#lz77-fields").isVisible(),
+        compression?.algorithm === "lz77",
+      );
       if (compression) {
-        await page
-          .locator("#compression-algorithm")
-          .selectOption(compression.algorithm);
         if (compression.algorithm === "zstd")
           await page
             .locator("#compression-level")
@@ -866,7 +963,9 @@ test(
             .fill(String(compression.search_depth));
         }
       }
-      await page.locator("#encryption").setChecked(encryption);
+      await page.locator("#encryption-algorithm").selectOption(
+        encryption ? "xchacha20-poly1305" : "none",
+      );
       if (encryption)
         await page
           .locator("#encryption-key")
@@ -882,10 +981,13 @@ test(
       await page.locator('nav a[href="#repository"]').click();
       await page.locator('nav a[href="#backup"]').click();
       assert.equal(
-        await page.locator("#compression").isChecked(),
-        Boolean(compression),
+        await page.locator("#compression-algorithm").inputValue(),
+        compression?.algorithm || "none",
       );
-      assert.equal(await page.locator("#encryption").isChecked(), encryption);
+      assert.equal(
+        await page.locator("#encryption-algorithm").inputValue(),
+        encryption ? "xchacha20-poly1305" : "none",
+      );
       const responsePromise = page.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
@@ -900,7 +1002,8 @@ test(
         encryption ? (index === 3 ? "current" : "previous") : null,
       );
       await page.locator("#backup-job-link").click();
-      await page.waitForFunction(
+      await refreshUntil(
+        page,
         () => document.querySelector(".job .badge")?.textContent === "已完成",
       );
       const details = page.locator(".job").first().locator("details");
@@ -940,7 +1043,8 @@ test(
       await mkdir(join(directory, `restored-${index}`));
       await page.locator("#destination").fill(`restored-${index}`);
       await page.locator("#restore-button").click();
-      await page.waitForFunction(
+      await refreshUntil(
+        page,
         (expected) =>
           document.querySelectorAll(".job .badge.succeeded").length ===
           expected,
@@ -970,9 +1074,9 @@ test(
       ),
       true,
     );
-    await page.locator("#disconnect-button").click();
-    assert.equal(await page.locator("#compression").isChecked(), true);
-    assert.equal(await page.locator("#encryption").isChecked(), false);
+    await deleteCurrentConnection(page);
+    assert.equal(await page.locator("#compression-algorithm").inputValue(), "zstd");
+    assert.equal(await page.locator("#encryption-algorithm").inputValue(), "none");
     assert.equal(await page.locator("#encryption-key").inputValue(), "");
     // Simulate a service reconfigured without the key; the UI must prevent an invalid restore.
     await page.route("**/api/status", async (route) => {
@@ -982,14 +1086,14 @@ test(
       await route.fulfill({ response, json: body });
     });
     await page.locator("#open-connection").click();
-    await page
-      .locator(".connection-row")
-      .getByRole("button", { name: "连接", exact: true })
-      .click();
+    await page.locator("#secret").fill(secret);
+    await page.locator("#connect-button").click();
     await page.waitForFunction(
-      () => !document.getElementById("source").disabled,
+      () => !document.getElementById("source").matches(":disabled"),
     );
-    assert.equal(await page.locator("#encryption").isDisabled(), true);
+    assert.equal(await page.locator("#encryption-xchacha").isDisabled(), true);
+    assert.equal(await page.locator("#encryption-algorithm").isEnabled(), true);
+    assert.equal(await page.locator("#encryption-algorithm").inputValue(), "none");
     await page.locator('nav a[href="#repository"]').click();
     await page.locator("#repository-path").fill("repo with space");
     await page.locator("#repository-button").click();
@@ -1024,7 +1128,7 @@ test(
     await page.locator("#secret").fill(secret);
     await page.locator("#connect-button").click();
     await page.waitForFunction(
-      () => !document.getElementById("source").disabled,
+      () => !document.getElementById("source").matches(":disabled"),
     );
     await page.locator('nav a[href="#backup"]').click();
     await page.locator("#source").fill("source");
@@ -1042,24 +1146,12 @@ test(
     assert.equal(await number.inputValue(), "1");
     await page.keyboard.press("End");
     assert.equal(await number.inputValue(), "22");
-    assert.equal(
-      await page.locator("#compression-level-warning").isVisible(),
-      true,
-    );
     await page.keyboard.press("ArrowLeft");
     assert.equal(await number.inputValue(), "21");
     await number.fill("19");
     assert.equal(await slider.inputValue(), "19");
-    assert.equal(
-      await page.locator("#compression-level-warning").isVisible(),
-      false,
-    );
     await number.press("ArrowUp");
     assert.equal(await slider.inputValue(), "20");
-    assert.equal(
-      await page.locator("#compression-level-warning").isVisible(),
-      true,
-    );
     await number.press("ArrowDown");
     assert.equal(await slider.inputValue(), "19");
     let submissions = 0;
@@ -1082,10 +1174,10 @@ test(
     }
     assert.equal(submissions, 0);
     await number.fill("12");
-    await page.locator("#compression").uncheck();
+    await page.locator("#compression-algorithm").selectOption("none");
     assert.equal(await number.isDisabled(), true);
     assert.equal(await slider.isDisabled(), true);
-    await page.locator("#compression").check();
+    await page.locator("#compression-algorithm").selectOption("zstd");
     assert.equal(await number.inputValue(), "12");
     assert.equal(await slider.inputValue(), "12");
     await page.locator('nav a[href="#repository"]').click();
@@ -1153,14 +1245,14 @@ test(
     await page.waitForFunction(
       () => !document.getElementById("backup-button").disabled,
     );
-    await page.locator("#compression").uncheck();
+    await page.locator("#compression-algorithm").selectOption("none");
     const requestPromise = page.waitForRequest(
       (req) => req.method() === "POST" && req.url().endsWith("/api/backups"),
     );
     await page.locator("#backup-button").click();
     assert.equal((await requestPromise).postDataJSON().compression, null);
     await page.locator("#backup-job-link").waitFor();
-    await page.locator("#disconnect-button").click();
+    await deleteCurrentConnection(page);
     assert.equal(await number.inputValue(), "3");
     assert.equal(await slider.inputValue(), "3");
     assert.equal(
