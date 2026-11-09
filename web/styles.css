@@ -23,7 +23,6 @@ input,
 select,
 textarea {
   font: inherit;
-  border-radius: 0;
 }
 button {
   white-space: nowrap;
@@ -80,6 +79,7 @@ select {
 }
 .select-control select {
   appearance: none;
+  border-radius: 2px;
   padding-right: 32px;
 }
 .select-control::after {
