@@ -599,19 +599,19 @@ dialog::backdrop {
   margin-top: 24px;
   padding-top: 16px;
 }
-.checkbox-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 24px 0 0;
-  font-weight: 500;
+.encoding-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 24px;
 }
-.checkbox-label input {
-  width: 16px;
-  min-height: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--accent);
+.encoding-section {
+  min-width: 0;
+}
+.encoding-section h2 {
+  margin-bottom: 16px;
+}
+#compression-algorithm-field {
+  margin-top: 0;
 }
 #encryption-key-field {
   margin-top: 16px;

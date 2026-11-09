@@ -497,8 +497,8 @@ test(
     await page.locator("#compression-algorithm").selectOption("lz77");
     await page.locator("#lz77-window").fill("128");
     await page.locator("#lz77-search-depth").fill("64");
-    await page.locator("#compression").uncheck();
-    await page.locator("#encryption").check();
+    await page.locator("#compression-algorithm").selectOption("none");
+    await page.locator("#encryption-algorithm").selectOption("xchacha20-poly1305");
     await page.locator("#encryption-key").selectOption("current");
     await page.locator("#filter-relative_path-exclude").fill("local-only");
     await manager();
@@ -516,13 +516,13 @@ test(
       await page.locator("#filter-relative_path-exclude").inputValue(),
       "local-only",
     );
-    assert.equal(await page.locator("#compression").isChecked(), false);
-    assert.equal(await page.locator("#encryption").isChecked(), true);
+    assert.equal(await page.locator("#compression-algorithm").inputValue(), "none");
+    assert.equal(await page.locator("#encryption-algorithm").inputValue(), "xchacha20-poly1305");
     assert.equal(await page.locator("#encryption-key").inputValue(), "current");
     assert.equal(await page.locator("#compression-level").inputValue(), "8");
     assert.equal(
       await page.locator("#compression-algorithm").inputValue(),
-      "lz77",
+      "none",
     );
     assert.equal(await page.locator("#lz77-window").inputValue(), "128");
     assert.equal((await stored()).connections.length, 1);
@@ -536,8 +536,8 @@ test(
       "",
     );
 
-    assert.equal(await page.locator("#compression").isChecked(), true);
-    assert.equal(await page.locator("#encryption").isChecked(), false);
+    assert.equal(await page.locator("#compression-algorithm").inputValue(), "zstd");
+    assert.equal(await page.locator("#encryption-algorithm").inputValue(), "none");
     assert.equal(await page.locator("#encryption-key").inputValue(), "");
     assert.equal(await page.locator("#compression-level").inputValue(), "3");
     assert.equal(
@@ -700,7 +700,7 @@ test(
     await page.locator("#secret").fill(secret);
     await page.locator("#connect-button").click();
     await page.waitForFunction(
-      () => !document.getElementById("source").disabled,
+      () => !document.getElementById("source").matches(":disabled"),
     );
     await page.locator('nav a[href="#backup"]').click();
     await page.locator("#filter-relative_path-include").waitFor();
@@ -828,7 +828,7 @@ test(
     });
     await dstPage.goto(url);
     await dstPage.waitForFunction(
-      () => !document.getElementById("source").disabled,
+      () => !document.getElementById("source").matches(":disabled"),
     );
     await dstPage.locator("#source").fill("source");
     await dstPage.locator("#backup-repository").fill("repo with space");
@@ -886,16 +886,29 @@ test(
     await page.locator("#secret").fill(secret);
     await page.locator("#connect-button").click();
     await page.waitForFunction(
-      () => !document.getElementById("source").disabled,
+      () => !document.getElementById("source").matches(":disabled"),
     );
     await page.locator('nav a[href="#backup"]').click();
-    assert.equal(await page.locator("#compression").isChecked(), true);
-    assert.equal(await page.locator("#encryption").isChecked(), false);
-    assert.equal(await page.locator("#encryption").isEnabled(), true);
+    assert.equal(await page.locator("#compression-algorithm").inputValue(), "zstd");
+    assert.equal(await page.locator("#encryption-algorithm").inputValue(), "none");
+    assert.equal(await page.locator("#encryption-xchacha").isEnabled(), true);
     assert.deepEqual(
       await page.locator("#encryption-key option").allTextContents(),
       ["选择服务端密钥", "current", "previous"],
     );
+    assert.equal(await page.locator('input[type="checkbox"]').count(), 0);
+    assert.deepEqual(
+      await page.locator("#compression-algorithm option").allTextContents(),
+      ["无", "Zstd", "LZ77（自实现）"],
+    );
+    await page.locator("#encryption-algorithm").selectOption("xchacha20-poly1305");
+    await page.locator("#encryption-key").selectOption("current");
+    assert.equal(await page.locator("#encryption-key").getAttribute("required"), "");
+    await page.locator("#encryption-algorithm").selectOption("none");
+    assert.equal(await page.locator("#encryption-key").isVisible(), false);
+    assert.equal(await page.locator("#encryption-key").isDisabled(), true);
+    assert.equal(await page.locator("#encryption-key").getAttribute("required"), null);
+    assert.equal(await page.locator("#encryption-key").inputValue(), "current");
     let encryptedId;
     const modes = [
       [null, false, "不压缩 · 不加密"],
@@ -918,11 +931,16 @@ test(
       await page.locator('nav a[href="#backup"]').click();
       await page.locator("#source").fill("source");
       await page.locator("#backup-repository").fill("repo with space");
-      await page.locator("#compression").setChecked(Boolean(compression));
+      await page.locator("#compression-algorithm").selectOption(compression?.algorithm || "none");
+      assert.equal(
+        await page.locator("#compression-level-fields").isVisible(),
+        compression?.algorithm === "zstd",
+      );
+      assert.equal(
+        await page.locator("#lz77-fields").isVisible(),
+        compression?.algorithm === "lz77",
+      );
       if (compression) {
-        await page
-          .locator("#compression-algorithm")
-          .selectOption(compression.algorithm);
         if (compression.algorithm === "zstd")
           await page
             .locator("#compression-level")
@@ -936,7 +954,9 @@ test(
             .fill(String(compression.search_depth));
         }
       }
-      await page.locator("#encryption").setChecked(encryption);
+      await page.locator("#encryption-algorithm").selectOption(
+        encryption ? "xchacha20-poly1305" : "none",
+      );
       if (encryption)
         await page
           .locator("#encryption-key")
@@ -952,10 +972,13 @@ test(
       await page.locator('nav a[href="#repository"]').click();
       await page.locator('nav a[href="#backup"]').click();
       assert.equal(
-        await page.locator("#compression").isChecked(),
-        Boolean(compression),
+        await page.locator("#compression-algorithm").inputValue(),
+        compression?.algorithm || "none",
       );
-      assert.equal(await page.locator("#encryption").isChecked(), encryption);
+      assert.equal(
+        await page.locator("#encryption-algorithm").inputValue(),
+        encryption ? "xchacha20-poly1305" : "none",
+      );
       const responsePromise = page.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
@@ -1043,8 +1066,8 @@ test(
       true,
     );
     await page.locator("#disconnect-button").click();
-    assert.equal(await page.locator("#compression").isChecked(), true);
-    assert.equal(await page.locator("#encryption").isChecked(), false);
+    assert.equal(await page.locator("#compression-algorithm").inputValue(), "zstd");
+    assert.equal(await page.locator("#encryption-algorithm").inputValue(), "none");
     assert.equal(await page.locator("#encryption-key").inputValue(), "");
     // Simulate a service reconfigured without the key; the UI must prevent an invalid restore.
     await page.route("**/api/status", async (route) => {
@@ -1059,9 +1082,11 @@ test(
       .getByRole("button", { name: "连接", exact: true })
       .click();
     await page.waitForFunction(
-      () => !document.getElementById("source").disabled,
+      () => !document.getElementById("source").matches(":disabled"),
     );
-    assert.equal(await page.locator("#encryption").isDisabled(), true);
+    assert.equal(await page.locator("#encryption-xchacha").isDisabled(), true);
+    assert.equal(await page.locator("#encryption-algorithm").isEnabled(), true);
+    assert.equal(await page.locator("#encryption-algorithm").inputValue(), "none");
     await page.locator('nav a[href="#repository"]').click();
     await page.locator("#repository-path").fill("repo with space");
     await page.locator("#repository-button").click();
@@ -1096,7 +1121,7 @@ test(
     await page.locator("#secret").fill(secret);
     await page.locator("#connect-button").click();
     await page.waitForFunction(
-      () => !document.getElementById("source").disabled,
+      () => !document.getElementById("source").matches(":disabled"),
     );
     await page.locator('nav a[href="#backup"]').click();
     await page.locator("#source").fill("source");
@@ -1154,10 +1179,10 @@ test(
     }
     assert.equal(submissions, 0);
     await number.fill("12");
-    await page.locator("#compression").uncheck();
+    await page.locator("#compression-algorithm").selectOption("none");
     assert.equal(await number.isDisabled(), true);
     assert.equal(await slider.isDisabled(), true);
-    await page.locator("#compression").check();
+    await page.locator("#compression-algorithm").selectOption("zstd");
     assert.equal(await number.inputValue(), "12");
     assert.equal(await slider.inputValue(), "12");
     await page.locator('nav a[href="#repository"]').click();
@@ -1225,7 +1250,7 @@ test(
     await page.waitForFunction(
       () => !document.getElementById("backup-button").disabled,
     );
-    await page.locator("#compression").uncheck();
+    await page.locator("#compression-algorithm").selectOption("none");
     const requestPromise = page.waitForRequest(
       (req) => req.method() === "POST" && req.url().endsWith("/api/backups"),
     );

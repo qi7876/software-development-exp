@@ -183,13 +183,12 @@ function resetSession() {
   );
   clearFilter();
   state.encryptionKeys = [];
-  $("compression").checked = true;
   $("compression-algorithm").value = "zstd";
   $("lz77-window").value = "64";
   $("lz77-search-depth").value = "32";
   $("compression-level").value = "3";
   $("compression-level-slider").value = "3";
-  $("encryption").checked = false;
+  $("encryption-algorithm").value = "none";
   $("encryption-key").replaceChildren(new Option("选择服务端密钥", ""));
   updateEncodingOptions();
   document.querySelectorAll("[data-connected]").forEach((element) => {
@@ -593,7 +592,7 @@ function storageMode(backup) {
   return `${compressionDescription(backup.compression)} · ${backup.encryption ? "加密" : "不加密"}`;
 }
 function compressionOptions() {
-  if (!$("compression").checked) return null;
+  if ($("compression-algorithm").value === "none") return null;
   if ($("compression-algorithm").value === "zstd")
     return { algorithm: "zstd", level: Number($("compression-level").value) };
   return {
@@ -605,7 +604,6 @@ function compressionOptions() {
 
 function updateCompressionLevelWarning() {
   $("compression-level-warning").hidden =
-    !$("compression").checked ||
     $("compression-algorithm").value !== "zstd" ||
     Number($("compression-level-slider").value) < 20;
 }
@@ -620,27 +618,26 @@ $("compression-level").addEventListener("input", () => {
 });
 
 function updateEncodingOptions() {
-  const compressed = $("compression").checked;
-  const zstd = $("compression-algorithm").value === "zstd";
-  $("compression-algorithm-field").hidden = !compressed;
-  $("compression-algorithm").disabled = !compressed;
+  const algorithm = $("compression-algorithm").value;
+  const zstd = algorithm === "zstd";
+  const lz77 = algorithm === "lz77";
   $("compression-level-fields").hidden = !zstd;
-  $("compression-level-fields").disabled = !compressed || !zstd;
-  $("lz77-fields").hidden = zstd;
-  $("lz77-fields").disabled = !compressed || zstd;
+  $("compression-level-fields").disabled = !zstd;
+  $("lz77-fields").hidden = !lz77;
+  $("lz77-fields").disabled = !lz77;
   updateCompressionLevelWarning();
-  $("encryption").disabled = !state.encryptionKeys.length;
-  const encrypted = $("encryption").checked;
+  const hasKeys = state.encryptionKeys.length > 0;
+  $("encryption-xchacha").disabled = !hasKeys;
+  const encrypted = $("encryption-algorithm").value !== "none";
   $("encryption-key-field").hidden = !encrypted;
   $("encryption-key").required = encrypted;
   $("encryption-key").disabled = !encrypted;
-  $("encryption-help").hidden = state.encryptionKeys.length > 0;
+  $("encryption-help").hidden = hasKeys;
   $("encryption-scope").hidden = !encrypted;
-  $("encoding-order").hidden = !encrypted || !$("compression").checked;
+  $("encoding-order").hidden = !encrypted || algorithm === "none";
 }
-$("compression").addEventListener("change", updateEncodingOptions);
 $("compression-algorithm").addEventListener("change", updateEncodingOptions);
-$("encryption").addEventListener("change", updateEncodingOptions);
+$("encryption-algorithm").addEventListener("change", updateEncodingOptions);
 
 const regexFilterFields = ["relative_path", "uid", "gid", "mode"];
 const timeFilterFields = ["mtime", "atime"];
@@ -741,7 +738,7 @@ $("backup-form").addEventListener("submit", async (event) => {
         repository,
         filter,
         compression: compressionOptions(),
-        encryption_key_id: $("encryption").checked
+        encryption_key_id: $("encryption-algorithm").value !== "none"
           ? $("encryption-key").value
           : null,
       }),
