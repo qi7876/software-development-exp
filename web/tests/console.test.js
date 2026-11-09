@@ -246,6 +246,30 @@ test(
     assert.ok(action.x > heading.x + heading.width);
     assert.equal(await page.locator(".panel, #backup-filter summary").count(), 0);
     await page.locator("#filter-relative_path-include").waitFor();
+    for (const width of [768, 1024, 1440, 1920]) {
+      await page.setViewportSize({ width, height: 1000 });
+      for (const name of ["connections", "repository", "jobs", "backup"]) {
+        await view(name);
+        assert.equal(
+          await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+          true,
+          `${name} overflows at ${width}px`,
+        );
+        const content = await page.locator(`#${name}`).boundingBox();
+        assert.ok(content.width <= 1040);
+        assert.ok(content.x + content.width <= width);
+      }
+      const source = await page.locator("#source").boundingBox();
+      const repository = await page.locator("#backup-repository").boundingBox();
+      if (width === 768) {
+        assert.equal(source.x, repository.x);
+        assert.ok(repository.y > source.y);
+      } else {
+        assert.ok(repository.x > source.x);
+        assert.equal(repository.y, source.y);
+      }
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
 
     await page.locator("#source").fill("source");
     await page.locator("#backup-repository").fill("repo with space");

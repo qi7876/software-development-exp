@@ -15,7 +15,7 @@
 }
 body {
   margin: 0;
-  min-width: 1200px;
+  min-width: 0;
 }
 button,
 input,
@@ -229,10 +229,12 @@ h2 {
 }
 main {
   margin-left: 208px;
-  padding: 32px;
+  padding: clamp(16px, 3vw, 40px);
 }
 .view {
   width: 100%;
+  max-width: 1040px;
+  margin-inline: auto;
 }
 .view-heading {
   display: flex;
@@ -255,7 +257,7 @@ main {
 }
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 24px;
 }
 .field-help {
@@ -280,11 +282,12 @@ main {
 }
 .inline-form {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   align-items: flex-end;
 }
 .grow {
-  flex: 1;
+  flex: 1 1 240px;
   min-width: 0;
 }
 .message {
@@ -317,8 +320,13 @@ main {
 .backup-list {
   margin-top: 24px;
 }
+.backup-list,
+.connection-list {
+  overflow-x: auto;
+}
 .data-table {
   width: 100%;
+  min-width: 640px;
   border-collapse: collapse;
   table-layout: fixed;
   text-align: left;
@@ -367,6 +375,7 @@ main {
 }
 .job-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
 }
@@ -572,7 +581,7 @@ dialog::backdrop {
 }
 .filter-columns {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 16px;
   margin-top: 8px;
 }
