@@ -62,7 +62,13 @@
         </a>
       </nav>
       <section class="connection-panel" aria-label="服务连接">
-        <div class="connection-status" role="status">
+        <div
+          id="connection-status"
+          class="connection-status"
+          data-state="disconnected"
+          role="status"
+        >
+          <span class="connection-indicator" aria-hidden="true"></span>
           <span id="connection-state">未连接</span><span id="version"></span>
         </div>
         <p id="connection-name" class="connection-name"></p>

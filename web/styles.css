@@ -89,6 +89,7 @@ fieldset {
   overflow-y: auto;
 }
 .brand {
+  padding-left: 10px;
   color: inherit;
   font-size: 24px;
   font-weight: 700;
@@ -115,8 +116,9 @@ fieldset {
 }
 .connection-panel {
   margin-top: auto;
+  margin-inline: -16px;
   border-top: 1px solid var(--border);
-  padding-top: 16px;
+  padding: 16px 16px 0;
   font-size: 13px;
 }
 .connection-status {
@@ -124,6 +126,16 @@ fieldset {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+.connection-indicator {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #b42318;
+}
+.connection-status[data-state="connected"] .connection-indicator {
+  background: #2f6b45;
 }
 #version {
   margin-left: auto;
@@ -170,7 +182,8 @@ main {
   font-size: 13px;
 }
 .form-grid,
-.encoding-options {
+.encoding-options,
+.filter-columns {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 24px;
@@ -394,9 +407,6 @@ dialog {
   margin-block: 20px;
 }
 .filter-columns {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-  gap: 16px;
   margin-top: 8px;
 }
 .filter-row legend {
@@ -419,7 +429,6 @@ dialog {
 .compression-level-fields,
 .compression-parameters {
   margin-top: 16px;
-  max-width: 420px;
 }
 #compression-algorithm-field {
   margin-top: 0;
@@ -431,6 +440,7 @@ dialog {
 }
 .compression-level-controls input[type="range"] {
   flex: 1;
+  margin: 0;
 }
 .compression-level-controls input[type="number"] {
   width: 76px;

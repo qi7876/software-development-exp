@@ -170,6 +170,7 @@ function resetSession() {
   state.displayedPage = 0;
   state.next = null;
   $("connection-state").textContent = "未连接";
+  $("connection-status").dataset.state = "disconnected";
   $("version").textContent = "";
   $("connection-name").textContent = "";
   $("connection-host").textContent = "";
@@ -365,6 +366,7 @@ async function connectProfile(connection, save = false) {
     state.selectedUrl = connection.url;
     saveConnections();
     $("connection-state").textContent = "已连接";
+    $("connection-status").dataset.state = "connected";
     $("connection-name").textContent = connection.name;
     $("connection-host").textContent = connection.url;
     $("version").textContent = `v${status.version}`;
@@ -779,6 +781,7 @@ async function refreshJobs() {
     renderJobs();
     message("jobs-message");
     $("connection-state").textContent = "已连接";
+    $("connection-status").dataset.state = "connected";
     $("jobs-updated").textContent = `最近更新 ${date(Date.now())}`;
     if (
       state.repository &&
@@ -799,6 +802,7 @@ async function refreshJobs() {
     state.page = state.displayedPage;
     report("jobs-message", error);
     $("connection-state").textContent = "连接异常";
+    $("connection-status").dataset.state = "error";
     $("jobs-updated").textContent = "更新失败，当前显示上次读取的结果，请点击“刷新”重试。";
   } finally {
     if (request === state.jobsRequest && state.connected) {
