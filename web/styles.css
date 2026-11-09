@@ -3,7 +3,7 @@
     -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Microsoft YaHei", sans-serif;
   color: #202723;
-  background: #f5f6f5;
+  background: #fff;
   font-size: 14px;
   line-height: 1.6;
   --accent: #245b43;
@@ -115,7 +115,7 @@ h2 {
   flex-direction: column;
   gap: 32px;
   border-right: 1px solid var(--border);
-  background: #fff;
+  background: #f5f6f5;
   overflow-y: auto;
 }
 .brand {
@@ -145,7 +145,7 @@ h2 {
 }
 .sidebar nav a {
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 0;
   color: #3f4c44;
   text-decoration: none;
   font-weight: 500;
@@ -154,7 +154,6 @@ h2 {
   background: #f0f3f0;
 }
 .sidebar nav a[aria-current="page"] {
-  border-color: var(--accent);
   color: var(--accent);
   background: #eaf0eb;
   font-weight: 600;
@@ -236,8 +235,7 @@ main {
   padding: 32px;
 }
 .view {
-  max-width: 1080px;
-  margin: 0 auto;
+  width: 100%;
 }
 .view-heading {
   display: flex;
@@ -253,11 +251,6 @@ main {
   color: var(--muted);
   font-size: 12px;
 }
-.panel {
-  border: 1px solid var(--border);
-  background: #fff;
-  padding: 24px;
-}
 .section-description {
   color: var(--muted);
   margin-bottom: 24px;
@@ -265,6 +258,7 @@ main {
 }
 .form-grid {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 24px;
 }
 .field-help {
@@ -516,9 +510,6 @@ dialog::backdrop {
   background: #f0f3f0;
 }
 .restore-summary {
-  border: 1px solid var(--border);
-  background: #f6f7f6;
-  padding: 14px;
   margin: 0 0 24px;
   display: grid;
   grid-template-columns: 65px minmax(0, 1fr);
@@ -566,11 +557,6 @@ dialog::backdrop {
   border-top: 1px solid var(--border);
   margin-top: 24px;
   padding-top: 16px;
-}
-.backup-filter > summary {
-  cursor: pointer;
-  font-weight: 600;
-  color: var(--accent);
 }
 .filter-content {
   margin-top: 16px;

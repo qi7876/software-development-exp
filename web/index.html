@@ -43,8 +43,19 @@
 
     <main id="main" tabindex="-1">
       <section id="backup" class="view" aria-labelledby="backup-title">
-        <h1 id="backup-title" tabindex="-1">创建备份</h1>
-        <form id="backup-form" class="panel">
+        <div class="view-heading">
+          <h1 id="backup-title" tabindex="-1">创建备份</h1>
+          <button
+            id="backup-button"
+            type="submit"
+            form="backup-form"
+            data-connected
+            disabled
+          >
+            创建备份
+          </button>
+        </div>
+        <form id="backup-form">
           <p class="section-description">
             路径均属于运行 bak 的设备，相对路径基于服务工作目录。
           </p>
@@ -187,8 +198,12 @@
                 先压缩，再加密。
               </p>
             </div>
-            <details id="backup-filter" class="backup-filter">
-              <summary id="filter-summary">过滤条件</summary>
+            <section
+              id="backup-filter"
+              class="backup-filter"
+              aria-labelledby="filter-summary"
+            >
+              <h2 id="filter-summary">过滤条件</h2>
               <div class="filter-content">
                 <p class="filter-scope">
                   作用于源目录内的文件、目录及符号链接。目录不匹配时跳过整个子树，包含规则也须允许祖先目录。
@@ -375,10 +390,7 @@
                   清空条件
                 </button>
               </div>
-            </details>
-            <div class="form-actions">
-              <button id="backup-button" type="submit">创建备份</button>
-            </div>
+            </section>
           </fieldset>
           <p id="backup-message" class="message" role="status"></p>
           <a id="backup-job-link" class="action-link" href="#jobs" hidden
@@ -397,7 +409,7 @@
           <h1 id="repository-title" tabindex="-1">备份仓库</h1>
           <span id="repository-label" class="view-meta">尚未载入仓库</span>
         </div>
-        <div class="panel">
+        <div>
           <form id="repository-form">
             <fieldset class="inline-form" data-connected disabled>
               <div class="grow">
@@ -432,8 +444,10 @@
             刷新
           </button>
         </div>
-        <div class="panel">
-          <p id="jobs-updated" class="view-meta">连接后自动更新任务状态。</p>
+        <div>
+          <p id="jobs-updated" class="view-meta">
+            连接后载入任务记录，点击“刷新”更新状态。
+          </p>
           <p id="jobs-message" class="message" role="status"></p>
           <div id="job-list">
             <div class="empty-state"><p>尚未连接服务。</p></div>
@@ -455,12 +469,12 @@
         hidden
       >
         <h1 id="connections-title" tabindex="-1">连接管理</h1>
-        <div class="panel">
+        <div>
           <h2>已保存的连接</h2>
           <p id="storage-message" class="message" role="status"></p>
           <div id="connection-list" class="connection-list"></div>
         </div>
-        <form id="connect-form" class="panel connection-form">
+        <form id="connect-form" class="connection-form">
           <h2 id="connection-form-title">添加连接</h2>
           <div class="form-grid">
             <div>

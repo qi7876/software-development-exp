@@ -10,7 +10,6 @@ const state = {
   connectionAttempt: null,
   session: new AbortController(),
   connected: false,
-  timer: null,
   cursors: [null],
   page: 0,
   displayedPage: 0,
@@ -160,7 +159,6 @@ function report(id, error) {
 function resetSession() {
   state.session.abort();
   state.session = new AbortController();
-  clearTimeout(state.timer);
   state.connection = null;
   state.connected = false;
   state.jobsRequest++;
@@ -196,14 +194,13 @@ function resetSession() {
   $("encryption").checked = false;
   $("encryption-key").replaceChildren(new Option("选择服务端密钥", ""));
   updateEncodingOptions();
-  $("backup-filter").open = false;
   document.querySelectorAll("[data-connected]").forEach((element) => {
     element.disabled = true;
   });
   $("refresh-jobs").disabled = true;
   $("previous-jobs").disabled = true;
   $("next-jobs").disabled = true;
-  ["backup-button", "repository-button", "restore-button"].forEach((id) => {
+  ["repository-button", "restore-button"].forEach((id) => {
     $(id).disabled = false;
   });
   $("jobs-page").textContent = "第 1 页";
@@ -213,7 +210,7 @@ function resetSession() {
     message(`${name}-message`),
   );
   $("repository-label").textContent = "尚未载入仓库";
-  $("jobs-updated").textContent = "连接后自动更新任务状态。";
+  $("jobs-updated").textContent = "连接后载入任务记录，点击“刷新”更新状态。";
   $("job-list").replaceChildren(empty("尚未连接服务。"));
   delete $("job-list").dataset.snapshot;
   $("backup-list").replaceChildren(empty("尚未载入仓库。"));
@@ -703,7 +700,6 @@ function backupFilter() {
         !Number.isFinite(time.getTime()) ||
         parts.some((part, i) => part !== actual[i])
       ) {
-        $("backup-filter").open = true;
         input.focus();
         throw new Error("请输入有效的本地日期时间。");
       }
@@ -714,7 +710,6 @@ function backupFilter() {
       range.before &&
       new Date(range.from) >= new Date(range.before)
     ) {
-      $("backup-filter").open = true;
       $(`filter-${field}-before`).focus();
       throw new Error(
         `${field === "mtime" ? "修改" : "访问"}时间的起始须早于截止。`,
@@ -728,13 +723,6 @@ function backupFilter() {
 $("filter-time-help").textContent =
   `时间按浏览器时区 ${Intl.DateTimeFormat().resolvedOptions().timeZone} 输入，精确到秒；留空的一端不限。`;
 $("backup-filter").addEventListener("input", updateFilterSummary);
-$("backup-filter").addEventListener(
-  "invalid",
-  () => {
-    $("backup-filter").open = true;
-  },
-  true,
-);
 $("clear-filter").addEventListener("click", clearFilter);
 
 $("backup-form").addEventListener("submit", async (event) => {
@@ -767,7 +755,7 @@ $("backup-form").addEventListener("submit", async (event) => {
   } catch (error) {
     report("backup-message", error);
   } finally {
-    $("backup-button").disabled = false;
+    $("backup-button").disabled = !state.connected;
   }
 });
 
@@ -800,7 +788,6 @@ $("restore-form").addEventListener("submit", async (event) => {
 
 async function refreshJobs() {
   if (!state.connected) return;
-  clearTimeout(state.timer);
   const request = ++state.jobsRequest;
   $("refresh-jobs").disabled = true;
   $("previous-jobs").disabled = true;
@@ -819,7 +806,7 @@ async function refreshJobs() {
     $("connection-state").textContent = "已连接";
     $("connection-dot").classList.remove("error");
     $("jobs-updated").textContent =
-      `每 3 秒自动更新 · 最近更新 ${date(Date.now())}`;
+      `手动刷新 · 最近更新 ${date(Date.now())}`;
     if (
       state.repository &&
       result.jobs.some(
@@ -840,13 +827,12 @@ async function refreshJobs() {
     report("jobs-message", error);
     $("connection-state").textContent = "连接异常";
     $("connection-dot").classList.add("error");
-    $("jobs-updated").textContent = "暂未更新，当前显示上次读取的结果。";
+    $("jobs-updated").textContent = "更新失败，当前显示上次读取的结果，请点击“刷新”重试。";
   } finally {
     if (request === state.jobsRequest && state.connected) {
       $("refresh-jobs").disabled = false;
       $("previous-jobs").disabled = state.page === 0;
       $("next-jobs").disabled = !state.next;
-      state.timer = setTimeout(refreshJobs, 3000);
     }
   }
 }
@@ -857,7 +843,7 @@ function renderJobs() {
   const snapshot = JSON.stringify(state.jobs);
   if (list.dataset.snapshot === snapshot) return;
   list.dataset.snapshot = snapshot;
-  // Preserve expanded details and keyboard focus during background refreshes.
+  // Preserve expanded details and keyboard focus when refreshing.
   const expanded = new Set(
     [...list.querySelectorAll("details[open]")].map(
       (element) => element.dataset.job,
