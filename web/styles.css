@@ -65,6 +65,8 @@ textarea {
   display: block;
   width: 100%;
   min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 1rem;
 }
 label {
   display: block;
@@ -142,19 +144,12 @@ fieldset {
   color: var(--muted);
   font-size: 12px;
 }
-.connection-name {
-  margin-top: 8px;
-  font-weight: 500;
-}
 .connection-host {
   margin: 4px 0 12px;
+  overflow-wrap: anywhere;
   font-family: monospace;
   font-size: 12px;
   color: var(--muted);
-}
-.connection-name,
-.connection-host {
-  overflow-wrap: anywhere;
 }
 main {
   margin-left: 208px;
@@ -276,9 +271,9 @@ main {
   text-align: right;
 }
 .data-table.connections-table th:first-child {
-  width: 20%;
+  width: auto;
 }
-.connections-table th:nth-child(3) {
+.connections-table th:nth-child(2) {
   width: 90px;
 }
 .data-table.connections-table th:last-child {

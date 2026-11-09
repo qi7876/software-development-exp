@@ -40,6 +40,12 @@ async function refreshUntil(page, predicate, argument) {
   assert.fail("Jobs did not reach the expected state after manual refreshes");
 }
 
+async function clearFilterInputs(page) {
+  for (const input of await page.locator("#backup-filter input, #backup-filter textarea").all()) {
+    await input.fill("");
+  }
+}
+
 async function deleteCurrentConnection(page) {
   await page.locator("#open-connection").click();
   await page
@@ -473,17 +479,16 @@ test(
           !document.getElementById("refresh-jobs").disabled,
       );
     }
-    async function save(name, url, key) {
-      await page.locator("#profile-name").fill(name);
+    async function save(url, key) {
       await page.locator("#api-url").fill(url);
       await page.locator("#secret").fill(key);
       await page.locator("#connect-button").click();
     }
-    async function switchTo(name, url) {
+    async function switchTo(url) {
       await manager();
       await page
         .locator(".connection-row")
-        .filter({ hasText: name })
+        .filter({ hasText: url })
         .getByRole("button", { name: "连接", exact: true })
         .click();
       await connected(url);
@@ -495,7 +500,7 @@ test(
     }
 
     await manager();
-    await save("本机", local.url.replace("http://", ""), secret);
+    await save(local.url.replace("http://", ""), secret);
     await connected(local.url);
     await page.locator('nav a[href="#backup"]').click();
     await page.locator("#source").fill("/local-only/source");
@@ -509,7 +514,7 @@ test(
     await page.locator("#encryption-key").selectOption("current");
     await page.locator("#filter-relative_path-exclude").fill("local-only");
     await manager();
-    await save("远程", remote.url, "wrong-key");
+    await save(remote.url, "wrong-key");
     await page.locator("#connection-message.error").waitFor();
     assert.equal(
       await page.locator("#connection-host").textContent(),
@@ -534,7 +539,7 @@ test(
     assert.equal(await page.locator("#lz77-window").inputValue(), "128");
     assert.equal((await stored()).connections.length, 1);
 
-    await save("远程", remote.url, "remote-api-key");
+    await save(remote.url, "remote-api-key");
     await connected(remote.url);
     assert.equal(await page.locator("#source").inputValue(), "");
     assert.equal(await page.locator("#backup-repository").inputValue(), "");
@@ -583,29 +588,29 @@ test(
     });
     assert.equal((await remoteHistory.json()).jobs.length, 1);
 
-    await switchTo("本机", local.url);
+    await switchTo(local.url);
     assert.equal(await page.locator(".job").count(), 0);
     assert.equal(
       await page.locator("#repository-label").textContent(),
       "尚未载入仓库",
     );
-    await switchTo("远程", remote.url);
+    await switchTo(remote.url);
     await page.waitForFunction(
       () => document.querySelectorAll(".job").length === 1,
     );
     await page
       .locator(".connection-row")
-      .filter({ hasText: "远程" })
+      .filter({ hasText: remote.url })
       .getByRole("button", { name: "编辑", exact: true })
       .click();
     assert.equal(await page.locator("#secret").inputValue(), "remote-api-key");
-    await save("远程备份", remote.url, "wrong-key");
+    await save(remote.url, "wrong-key");
     await page.locator("#connection-message.error").waitFor();
     assert.equal(
       (await stored()).connections.find((item) => item.url === remote.url).key,
       "remote-api-key",
     );
-    await save("远程备份", remote.url, "remote-api-key");
+    await save(remote.url, "remote-api-key");
     await connected(remote.url);
     assert.equal((await stored()).connections.length, 2);
     if (process.env.BAK_UI_SCREENSHOT) {
@@ -626,7 +631,7 @@ test(
 
     await page
       .locator(".connection-row")
-      .filter({ hasText: "本机" })
+      .filter({ hasText: local.url })
       .getByRole("button", { name: "删除", exact: true })
       .click();
     assert.equal(
@@ -635,7 +640,7 @@ test(
     );
     await page
       .locator(".connection-row")
-      .filter({ hasText: "远程备份" })
+      .filter({ hasText: remote.url })
       .getByRole("button", { name: "删除", exact: true })
       .click();
     assert.deepEqual(await stored(), { connections: [], selectedUrl: null });
@@ -661,7 +666,7 @@ test(
         throw new DOMException("Storage blocked", "SecurityError");
       };
     });
-    await save("仅本次连接", local.url, secret);
+    await save(local.url, secret);
     await connected(local.url);
     await page.locator("#storage-message.error").waitFor();
     assert.equal(
@@ -791,7 +796,7 @@ test(
     });
 
     await page.locator('nav a[href="#backup"]').click();
-    await page.locator("#clear-filter").click();
+    await clearFilterInputs(page);
     assert.equal(
       await page.locator("#filter-summary").textContent(),
       "过滤条件",
@@ -845,7 +850,7 @@ test(
       true,
     );
     await dstPage.close();
-    await page.locator("#clear-filter").click();
+    await clearFilterInputs(page);
     await page.locator("#filter-relative_path-include").fill("[");
     await page.locator("#backup-button").click();
     await page.locator("#backup-job-link").click();
@@ -898,7 +903,7 @@ test(
     assert.equal(await page.locator('input[type="checkbox"]').count(), 0);
     assert.deepEqual(
       await page.locator("#compression-algorithm option").allTextContents(),
-      ["无", "Zstd", "LZ77（自实现）"],
+      ["None", "Zstd", "LZ77（自实现）"],
     );
     await page.locator("#encryption-algorithm").selectOption("xchacha20-poly1305");
     await page.locator("#encryption-key").selectOption("current");

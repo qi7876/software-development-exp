@@ -172,7 +172,6 @@ function resetSession() {
   $("connection-state").textContent = "未连接";
   $("connection-status").dataset.state = "disconnected";
   $("version").textContent = "";
-  $("connection-name").textContent = "";
   $("connection-host").textContent = "";
   ["source", "backup-repository", "repository-path", "destination"].forEach(
     (id) => {
@@ -257,7 +256,6 @@ function cancelConnectionAttempt() {
 
 function resetEditor() {
   state.editingUrl = null;
-  $("profile-name").value = "";
   $("api-url").value = location.origin;
   $("secret").value = "";
   $("connection-form-title").textContent = "添加连接";
@@ -267,7 +265,6 @@ function resetEditor() {
 function editConnection(connection) {
   cancelConnectionAttempt();
   state.editingUrl = connection.url;
-  $("profile-name").value = connection.name;
   $("api-url").value = connection.url;
   $("secret").value = connection.key;
   $("connection-form-title").textContent = "编辑连接";
@@ -286,7 +283,7 @@ function renderConnections() {
   table.append(node("caption", "sr-only", "已保存的 API 连接"));
   const head = node("thead");
   const header = node("tr");
-  for (const label of ["名称", "API 地址", "状态", "操作"]) {
+  for (const label of ["API 地址", "状态", "操作"]) {
     const cell = node("th", "", label);
     cell.scope = "col";
     header.append(cell);
@@ -297,7 +294,6 @@ function renderConnections() {
     const row = node("tr", "connection-row");
     const active = state.connection?.url === connection.url;
     row.append(
-      node("td", "", connection.name),
       node("td", "mono", connection.url),
       node("td", "", active ? "当前连接" : "未连接"),
     );
@@ -312,7 +308,7 @@ function renderConnections() {
     edit.type = "button";
     edit.addEventListener("click", () => {
       editConnection(connection);
-      $("profile-name").focus();
+      $("api-url").focus();
     });
     const remove = node("button", "", "删除");
     remove.type = "button";
@@ -367,7 +363,6 @@ async function connectProfile(connection, save = false) {
     saveConnections();
     $("connection-state").textContent = "已连接";
     $("connection-status").dataset.state = "connected";
-    $("connection-name").textContent = connection.name;
     $("connection-host").textContent = connection.url;
     $("version").textContent = `v${status.version}`;
     document.querySelectorAll("[data-connected]").forEach((element) => {
@@ -379,7 +374,7 @@ async function connectProfile(connection, save = false) {
     updateEncodingOptions();
     $("refresh-jobs").disabled = false;
     renderConnections();
-    message("connection-message", `已连接 ${connection.name}。`);
+    message("connection-message", `已连接 ${connection.url}。`);
     await refreshJobs();
   } catch (error) {
     if (attempt === state.connectionAttempt)
@@ -397,7 +392,6 @@ $("connect-form").addEventListener("submit", (event) => {
   try {
     const url = normalizeUrl($("api-url").value);
     const connection = {
-      name: $("profile-name").value.trim() || new URL(url).host,
       url,
       key: $("secret").value,
     };
@@ -429,7 +423,6 @@ function restoreConnections() {
       const urls = new Set();
       for (const item of saved.connections) {
         if (
-          typeof item.name !== "string" ||
           typeof item.url !== "string" ||
           typeof item.key !== "string" ||
           !item.key ||
@@ -440,7 +433,7 @@ function restoreConnections() {
         }
         urls.add(item.url);
       }
-      state.connections = saved.connections;
+      state.connections = saved.connections.map(({ url, key }) => ({ url, key }));
       state.selectedUrl = saved.selectedUrl;
     }
   } catch {
@@ -700,7 +693,6 @@ function backupFilter() {
 $("filter-time-help").textContent =
   `时间按浏览器时区 ${Intl.DateTimeFormat().resolvedOptions().timeZone} 输入，精确到秒；留空的一端不限。`;
 $("backup-filter").addEventListener("input", updateFilterSummary);
-$("clear-filter").addEventListener("click", clearFilter);
 
 $("backup-form").addEventListener("submit", async (event) => {
   event.preventDefault();
