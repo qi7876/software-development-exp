@@ -130,11 +130,13 @@
                     class="compression-parameters"
                   >
                     <label for="compression-algorithm">算法</label>
-                    <select id="compression-algorithm">
-                      <option value="none">None</option>
-                      <option value="zstd" selected>Zstd</option>
-                      <option value="lz77">LZ77（自实现）</option>
-                    </select>
+                    <div class="select-control">
+                      <select id="compression-algorithm">
+                        <option value="none">None</option>
+                        <option value="zstd" selected>Zstd</option>
+                        <option value="lz77">LZ77（自实现）</option>
+                      </select>
+                    </div>
                   </div>
                   <fieldset
                     id="compression-level-fields"
@@ -212,24 +214,28 @@
                 >
                   <h2 id="encryption-title">加密</h2>
                   <label for="encryption-algorithm">算法</label>
-                  <select
-                    id="encryption-algorithm"
-                    aria-describedby="encryption-help"
-                  >
-                    <option value="none">None</option>
-                    <option
-                      id="encryption-xchacha"
-                      value="xchacha20-poly1305"
-                      disabled
+                  <div class="select-control">
+                    <select
+                      id="encryption-algorithm"
+                      aria-describedby="encryption-help"
                     >
-                      XChaCha20-Poly1305
-                    </option>
-                  </select>
+                      <option value="none">None</option>
+                      <option
+                        id="encryption-xchacha"
+                        value="xchacha20-poly1305"
+                        disabled
+                      >
+                        XChaCha20-Poly1305
+                      </option>
+                    </select>
+                  </div>
                   <div id="encryption-key-field" hidden>
                     <label for="encryption-key">加密密钥</label>
-                    <select id="encryption-key" disabled>
-                      <option value="">选择服务端密钥</option>
-                    </select>
+                    <div class="select-control">
+                      <select id="encryption-key" disabled>
+                        <option value="">选择服务端密钥</option>
+                      </select>
+                    </div>
                   </div>
                   <p id="encryption-help" class="field-help">
                     加密需在服务端配置密钥。

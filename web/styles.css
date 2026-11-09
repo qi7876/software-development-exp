@@ -68,6 +68,34 @@ textarea {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 1rem;
 }
+input:not([type="range"]),
+select {
+  height: 32px;
+  padding-inline: 6px;
+}
+.select-control {
+  position: relative;
+  min-width: 0;
+}
+.select-control select {
+  appearance: none;
+  padding-right: 32px;
+}
+.select-control::after {
+  content: "";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: translateY(-75%) rotate(45deg);
+  pointer-events: none;
+}
+.select-control:has(select:disabled) {
+  color: GrayText;
+}
 label {
   display: block;
   margin-bottom: 6px;
