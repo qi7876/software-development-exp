@@ -105,9 +105,6 @@
           </button>
         </div>
         <form id="backup-form">
-          <p class="section-description">
-            路径均属于运行 bak 的设备，相对路径基于服务工作目录。
-          </p>
           <fieldset data-connected disabled>
             <div class="form-grid">
               <div>
@@ -115,26 +112,16 @@
                 ><input
                   id="source"
                   name="source"
-                  placeholder="/Users/me/Documents"
-                  aria-describedby="source-help"
                   required
                 />
-                <p id="source-help" class="field-help">
-                  目录需已存在。备份期间请保持文件不变。
-                </p>
               </div>
               <div>
                 <label for="backup-repository">备份仓库</label
                 ><input
                   id="backup-repository"
                   name="repository"
-                  placeholder="/Volumes/Backup/repository"
-                  aria-describedby="backup-repository-help"
                   required
                 />
-                <p id="backup-repository-help" class="field-help">
-                  目录需已存在，且不能与源目录相互包含。
-                </p>
               </div>
             </div>
             <div class="backup-options">
@@ -269,11 +256,8 @@
             >
               <h2 id="filter-summary">过滤条件</h2>
               <div class="filter-content">
-                <p class="filter-scope">
-                  作用于源目录内的文件、目录及符号链接。目录不匹配时跳过整个子树，包含规则也须允许祖先目录。
-                </p>
                 <p id="filter-rules-help" class="field-help">
-                  每行一条正则，留空不限；各字段须同时满足。同字段包含任一匹配即可，排除优先。
+                  每行一条正则，留空不限。
                 </p>
                 <fieldset class="filter-row">
                   <legend>相对路径</legend>
@@ -288,7 +272,6 @@
                         id="filter-relative_path-include"
                         rows="2"
                         spellcheck="false"
-                        placeholder="^docs(/|$)"
                         aria-describedby="filter-rules-help filter-relative_path-help"
                       ></textarea>
                     </div>
@@ -299,7 +282,6 @@
                         id="filter-relative_path-exclude"
                         rows="2"
                         spellcheck="false"
-                        placeholder=""
                         aria-describedby="filter-rules-help filter-relative_path-help"
                       ></textarea>
                     </div>
@@ -316,7 +298,6 @@
                         id="filter-uid-include"
                         rows="2"
                         spellcheck="false"
-                        placeholder="^1000$"
                         aria-describedby="filter-rules-help filter-uid-help"
                       ></textarea>
                     </div>
@@ -327,7 +308,6 @@
                         id="filter-uid-exclude"
                         rows="2"
                         spellcheck="false"
-                        placeholder=""
                         aria-describedby="filter-rules-help filter-uid-help"
                       ></textarea>
                     </div>
@@ -344,7 +324,6 @@
                         id="filter-gid-include"
                         rows="2"
                         spellcheck="false"
-                        placeholder="^1000$"
                         aria-describedby="filter-rules-help filter-gid-help"
                       ></textarea>
                     </div>
@@ -355,7 +334,6 @@
                         id="filter-gid-exclude"
                         rows="2"
                         spellcheck="false"
-                        placeholder=""
                         aria-describedby="filter-rules-help filter-gid-help"
                       ></textarea>
                     </div>
@@ -374,7 +352,6 @@
                         id="filter-mode-include"
                         rows="2"
                         spellcheck="false"
-                        placeholder="^0644$"
                         aria-describedby="filter-rules-help filter-mode-help"
                       ></textarea>
                     </div>
@@ -385,7 +362,6 @@
                         id="filter-mode-exclude"
                         rows="2"
                         spellcheck="false"
-                        placeholder=""
                         aria-describedby="filter-rules-help filter-mode-help"
                       ></textarea>
                     </div>
@@ -481,8 +457,6 @@
                 ><input
                   id="repository-path"
                   name="repository"
-                  placeholder="输入已有仓库的路径"
-                  aria-describedby="repository-help"
                   required
                 />
               </div>
@@ -490,9 +464,6 @@
                 载入备份
               </button>
             </fieldset>
-            <p id="repository-help" class="field-help">
-              输入服务端目录路径，选择备份后可恢复到独立的空目录。
-            </p>
           </form>
           <p id="repository-message" class="message" role="status"></p>
           <div id="backup-list" class="backup-list">
@@ -555,7 +526,6 @@
               ><input
                 id="profile-name"
                 name="name"
-                placeholder="例如：本机、家中服务器"
               />
             </div>
             <div>
@@ -563,13 +533,8 @@
               ><input
                 id="api-url"
                 name="url"
-                placeholder="127.0.0.1:8080 或 https://backup.example.com"
-                aria-describedby="api-url-help"
                 required
               />
-              <p id="api-url-help" class="field-help">
-                支持 HTTP / HTTPS；省略协议时使用 HTTP。
-              </p>
             </div>
             <div>
               <label for="secret">访问密钥</label
@@ -578,12 +543,8 @@
                 name="secret"
                 type="password"
                 autocomplete="off"
-                aria-describedby="secret-help"
                 required
               />
-              <p id="secret-help" class="field-help">
-                地址和密钥保存在当前浏览器中，可通过删除连接清除。
-              </p>
             </div>
           </div>
           <p id="connection-message" class="message" role="status"></p>
@@ -629,7 +590,6 @@
         ><input
           id="destination"
           name="destination"
-          placeholder="/Users/me/Restored"
           aria-describedby="destination-help"
           required
         />

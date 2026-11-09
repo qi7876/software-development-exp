@@ -232,7 +232,7 @@ test(
       () => !document.getElementById("refresh-jobs").disabled,
     );
     assert.equal(jobRequests, 1);
-    assert.match(await page.locator("#jobs-updated").textContent(), /手动刷新/);
+    assert.match(await page.locator("#jobs-updated").textContent(), /最近更新/);
     await page.clock.resume();
     await view("backup");
     const sidebar = await page.locator(".sidebar").boundingBox();

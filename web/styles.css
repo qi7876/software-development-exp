@@ -165,11 +165,6 @@ main {
 .dialog-heading h2 {
   margin: 0;
 }
-.section-description {
-  margin-bottom: 24px;
-  color: var(--muted);
-  font-size: 13px;
-}
 .view-meta {
   color: var(--muted);
   font-size: 13px;

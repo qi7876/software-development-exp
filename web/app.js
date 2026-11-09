@@ -788,8 +788,7 @@ async function refreshJobs() {
     renderJobs();
     message("jobs-message");
     $("connection-state").textContent = "已连接";
-    $("jobs-updated").textContent =
-      `手动刷新 · 最近更新 ${date(Date.now())}`;
+    $("jobs-updated").textContent = `最近更新 ${date(Date.now())}`;
     if (
       state.repository &&
       result.jobs.some(
