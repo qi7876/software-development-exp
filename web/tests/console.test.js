@@ -169,12 +169,10 @@ test(
     );
     assert.equal(await page.locator("#source").isDisabled(), true);
     assert.equal(await page.locator("#backup-button").isDisabled(), true);
-    assert.deepEqual(await page.locator(".sidebar nav a").allTextContents(), [
-      "创建备份",
-      "备份仓库",
-      "任务记录",
-      "管理连接",
-    ]);
+    assert.deepEqual(
+      (await page.locator(".sidebar nav a").allTextContents()).map((text) => text.trim()),
+      ["创建备份", "备份仓库", "任务记录", "管理连接"],
+    );
     assert.equal(
       await page.locator(".connection-panel #disconnect-button").count(),
       1,
