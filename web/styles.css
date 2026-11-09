@@ -23,6 +23,7 @@ input,
 select,
 textarea {
   font: inherit;
+  border-radius: 0;
 }
 button {
   white-space: nowrap;
