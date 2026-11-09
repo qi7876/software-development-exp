@@ -147,6 +147,7 @@ fieldset {
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
+  border-radius: 4px;
   color: #525252;
   text-decoration: none;
 }
