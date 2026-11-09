@@ -690,8 +690,6 @@ function backupFilter() {
   return filter;
 }
 
-$("filter-time-help").textContent =
-  `时间按浏览器时区 ${Intl.DateTimeFormat().resolvedOptions().timeZone} 输入，精确到秒；留空的一端不限。`;
 $("backup-filter").addEventListener("input", updateFilterSummary);
 
 $("backup-form").addEventListener("submit", async (event) => {

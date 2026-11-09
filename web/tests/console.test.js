@@ -710,13 +710,6 @@ test(
     await page.locator("#filter-relative_path-include").waitFor();
     await page.locator("#source").fill("source");
     await page.locator("#backup-repository").fill("repo with space");
-    assert.equal(
-      await page
-        .locator("#filter-time-help")
-        .textContent()
-        .then((text) => text.includes("Asia/Shanghai")),
-      true,
-    );
     await page
       .locator("#filter-relative_path-include")
       .fill("^docs(/|$)\n\n  ");
@@ -903,7 +896,7 @@ test(
     assert.equal(await page.locator('input[type="checkbox"]').count(), 0);
     assert.deepEqual(
       await page.locator("#compression-algorithm option").allTextContents(),
-      ["None", "Zstd", "LZ77（自实现）"],
+      ["None", "Zstd", "LZ77"],
     );
     await page.locator("#encryption-algorithm").selectOption("xchacha20-poly1305");
     await page.locator("#encryption-key").selectOption("current");
