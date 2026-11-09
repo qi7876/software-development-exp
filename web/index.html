@@ -12,10 +12,7 @@
   <body>
     <a class="skip-link" href="#main">跳转到主要内容</a>
     <aside class="sidebar">
-      <a class="brand" href="#backup" aria-label="bak. 首页"
-        ><span class="brand-mark" aria-hidden="true">b.</span
-        ><span>bak.</span></a
-      >
+      <a href="#backup" aria-label="bak. 首页">bak.</a>
       <nav aria-label="主导航">
         <a href="#backup" aria-current="page">创建备份</a>
         <a href="#repository">备份仓库</a>
@@ -24,16 +21,11 @@
       </nav>
       <section class="connection-panel" aria-label="服务连接">
         <div class="connection-status" role="status">
-          <span
-            id="connection-dot"
-            class="status-indicator muted"
-            aria-hidden="true"
-          ></span
-          ><span id="connection-state">未连接</span><span id="version"></span>
+          <span id="connection-state">未连接</span><span id="version"></span>
         </div>
         <p id="connection-name" class="connection-name"></p>
         <p id="connection-host" class="connection-host"></p>
-        <button id="disconnect-button" class="secondary" type="button" hidden>
+        <button id="disconnect-button" type="button" hidden>
           断开连接
         </button>
       </section>
@@ -399,7 +391,7 @@
                     </div>
                   </div>
                 </fieldset>
-                <button id="clear-filter" class="secondary" type="button">
+                <button id="clear-filter" type="button">
                   清空条件
                 </button>
               </div>
@@ -435,7 +427,7 @@
                   required
                 />
               </div>
-              <button id="repository-button" class="secondary" type="submit">
+              <button id="repository-button" type="submit">
                 载入备份
               </button>
             </fieldset>
@@ -453,7 +445,7 @@
       <section id="jobs" class="view" aria-labelledby="jobs-title" hidden>
         <div class="view-heading">
           <h1 id="jobs-title" tabindex="-1">任务记录</h1>
-          <button id="refresh-jobs" class="secondary" type="button" disabled>
+          <button id="refresh-jobs" type="button" disabled>
             刷新
           </button>
         </div>
@@ -466,10 +458,10 @@
             <div class="empty-state"><p>尚未连接服务。</p></div>
           </div>
           <div class="pagination">
-            <button id="previous-jobs" class="secondary" type="button" disabled>
+            <button id="previous-jobs" type="button" disabled>
               较新记录</button
             ><span id="jobs-page">第 1 页</span
-            ><button id="next-jobs" class="secondary" type="button" disabled>
+            ><button id="next-jobs" type="button" disabled>
               较早记录
             </button>
           </div>
@@ -530,7 +522,6 @@
           <div class="form-actions">
             <button
               id="cancel-edit-connection"
-              class="secondary"
               type="button"
               hidden
             >
@@ -550,7 +541,6 @@
           <h2 id="restore-title">恢复备份</h2>
           <button
             id="close-restore"
-            class="icon-button"
             type="button"
             aria-label="关闭恢复窗口"
           >
@@ -580,7 +570,7 @@
         </p>
         <p id="restore-message" class="message" role="status"></p>
         <div class="dialog-actions">
-          <button id="cancel-restore" class="secondary" type="button">
+          <button id="cancel-restore" type="button">
             取消</button
           ><button id="restore-button" type="submit">开始恢复</button>
         </div>

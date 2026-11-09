@@ -171,8 +171,6 @@ function resetSession() {
   state.next = null;
   $("disconnect-button").hidden = true;
   $("connection-state").textContent = "未连接";
-  $("connection-dot").classList.add("muted");
-  $("connection-dot").classList.remove("error");
   $("version").textContent = "";
   $("connection-name").textContent = "";
   $("connection-host").textContent = "";
@@ -304,19 +302,19 @@ function renderConnections() {
       node("td", "", active ? "当前连接" : "未连接"),
     );
     const actions = node("td", "connection-actions");
-    const connect = node("button", "secondary", "连接");
+    const connect = node("button", "", "连接");
     connect.type = "button";
     connect.disabled = active;
     connect.addEventListener("click", () => {
       void connectProfile(connection);
     });
-    const edit = node("button", "secondary", "编辑");
+    const edit = node("button", "", "编辑");
     edit.type = "button";
     edit.addEventListener("click", () => {
       editConnection(connection);
       $("profile-name").focus();
     });
-    const remove = node("button", "secondary", "删除");
+    const remove = node("button", "", "删除");
     remove.type = "button";
     remove.addEventListener("click", () => {
       cancelConnectionAttempt();
@@ -369,7 +367,6 @@ async function connectProfile(connection, save = false) {
     saveConnections();
     $("disconnect-button").hidden = false;
     $("connection-state").textContent = "已连接";
-    $("connection-dot").classList.remove("muted");
     $("connection-name").textContent = connection.name;
     $("connection-host").textContent = connection.url;
     $("version").textContent = `v${status.version}`;
@@ -528,7 +525,7 @@ function renderBackups() {
     created.append(time);
     const info = node("td", "mono", backup.backup_id);
     const action = node("td");
-    const button = node("button", "secondary", "恢复");
+    const button = node("button", "", "恢复");
     button.type = "button";
     button.addEventListener("click", () => {
       state.selection = {
@@ -791,7 +788,6 @@ async function refreshJobs() {
     renderJobs();
     message("jobs-message");
     $("connection-state").textContent = "已连接";
-    $("connection-dot").classList.remove("error");
     $("jobs-updated").textContent =
       `手动刷新 · 最近更新 ${date(Date.now())}`;
     if (
@@ -813,7 +809,6 @@ async function refreshJobs() {
     state.page = state.displayedPage;
     report("jobs-message", error);
     $("connection-state").textContent = "连接异常";
-    $("connection-dot").classList.add("error");
     $("jobs-updated").textContent = "更新失败，当前显示上次读取的结果，请点击“刷新”重试。";
   } finally {
     if (request === state.jobsRequest && state.connected) {
@@ -908,7 +903,7 @@ function renderJobs() {
     const actions = node("div", "job-actions");
     actions.append(details);
     if (job.kind === "backup" && job.state === "succeeded") {
-      const browse = node("button", "secondary", "查看备份");
+      const browse = node("button", "", "查看备份");
       browse.type = "button";
       browse.dataset.job = job.job_id;
       browse.addEventListener("click", () => {
