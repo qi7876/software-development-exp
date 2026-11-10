@@ -750,6 +750,12 @@ dialog label {
 #compression-algorithm-field {
   margin-top: 0;
 }
+/* Stack LZ77 parameters like the Zstd level field: one column, same spacing. */
+#lz77-fields .filter-columns {
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin-top: 0;
+}
 .compression-level-controls {
   display: flex;
   align-items: center;
