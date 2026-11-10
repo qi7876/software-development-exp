@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <title>bak · 创建备份</title>
     <link rel="icon" href="/ui/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/ui/styles.css" />
@@ -75,11 +75,15 @@
     </aside>
 
     <main id="main" tabindex="-1">
+      <p class="connect-notice">
+        <span>尚未连接服务，连接后才能创建备份、载入仓库和查看任务。</span>
+        <a href="#connections">管理连接</a>
+      </p>
       <section id="backup" class="view" aria-labelledby="backup-title">
         <div class="view-heading">
           <h1 id="backup-title" tabindex="-1">创建备份</h1>
           <button
-            class="with-icon"
+            class="with-icon primary"
             id="backup-button"
             type="submit"
             form="backup-form"
@@ -422,7 +426,7 @@
                   required
                 />
               </div>
-              <button id="repository-button" type="submit">
+              <button id="repository-button" class="primary" type="submit">
                 载入备份
               </button>
             </fieldset>
@@ -510,7 +514,7 @@
               hidden
             >
               取消编辑</button
-            ><button id="connect-button" type="submit">验证并保存</button>
+            ><button id="connect-button" class="primary" type="submit">验证并保存</button>
           </div>
         </form>
       </section>
@@ -525,6 +529,7 @@
           <h2 id="restore-title">恢复备份</h2>
           <button
             id="close-restore"
+            class="icon-button"
             type="button"
             aria-label="关闭恢复窗口"
           >
@@ -555,7 +560,7 @@
         <div class="dialog-actions">
           <button id="cancel-restore" type="button">
             取消</button
-          ><button id="restore-button" type="submit">开始恢复</button>
+          ><button id="restore-button" class="primary" type="submit">开始恢复</button>
         </div>
       </form>
     </dialog>

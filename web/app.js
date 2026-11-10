@@ -309,7 +309,7 @@ function renderConnections() {
       editConnection(connection);
       $("api-url").focus();
     });
-    const remove = node("button", "", "删除");
+    const remove = node("button", "danger", "删除");
     remove.type = "button";
     remove.addEventListener("click", () => {
       cancelConnectionAttempt();
