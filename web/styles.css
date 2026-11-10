@@ -734,7 +734,7 @@ dialog label {
   font-weight: 600;
   font-size: 14px;
 }
-.filter-columns label {
+.filter-row .filter-columns label {
   color: var(--muted);
   font-size: 13px;
   font-weight: 400;
