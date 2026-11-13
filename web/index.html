@@ -15,49 +15,15 @@
       <a class="brand" href="#backup" aria-label="bak. 首页">bak.</a>
       <nav aria-label="主导航">
         <a href="#backup" aria-current="page">
-          <svg
-            class="icon"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-            focusable="false"
-          >
-            <path d="M12 3v12m-4-4 4 4 4-4" />
-            <path d="M5 14v6h14v-6" />
-          </svg>
           <span>创建备份</span>
         </a>
         <a href="#repository">
-          <svg
-            class="icon"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-            focusable="false"
-          >
-            <path d="M3 7h7l2-3h9v16H3Z" />
-          </svg>
           <span>备份仓库</span>
         </a>
         <a href="#jobs">
-          <svg
-            class="icon"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-            focusable="false"
-          >
-            <path d="M5 4h14v16H5Z" />
-            <path d="M8 8h8M8 12h8M8 16h5" />
-          </svg>
           <span>任务记录</span>
         </a>
         <a id="open-connection" href="#connections">
-          <svg
-            class="icon"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-            focusable="false"
-          >
-            <path d="M8 3v5m8-5v5M6 8h12v4a6 6 0 0 1-12 0ZM12 18v3" />
-          </svg>
           <span>管理连接</span>
         </a>
       </nav>
@@ -83,21 +49,13 @@
         <div class="view-heading">
           <h1 id="backup-title" tabindex="-1">创建备份</h1>
           <button
-            class="with-icon primary"
+            class="primary"
             id="backup-button"
             type="submit"
             form="backup-form"
             data-connected
             disabled
           >
-            <svg
-              class="icon"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
             <span>创建备份</span>
           </button>
         </div>
@@ -442,16 +400,7 @@
       <section id="jobs" class="view" aria-labelledby="jobs-title" hidden>
         <div class="view-heading">
           <h1 id="jobs-title" tabindex="-1">任务记录</h1>
-          <button class="with-icon" id="refresh-jobs" type="button" disabled>
-            <svg
-              class="icon"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path d="M20 7v5h-5" />
-              <path d="M20 12a8 8 0 1 0-2.34 5.66" />
-            </svg>
+          <button id="refresh-jobs" type="button" disabled>
             <span>刷新</span>
           </button>
         </div>
