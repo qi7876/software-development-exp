@@ -713,6 +713,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn archive_round_trip_preserves_unix_metadata_and_link_targets() -> TestResult {
+        let fixture = Fixture::new()?;
+        std::fs::create_dir(fixture.source.join("nested"))?;
+        std::fs::write(fixture.source.join("nested/file"), b"contents")?;
+        for (name, target) in [
+            ("link", "nested/file"),
+            ("dangling", "missing"),
+            ("cycle", "cycle"),
+        ] {
+            std::os::unix::fs::symlink(target, fixture.source.join(name))?;
+        }
+        let timestamp = FileTime::from_unix_time(1_600_000_000, 123_456_789);
+        for (name, mode) in [("", 0o750), ("nested", 0o750), ("nested/file", 0o400)] {
+            let path = fixture.source.join(name);
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))?;
+            filetime::set_file_times(path, timestamp, timestamp)?;
+        }
+        fixture.backup().await?;
+        let manifest = Manifest::read(&fixture.repository, BACKUP_ID).await?;
+        fixture.restore(BACKUP_ID).await?;
+        assert_eq!(
+            super::super::repository::UnixMetadata::read(&fixture.destination)?,
+            manifest.root_metadata
+        );
+        for entry in &manifest.entries {
+            let path = fixture.destination.join(&entry.relative_path);
+            assert_eq!(
+                super::super::repository::UnixMetadata::read(&path)?,
+                entry.metadata
+            );
+            if let ManifestEntryKind::Symlink { target } = &entry.kind {
+                assert_eq!(&std::fs::read_link(path)?, target);
+            }
+        }
+        assert_eq!(
+            std::fs::read(fixture.destination.join("nested/file"))?,
+            b"contents"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn invalid_metadata_paths_are_rejected_before_writes() -> TestResult {
         // Put each invalid entry after a valid file to detect validation during writing.
         // Absolute and parent paths target only our temporary directory.

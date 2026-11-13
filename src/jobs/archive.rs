@@ -120,6 +120,69 @@ pub(super) struct Reader<R> {
     inner: BufReader<R>,
 }
 
+impl<R: Read> Reader<R> {
+    pub(super) fn new(inner: R) -> io::Result<Self> {
+        let mut inner = BufReader::new(inner);
+        let mut magic = [0; 8];
+        inner.read_exact(&mut magic)?;
+        if &magic != MAGIC {
+            return Err(invalid("unsupported archive format"));
+        }
+        Ok(Self { inner })
+    }
+
+    fn header_length(&mut self) -> io::Result<usize> {
+        let mut length = [0; 4];
+        self.inner.read_exact(&mut length)?;
+        let length = u32::from_le_bytes(length) as usize;
+        if length > MAX_HEADER_SIZE {
+            return Err(invalid("archive entry header exceeds 1 MiB"));
+        }
+        Ok(length)
+    }
+
+    /// Validate the header before creating an output entry.
+    pub(super) fn expect_entry(&mut self, entry: &ManifestEntry) -> io::Result<()> {
+        let length = self.header_length()?;
+        if length == 0 {
+            return Err(invalid("archive ended before expected entry"));
+        }
+        let mut bytes = vec![0; length];
+        self.inner.read_exact(&mut bytes)?;
+        let header: Header = serde_json::from_slice(&bytes)?;
+        if header != Header::from_entry(entry) {
+            return Err(invalid("archive entry differs from repository metadata"));
+        }
+        Ok(())
+    }
+
+    pub(super) fn read_file(
+        &mut self,
+        destination: &mut impl Write,
+        size: u64,
+        checksum: &str,
+    ) -> io::Result<()> {
+        let digest = copy_file(&mut self.inner, destination, size)?;
+        let mut stored = [0; 32];
+        self.inner.read_exact(&mut stored)?;
+        if stored != digest || hex::encode(digest) != checksum {
+            return Err(invalid("archive file checksum mismatch"));
+        }
+        Ok(())
+    }
+
+    /// Require an explicit end marker and fully consume the outer codec/AEAD.
+    pub(super) fn finish(mut self) -> io::Result<R> {
+        if self.header_length()? != 0 {
+            return Err(invalid("unexpected extra archive entry"));
+        }
+        if self.inner.read(&mut [0])? != 0 {
+            return Err(invalid("trailing archive data"));
+        }
+        Ok(self.inner.into_inner())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::repository::FileTimestamp;
@@ -212,7 +275,7 @@ mod tests {
         for file in &mut entries {
             writer.append(
                 file,
-                &mut if file.relative_path == PathBuf::from("binary") {
+                &mut if file.relative_path == std::path::Path::new("binary") {
                     binary.as_slice()
                 } else {
                     &[]
@@ -301,75 +364,81 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn short_io_and_write_failures_are_observable() -> TestResult {
+        struct ShortIo<T>(T);
+        impl<T: Read> Read for ShortIo<T> {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                let length = buffer.len().min(3);
+                self.0.read(&mut buffer[..length])
+            }
+        }
+        impl<T: Write> Write for ShortIo<T> {
+            fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+                self.0.write(&buffer[..buffer.len().min(3)])
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.0.flush()
+            }
+        }
+        let data = vec![42; 131_073];
+        let mut file = entry(
+            "file",
+            ManifestEntryKind::File {
+                original_size: data.len() as u64,
+                checksum: String::new(),
+            },
+        );
+        let mut writer = Writer::new(ShortIo(Vec::new()))?;
+        writer.append(&mut file, &mut ShortIo(data.as_slice()))?;
+        let bytes = writer.finish()?.0;
+        let mut reader = Reader::new(ShortIo(bytes.as_slice()))?;
+        reader.expect_entry(&file)?;
+        let ManifestEntryKind::File {
+            original_size,
+            checksum,
+        } = &file.kind
+        else {
+            return Err("expected file".into());
+        };
+        let mut output = ShortIo(Vec::new());
+        reader.read_file(&mut output, *original_size, checksum)?;
+        reader.finish()?;
+        assert_eq!(output.0, data);
+
+        // A zero-capacity output reports WriteZero, including errors delayed by buffering.
+        let mut writer = Writer::new(&mut [][..])?;
+        writer.append(
+            &mut entry("directory", ManifestEntryKind::Directory),
+            &mut io::empty(),
+        )?;
+        assert_eq!(
+            writer
+                .finish()
+                .err()
+                .ok_or("lost buffered write error")?
+                .kind(),
+            io::ErrorKind::WriteZero
+        );
+        let mut reader = Reader::new(bytes.as_slice())?;
+        reader.expect_entry(&file)?;
+        assert_eq!(
+            reader
+                .read_file(&mut &mut [][..], *original_size, checksum)
+                .err()
+                .ok_or("lost restore write error")?
+                .kind(),
+            io::ErrorKind::WriteZero
+        );
+        Ok(())
+    }
+
     proptest! {
-        #![proptest_config(Config { cases: 32, rng_seed: RngSeed::Fixed(0xBA_A2_C001), ..Config::default() })]
+        #![proptest_config(Config { cases: 32, rng_seed: RngSeed::Fixed(0xBAA2_C001), ..Config::default() })]
         #[test]
         fn arbitrary_file_bytes_round_trip(data in proptest::collection::vec(any::<u8>(), 0..16385)) {
             let (bytes, file) = pack(&data)?;
             prop_assert_eq!(unpack(&bytes, &file)?, data);
         }
-    }
-}
-
-impl<R: Read> Reader<R> {
-    pub(super) fn new(inner: R) -> io::Result<Self> {
-        let mut inner = BufReader::new(inner);
-        let mut magic = [0; 8];
-        inner.read_exact(&mut magic)?;
-        if &magic != MAGIC {
-            return Err(invalid("unsupported archive format"));
-        }
-        Ok(Self { inner })
-    }
-
-    fn header_length(&mut self) -> io::Result<usize> {
-        let mut length = [0; 4];
-        self.inner.read_exact(&mut length)?;
-        let length = u32::from_le_bytes(length) as usize;
-        if length > MAX_HEADER_SIZE {
-            return Err(invalid("archive entry header exceeds 1 MiB"));
-        }
-        Ok(length)
-    }
-
-    /// Validate the header before creating an output entry.
-    pub(super) fn expect_entry(&mut self, entry: &ManifestEntry) -> io::Result<()> {
-        let length = self.header_length()?;
-        if length == 0 {
-            return Err(invalid("archive ended before expected entry"));
-        }
-        let mut bytes = vec![0; length];
-        self.inner.read_exact(&mut bytes)?;
-        let header: Header = serde_json::from_slice(&bytes)?;
-        if header != Header::from_entry(entry) {
-            return Err(invalid("archive entry differs from repository metadata"));
-        }
-        Ok(())
-    }
-
-    pub(super) fn read_file(
-        &mut self,
-        destination: &mut impl Write,
-        size: u64,
-        checksum: &str,
-    ) -> io::Result<()> {
-        let digest = copy_file(&mut self.inner, destination, size)?;
-        let mut stored = [0; 32];
-        self.inner.read_exact(&mut stored)?;
-        if stored != digest || hex::encode(digest) != checksum {
-            return Err(invalid("archive file checksum mismatch"));
-        }
-        Ok(())
-    }
-
-    /// Require an explicit end marker and fully consume the outer codec/AEAD.
-    pub(super) fn finish(mut self) -> io::Result<R> {
-        if self.header_length()? != 0 {
-            return Err(invalid("unexpected extra archive entry"));
-        }
-        if self.inner.read(&mut [0])? != 0 {
-            return Err(invalid("trailing archive data"));
-        }
-        Ok(self.inner.into_inner())
     }
 }

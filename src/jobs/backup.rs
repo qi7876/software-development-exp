@@ -167,8 +167,15 @@ fn backup_all_files(
             let source_path = absolute_source_path.join(&relative_path);
             let (kind, mut source) = match kind {
                 BackupEntryKind::File => {
-                    let file = std::fs::File::open(&source_path)?;
-                    let stat = file.metadata()?;
+                    let file = std::fs::File::open(&source_path).map_err(|error| {
+                        io::Error::other(format!("cannot open {}: {error}", source_path.display()))
+                    })?;
+                    let stat = file.metadata().map_err(|error| {
+                        io::Error::other(format!(
+                            "cannot read metadata for {}: {error}",
+                            source_path.display()
+                        ))
+                    })?;
                     if !stat.is_file() {
                         return Err(io::Error::other(format!(
                             "source is no longer a regular file: {}",
@@ -186,7 +193,12 @@ fn backup_all_files(
                 BackupEntryKind::Directory => (ManifestEntryKind::Directory, None),
                 BackupEntryKind::Symlink => (
                     ManifestEntryKind::Symlink {
-                        target: std::fs::read_link(&source_path)?,
+                        target: std::fs::read_link(&source_path).map_err(|error| {
+                            io::Error::other(format!(
+                                "cannot read link {}: {error}",
+                                source_path.display()
+                            ))
+                        })?,
                     },
                     None,
                 ),
