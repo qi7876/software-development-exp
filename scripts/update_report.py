@@ -417,7 +417,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "config.json，运行 axum/Tokio HTTP 服务。"
         "用户通过嵌入式 Web 控制台或 curl 调用 Bearer 认证接口。"
         "浏览器可选择本机或远程 API，后台 worker 顺序执行作业；"
-        "当前未实现计划调度、增量备份或元数据加密。"
+        "当前支持配置式定时备份；未实现增量备份或元数据加密。"
         "本报告描述已实现行为，不把未来目标列为当前能力。",
     )
     _heading(document, anchor, "1.3 运行环境与限制", 2)
@@ -583,7 +583,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "backups/<backup_id>/ 镜像保存源相对路径，"
         "载荷保留原名，内容可原样、只压缩、只加密或先压缩再加密；空目录和符号链接有独立条目。"
         "文件与目录同步后，一次提交头、条目、Unix 根元数据与统计。"
-        "作业库 schema v4、仓库 format/schema "
+        "作业库 schema v5、仓库 format/schema "
         "v5，旧数据库拒绝且不迁移。",
     )
     _paragraph(
@@ -672,7 +672,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "下一阶段优先处理源一致性与失败清理。非 Unix "
-        "执行、调度、保留策略、元数据加密和远程存储尚未实现；"
+        "执行、保留策略、元数据加密和远程存储尚未实现；"
         "增量备份不在当前计划内。已有内容加密不代表整个仓库元数据加密。",
     )
 
@@ -863,11 +863,11 @@ def _populate_system_design(
     for boundary in (
         "一个 bak 进程；HTTP、worker 和阻塞文件操作通过普通 Rust 调用与 Tokio 协作。",
         "API 只经 JobManager 门面访问业务；私有模块不为测试暴露。",
-        "仓库 format/schema v5、作业库 v4；"
+        "仓库 format/schema v5、作业库 v5；"
         "过滤和可选编码已实现，旧数据库与 JSON manifest "
         "不读取或迁移。",
         "作业和仓库分属两个数据库；元数据提交与作业终态提交之间存在独立失败边界。",
-        "Web 控制台和内容加密已实现；调度、取消、增量和元数据加密尚未"
+        "Web 控制台和内容加密及配置式定时备份已实现；取消、增量和元数据加密尚未"
         "实现。未验证断电或非 Unix 执行。",
     ):
         _paragraph(document, anchor, boundary, bullet=True)

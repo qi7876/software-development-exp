@@ -17,8 +17,9 @@
       ],
       "details": [
         "浏览器可连接同一或另一台 bak API；连接名称、地址和明文 API key 保存在浏览器 origin 的 localStorage。",
-        "工作目录作业库 schema v4，仓库 schema/format v5；保留命名密钥文件以恢复旧备份。",
-        "普通文件选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 或 AES-256-GCM 加密，形成九种模式；元数据和文件名仍为明文。"
+        "工作目录作业库 schema v5，仓库 schema/format v5；保留命名密钥文件以恢复旧备份。",
+        "普通文件选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 或 AES-256-GCM 加密，形成九种模式；元数据和文件名仍为明文。",
+        "配置式定时备份使用 IANA 时区与分钟级 Cron，复用 FIFO；停机不补跑，同一计划有未完成任务时跳过。"
       ],
       "constraints": [
         "一个工作目录只运行一个服务实例，SQLite 使用本地文件系统。",
@@ -116,7 +117,7 @@
           "name": "jobs.sqlite3",
           "package": "Working directory",
           "type": "database",
-          "stereotype": "queue / history v4"
+          "stereotype": "queue / history v5"
         },
         {
           "id": "Source",

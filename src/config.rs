@@ -8,6 +8,8 @@ pub(crate) struct Config {
     pub(crate) web_ui: WebUIConfig,
     #[serde(default)]
     pub(crate) encryption: EncryptionConfig,
+    #[serde(default)]
+    pub(crate) scheduled_backups: Option<crate::schedule::ScheduleConfig>,
 }
 
 #[derive(serde::Deserialize, Debug, Default)]

@@ -56,6 +56,35 @@ uv run scripts/check.py --web-ui
 
 The browser checks launch disposable real services and verify authentication, backup/restore content and empty directories, preservation of an occupied destination, durable history, pagination, text-safe rendering of paths/errors, network recovery, and desktop view navigation. Two services with different keys exercise cross-origin backup submission, failed-switch preservation, cache restoration after closing a page, editing/deleting profiles, and clearing old-service data on successful switches. Test files use `.js` with the web package's ES module setting.
 
+## Scheduled backups
+
+Configure optional `scheduled_backups` in `config.json`:
+
+```json
+"scheduled_backups": {
+  "timezone": "Asia/Shanghai",
+  "plans": [{
+    "id": "daily-source",
+    "enabled": true,
+    "cron": "0 2 * * *",
+    "source": "source",
+    "repository": "repository",
+    "compression": {"algorithm": "zstd", "level": 3},
+    "encryption": null
+  }]
+}
+```
+
+This runs daily at 02:00 in the specified IANA timezone. Multiple plans are supported. The example configuration ships with its plan disabled. Omit the section or use empty `plans` to disable scheduling. Restart to apply changes; there is no schedule management API or page.
+
+Each plan needs a stable unique nonempty `id`, five-field numeric Cron expression (minute, hour, day, month, weekday; Sunday 0 or 7), source and repository. Lists, ranges and steps are supported; seconds, years, names and shortcuts are rejected. Restricted day and weekday fields use OR. `enabled` defaults to true. Relative paths resolve against the service working directory; source and repository must exist when backup executes.
+
+Optional `filter` uses the manual backup API's complete filter object and defaults to all files. Omitted `compression` defaults to Zstd 3; null disables compression. Optional `encryption` uses the existing `{algorithm, key_id}` object and defaults to disabled. Active plans resolve key identity at startup. Invalid settings prevent startup with a diagnostic; filesystem failures are recorded as failed jobs when executed.
+
+The service must be running. Scheduling begins with the next minute; downtime and skipped minutes are not replayed. A plan with queued/running work skips that occurrence; other plans and manual tasks share the FIFO worker. Failed backups wait for the next occurrence without automatic retry. Clock jumps and daylight-saving behavior are specified in [scheduling](docs/architecture/scheduling.md).
+
+Tasks expose nullable `schedule_id` and `scheduled_for` (UTC Unix milliseconds for the matching minute); both are null for manual tasks. The console displays these in task details. This feature requires job schema v5 without migration, while repository format remains v5. Old job histories require the prior binary and original working directory.
+
 ## Encryption keys
 
 Generate independent keys outside the source and backup repository, then configure them on the service:
@@ -80,7 +109,7 @@ Add to `config.json`:
 
 The `encryption` section is optional. Key paths may be absolute or relative to the service working directory. All configured keys load at startup; unreadable or invalid files prevent startup. Changes require a service restart and browser reconnection. Keep old keys under stable identifiers while their backups remain in use, and add a new identifier when rotating keys. Backups and queued jobs pin both the identifier and a SHA-256 fingerprint. Removing a key or replacing its contents makes operations requiring the original key fail; it never silently selects another key. Keep independent copies of the required key files: losing a key makes its encrypted backups unrecoverable. Keys are never stored in task history, repository metadata, API responses, or browser storage.
 
-This version is a breaking format change: repository databases require schema/format v5 and task databases require schema v4. Use a new service working directory and a new repository. Previous databases are rejected, not migrated or deleted; use the previous application version and original directories to access older backups.
+This version is a breaking format change: repository databases require schema/format v5 and task databases require schema v5. Use a new service working directory; existing repository-v5 backups remain usable. Previous databases are rejected, not migrated or deleted; use the previous application version and original directories to access older backups.
 
 ## HTTP API
 
@@ -110,7 +139,7 @@ Accepted responses include `Location: /api/jobs/{job_id}` and a job with fields 
 
 Request errors use `{"error":{"code":400,"message":"..."}}` with the corresponding HTTP status. JSON bodies are limited to 2 MiB; `application/json` and `application/*+json` are accepted. Invalid or missing fields return 400, oversized bodies 413, unsupported media types 415, and missing or invalid authentication 401 with `WWW-Authenticate: Bearer`. There is no cancellation endpoint.
 
-`compression` is null or omitted for uncompressed backups. Select `{"algorithm":"zstd","level":3}` or `{"algorithm":"lz77","window_kib":64,"search_depth":32}` to enable a codec. Parameters omitted inside a selected algorithm use its defaults. Unknown algorithms, unknown fields, invalid types and out-of-range values return HTTP 400 before admission. The old boolean `compression` and separate `compression_level` are no longer accepted. The UI still defaults to Zstd; API clients choose explicitly. Complete settings persist in jobs and backup metadata, and restore takes no codec parameters. This is a breaking change: use new working directories and repositories; schema versions are jobs v4 / repository v5, with XChaCha encrypted payload v2 and AES encrypted payload v3.
+`compression` is null or omitted for uncompressed backups. Select `{"algorithm":"zstd","level":3}` or `{"algorithm":"lz77","window_kib":64,"search_depth":32}` to enable a codec. Parameters omitted inside a selected algorithm use its defaults. Unknown algorithms, unknown fields, invalid types and out-of-range values return HTTP 400 before admission. The old boolean `compression` and separate `compression_level` are no longer accepted. The UI still defaults to Zstd; API clients choose explicitly. Complete settings persist in jobs and backup metadata, and restore takes no codec parameters. This is a breaking change: use new working directories and repositories; schema versions are jobs v5 / repository v5, with XChaCha encrypted payload v2 and AES encrypted payload v3.
 
 An omitted or null `encryption` disables encryption. Select `{"algorithm":"aes-256-gcm","key_id":"current"}` or `{"algorithm":"xchacha20-poly1305","key_id":"current"}`. Both fields are required. Unknown algorithms, fields, keys, invalid types, and the removed `encryption_key_id` request field return HTTP 400 before admission. Both algorithms use the existing 32-byte key files. Accepted encrypted jobs persist the selected algorithm, identifier and fingerprint, allowing restart without persisting the secret. Restore resolves its key from backup metadata.
 
@@ -122,7 +151,7 @@ Job listing defaults to 20 entries and accepts limits from 1 to 100. Pass the re
 
 ## Persistence and operation lifecycle
 
-The service creates schema-v4 `jobs.sqlite3` in the working directory. One worker executes committed jobs in FIFO insertion order while HTTP status and job queries remain responsive. Completed results and queued jobs survive restart. Client disconnection does not cancel a committed job; retrying a POST creates another job.
+The service creates schema-v5 `jobs.sqlite3` in the working directory. One worker executes committed jobs in FIFO insertion order while HTTP status and job queries remain responsive. Completed results and queued jobs survive restart. Client disconnection does not cancel a committed job; retrying a POST creates another job.
 
 At startup, jobs left `running` by an earlier service exit become failed with code 500 and an interruption message. They are never automatically retried because execution may have affected external files. Previously queued jobs then continue in order. On Ctrl-C or Unix SIGTERM, the service stops accepting requests and claiming jobs, waits for its active operation to finish and persist its outcome, and leaves queued jobs for the next start. A worker or outcome-persistence failure stops the service with a failure exit status rather than continuing to accept jobs with a broken worker.
 
@@ -207,7 +236,7 @@ This closes the local MVP workflow. The next reliability priorities are source-f
 - UI directory browsing, saved repository shortcuts, byte/file progress, and safe task cancellation, as separate follow-ups.
 - Directory synchronization support for non-Unix backup and restore execution.
 - Permissions, modification times, symbolic links, and other advanced restore capabilities.
-- Scheduled jobs, retention policies, and encryption of repository metadata. Consider WebDAV / S3 after the local workflow is stable. Incremental backups are not planned. Mobile clients, real-time synchronization, and multi-user collaboration are outside the current scope.
+- Retention policies, and encryption of repository metadata. Consider WebDAV / S3 after the local workflow is stable. Incremental backups are not planned. Mobile clients, real-time synchronization, and multi-user collaboration are outside the current scope.
 
 ## License
 

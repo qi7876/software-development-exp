@@ -870,6 +870,8 @@ function renderJobs() {
         job.finished_at === null ? "尚未结束" : date(job.finished_at),
       ],
     ];
+    if (job.schedule_id)
+      values.unshift(["计划标识", job.schedule_id], ["计划时间", date(job.scheduled_for)]);
     if (job.kind === "restore")
       values.unshift(["备份编号", job.request.backup_id]);
     if (job.kind === "backup" && job.request.compression)

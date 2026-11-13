@@ -103,14 +103,7 @@ struct BackupRequest {
     repository: PathBuf,
     filter: Filter,
     compression: Option<CompressionOptions>,
-    encryption: Option<EncryptionRequest>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct EncryptionRequest {
-    algorithm: crate::jobs::crypto::EncryptionAlgorithm,
-    key_id: String,
+    encryption: Option<crate::jobs::EncryptionRequest>,
 }
 
 #[derive(Deserialize)]
@@ -163,7 +156,7 @@ async fn start_backup(
         encryption: request
             .encryption
             .as_ref()
-            .map(|e| state.jobs.keys.select(&e.key_id, e.algorithm))
+            .map(|e| e.resolve(&state.jobs.keys))
             .transpose()?,
     };
     options.validate()?;
@@ -726,6 +719,8 @@ mod tests {
             ),
         ] {
             let job = JobInfo {
+                schedule_id: None,
+                scheduled_for: None,
                 job_id: "job-001".into(),
                 request: JobRequest::Backup {
                     source: "source".into(),
@@ -737,10 +732,12 @@ mod tests {
             };
             assert_eq!(
                 job.to_json()?,
-                json!({"job_id": "job-001", "kind": "backup", "state": expected_state, "result": result, "error": error})
+                json!({"job_id": "job-001", "schedule_id": null, "scheduled_for": null, "kind": "backup", "state": expected_state, "result": result, "error": error})
             );
         }
         let job = JobInfo {
+            schedule_id: None,
+            scheduled_for: None,
             job_id: "job-002".into(),
             request: JobRequest::Restore {
                 repository: "repository".into(),

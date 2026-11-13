@@ -11,6 +11,18 @@ use std::{
 use super::lz77;
 pub(crate) use super::lz77::Lz77Options;
 
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EncryptionRequest {
+    pub(crate) algorithm: super::crypto::EncryptionAlgorithm,
+    pub(crate) key_id: String,
+}
+impl EncryptionRequest {
+    pub(crate) fn resolve(&self, keys: &Keyring) -> Result<Encryption, JobError> {
+        keys.select(&self.key_id, self.algorithm)
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct BackupOptions {
     pub(crate) compression: Option<CompressionOptions>,

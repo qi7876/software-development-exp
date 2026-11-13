@@ -40,3 +40,5 @@ The source modules divide responsibilities into configuration and arguments, ser
 
 
 At startup, the service loads optional named encryption keys from separate files. The job manager shares this immutable in-memory keyring with the worker. API admission persists only the selected key identifier and fingerprint. The content pipeline composes optional Zstd or project LZ77 compression with optional XChaCha20-Poly1305 or AES-256-GCM STREAM encryption; restore reverses this pipeline. The browser receives key identifiers and fingerprints for selection and restore eligibility, never key material. See [content encryption](content-encryption.md).
+
+The in-process scheduler reads configured Cron plans, records per-plan UTC cursors, and admits requests into the same durable FIFO queue. It shares service supervision and shutdown with HTTP and the worker. See [scheduling](scheduling.md).
