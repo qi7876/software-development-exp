@@ -19,11 +19,11 @@ pub(crate) struct RepoBackupInfo {
 }
 
 pub(super) const REPO_SCHEMA: storage::Schema = storage::Schema {
-    version: 5,
+    version: 6,
     sql: "
 CREATE TABLE backups (
     backup_id TEXT PRIMARY KEY NOT NULL,
-    format_version INTEGER NOT NULL CHECK (format_version = 5),
+    format_version INTEGER NOT NULL CHECK (format_version = 6),
     created_at TEXT NOT NULL,
     source TEXT NOT NULL,
     compression TEXT NOT NULL CHECK (json_valid(compression)),
@@ -95,7 +95,7 @@ pub(super) struct ManifestEntry {
     pub(super) kind: ManifestEntryKind,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) struct UnixMetadata {
     pub(super) uid: u32,
     pub(super) gid: u32,
@@ -104,7 +104,7 @@ pub(super) struct UnixMetadata {
     pub(super) mtime: FileTimestamp,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) struct FileTimestamp {
     pub(super) seconds: i64,
     pub(super) nanoseconds: u32,
@@ -380,7 +380,7 @@ impl Manifest {
                 JobError::internal(format!("invalid compression metadata: {}", error.message))
             })?;
         }
-        if self.format_version != 5 || self.checksum_algorithm != "sha256" {
+        if self.format_version != 6 || self.checksum_algorithm != "sha256" {
             return Err(JobError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "unsupported manifest format, compression or checksum algorithm",
@@ -468,7 +468,7 @@ mod tests {
     type TestResult = Result<(), Box<dyn Error>>;
 
     #[tokio::test]
-    async fn v5_schema_enforces_metadata_and_entry_types() -> TestResult {
+    async fn v6_schema_enforces_metadata_and_entry_types() -> TestResult {
         let directory = TestDirectory::new()?;
         let pool = storage::open(
             &directory.path().join("repository.sqlite3"),
@@ -480,7 +480,7 @@ mod tests {
             sqlx::query_scalar::<_, i64>("PRAGMA user_version")
                 .fetch_one(&pool)
                 .await?,
-            5
+            6
         );
         sqlx::query(
             "INSERT INTO backups (
@@ -488,7 +488,7 @@ mod tests {
             root_uid, root_gid, root_mode, root_atime_seconds, root_atime_nanoseconds,
             root_mtime_seconds, root_mtime_nanoseconds,
             entries_created, skipped_unsupported, skipped_filtered, encryption
-        ) VALUES ('backup', 5, '2026-10-23T00:00:00Z', '\"/source\"', '{\"algorithm\":\"zstd\",\"level\":3}', 'sha256',
+        ) VALUES ('backup', 6, '2026-10-23T00:00:00Z', '\"/source\"', '{\"algorithm\":\"zstd\",\"level\":3}', 'sha256',
             4294967295, 0, 4095, -1, 999999999, 0, 0, 3, 2, 1, 'none')",
         )
         .execute(&pool)
@@ -554,7 +554,7 @@ mod tests {
 
     fn header(repository: &Path, backup_id: &str, second: u8) -> Manifest {
         Manifest {
-            format_version: 5,
+            format_version: 6,
             backup_id: backup_id.to_owned(),
             created_at: format!("2026-10-13T00:00:{second:02}.000Z"),
             source: repository.to_owned(),
@@ -752,7 +752,7 @@ mod tests {
 
     fn manifest() -> Manifest {
         Manifest {
-            format_version: 5,
+            format_version: 6,
             backup_id: "backup-001".into(),
             created_at: "2026-10-09T00:00:00Z".into(),
             source: "/source".into(),

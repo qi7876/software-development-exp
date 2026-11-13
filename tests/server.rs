@@ -969,13 +969,13 @@ async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> 
         let payload = server
             .path("repo with space/backups")
             .join(id)
-            .join("random");
+            .join("archive.bak");
         let encoded = std::fs::read(&payload)?;
         if key_id.is_none() {
             if compression["algorithm"] == "zstd" {
-                assert_eq!(zstd::decode_all(encoded.as_slice())?, random);
+                assert!(zstd::decode_all(encoded.as_slice())?.starts_with(b"BAKARC\0\x01"));
             } else if compression.is_null() {
-                assert_eq!(encoded, random);
+                assert!(encoded.starts_with(b"BAKARC\0\x01"));
             } else {
                 assert!(encoded.starts_with(b"BAKLZ77\x01"));
             }
