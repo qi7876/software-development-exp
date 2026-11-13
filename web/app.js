@@ -309,7 +309,7 @@ function renderConnections() {
       editConnection(connection);
       $("api-url").focus();
     });
-    const remove = node("button", "", "删除");
+    const remove = node("button", "danger", "删除");
     remove.type = "button";
     remove.addEventListener("click", () => {
       cancelConnectionAttempt();
@@ -570,7 +570,7 @@ function compressionDescription(compression) {
   return `LZ77 · ${compression.window_kib} KiB · ${compression.search_depth} 候选`;
 }
 function storageMode(backup) {
-  return `${compressionDescription(backup.compression)} · ${backup.encryption ? "加密" : "不加密"}`;
+  return `${compressionDescription(backup.compression)} · ${backup.encryption ? (backup.encryption.algorithm === "aes-256-gcm" ? "AES-256-GCM" : "XChaCha20-Poly1305") : "不加密"}`;
 }
 function compressionOptions() {
   if ($("compression-algorithm").value === "none") return null;
@@ -601,6 +601,7 @@ function updateEncodingOptions() {
   $("lz77-fields").disabled = !lz77;
   const hasKeys = state.encryptionKeys.length > 0;
   $("encryption-xchacha").disabled = !hasKeys;
+  $("encryption-aes").disabled = !hasKeys;
   const encrypted = $("encryption-algorithm").value !== "none";
   $("encryption-key-field").hidden = !encrypted;
   $("encryption-key").required = encrypted;
@@ -708,8 +709,8 @@ $("backup-form").addEventListener("submit", async (event) => {
         repository,
         filter,
         compression: compressionOptions(),
-        encryption_key_id: $("encryption-algorithm").value !== "none"
-          ? $("encryption-key").value
+        encryption: $("encryption-algorithm").value !== "none"
+          ? { algorithm: $("encryption-algorithm").value, key_id: $("encryption-key").value }
           : null,
       }),
     });

@@ -877,7 +877,7 @@ test(
 );
 
 test(
-  "console selects all six storage modes and matches restore keys",
+  "console selects all nine storage modes and matches restore keys",
   { timeout: 90000 },
   async (t) => {
     const { directory, url } = await startServer(t, secret, true, true);
@@ -927,13 +927,16 @@ test(
         false,
         "LZ77 · 8 KiB · 16 候选 · 不加密",
       ],
-      [null, true, "不压缩 · 加密"],
-      [{ algorithm: "zstd", level: 9 }, true, "Zstd · 等级 9 · 加密"],
+      [null, "xchacha20-poly1305", "不压缩 · XChaCha20-Poly1305"],
+      [{ algorithm: "zstd", level: 9 }, "xchacha20-poly1305", "Zstd · 等级 9 · XChaCha20-Poly1305"],
       [
         { algorithm: "lz77", window_kib: 64, search_depth: 32 },
-        true,
-        "LZ77 · 64 KiB · 32 候选 · 加密",
+        "xchacha20-poly1305",
+        "LZ77 · 64 KiB · 32 候选 · XChaCha20-Poly1305",
       ],
+      [null, "aes-256-gcm", "不压缩 · AES-256-GCM"],
+      [{ algorithm: "zstd", level: 9 }, "aes-256-gcm", "Zstd · 等级 9 · AES-256-GCM"],
+      [{ algorithm: "lz77", window_kib: 64, search_depth: 32 }, "aes-256-gcm", "LZ77 · 64 KiB · 32 候选 · AES-256-GCM"],
     ];
     for (let index = 0; index < modes.length; index++) {
       const [compression, encryption, mode] = modes[index];
@@ -964,7 +967,7 @@ test(
         }
       }
       await page.locator("#encryption-algorithm").selectOption(
-        encryption ? "xchacha20-poly1305" : "none",
+        encryption || "none",
       );
       if (encryption)
         await page
@@ -972,11 +975,11 @@ test(
           .selectOption(index === 3 ? "current" : "previous");
       assert.equal(
         await page.locator("#encoding-order").isVisible(),
-        Boolean(compression) && encryption,
+        Boolean(compression && encryption),
       );
       assert.equal(
         await page.locator("#encryption-scope").isVisible(),
-        encryption,
+        Boolean(encryption),
       );
       await page.locator('nav a[href="#repository"]').click();
       await page.locator('nav a[href="#backup"]').click();
@@ -986,7 +989,7 @@ test(
       );
       assert.equal(
         await page.locator("#encryption-algorithm").inputValue(),
-        encryption ? "xchacha20-poly1305" : "none",
+        encryption || "none",
       );
       const responsePromise = page.waitForResponse(
         (response) =>
@@ -997,9 +1000,9 @@ test(
       const response = await responsePromise;
       const payload = response.request().postDataJSON();
       assert.deepEqual(payload.compression, compression);
-      assert.equal(
-        payload.encryption_key_id,
-        encryption ? (index === 3 ? "current" : "previous") : null,
+      assert.deepEqual(
+        payload.encryption,
+        encryption ? { algorithm: encryption, key_id: index === 3 ? "current" : "previous" } : null,
       );
       await page.locator("#backup-job-link").click();
       await refreshUntil(
@@ -1015,7 +1018,7 @@ test(
         );
         assert.equal(
           await details.locator("dd").last().textContent(),
-          mode.replace(/ · (不)?加密$/, ""),
+          mode.replace(/ · (不加密|XChaCha20-Poly1305|AES-256-GCM)$/, ""),
         );
       } else {
         assert.equal(
@@ -1038,7 +1041,7 @@ test(
       assert.equal(await row.locator("td").nth(2).textContent(), mode);
       await row.getByRole("button", { name: "恢复", exact: true }).click();
       assert.equal(await page.locator("#restore-mode").textContent(), mode);
-      assert.equal(await page.locator("#restore-key").isVisible(), encryption);
+      assert.equal(await page.locator("#restore-key").isVisible(), Boolean(encryption));
       assert.equal(await page.locator("#restore-button").isEnabled(), true);
       await mkdir(join(directory, `restored-${index}`));
       await page.locator("#destination").fill(`restored-${index}`);
@@ -1092,6 +1095,7 @@ test(
       () => !document.getElementById("source").matches(":disabled"),
     );
     assert.equal(await page.locator("#encryption-xchacha").isDisabled(), true);
+    assert.equal(await page.locator("#encryption-aes").isDisabled(), true);
     assert.equal(await page.locator("#encryption-algorithm").isEnabled(), true);
     assert.equal(await page.locator("#encryption-algorithm").inputValue(), "none");
     await page.locator('nav a[href="#repository"]').click();

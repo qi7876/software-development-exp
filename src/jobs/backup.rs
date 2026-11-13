@@ -402,7 +402,7 @@ pub(super) fn run_with_options(
     sync_directory(&absolute_repository_path)?;
 
     let manifest = Manifest {
-        format_version: 4,
+        format_version: 5,
         backup_id: backup_id.to_owned(),
         created_at,
         source: absolute_source_path,
@@ -740,7 +740,7 @@ mod tests {
         let manifest = Manifest::read(&repository, "backup-001").await?;
         assert_eq!(manifest.backup_id, "backup-001");
         assert_eq!(manifest.source, std::fs::canonicalize(&source)?);
-        assert_eq!(manifest.format_version, 4);
+        assert_eq!(manifest.format_version, 5);
         assert!(matches!(
             manifest.compression,
             Some(super::super::content::CompressionOptions::Zstd(_))

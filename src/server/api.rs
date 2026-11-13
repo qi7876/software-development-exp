@@ -103,7 +103,14 @@ struct BackupRequest {
     repository: PathBuf,
     filter: Filter,
     compression: Option<CompressionOptions>,
-    encryption_key_id: Option<String>,
+    encryption: Option<EncryptionRequest>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EncryptionRequest {
+    algorithm: crate::jobs::crypto::EncryptionAlgorithm,
+    key_id: String,
 }
 
 #[derive(Deserialize)]
@@ -154,9 +161,9 @@ async fn start_backup(
     let options = BackupOptions {
         compression: request.compression,
         encryption: request
-            .encryption_key_id
-            .as_deref()
-            .map(|id| state.jobs.keys.select(id))
+            .encryption
+            .as_ref()
+            .map(|e| state.jobs.keys.select(&e.key_id, e.algorithm))
             .transpose()?,
     };
     options.validate()?;

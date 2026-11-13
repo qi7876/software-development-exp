@@ -20,8 +20,38 @@ const PREFIX: usize = 19; // STREAM BE32 reserves four counter bytes and one fin
 pub(super) const CHUNK: usize = 128 * 1024;
 const TAG: usize = 16;
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) enum EncryptionAlgorithm {
+    #[serde(rename = "xchacha20-poly1305")]
+    XChaCha20Poly1305,
+    #[serde(rename = "aes-256-gcm")]
+    Aes256Gcm,
+}
+impl EncryptionAlgorithm {
+    pub(super) fn format(self) -> &'static str {
+        match self {
+            Self::XChaCha20Poly1305 => "xchacha20poly1305-stream-be32-v2",
+            Self::Aes256Gcm => "aes256gcm-stream-be32-v3",
+        }
+    }
+    pub(super) fn from_format(value: &str) -> Option<Self> {
+        match value {
+            "xchacha20poly1305-stream-be32-v2" => Some(Self::XChaCha20Poly1305),
+            "aes256gcm-stream-be32-v3" => Some(Self::Aes256Gcm),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct KeyInfo {
+    pub(crate) key_id: String,
+    pub(crate) fingerprint: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct Encryption {
+    pub(crate) algorithm: EncryptionAlgorithm,
     pub(crate) key_id: String,
     pub(crate) fingerprint: String,
 }
@@ -56,20 +86,29 @@ impl Keyring {
         Ok(Self(keys))
     }
 
-    pub(crate) fn available(&self) -> Vec<Encryption> {
+    pub(crate) fn available(&self) -> Vec<KeyInfo> {
         self.0
             .iter()
-            .map(|(id, key)| Encryption {
+            .map(|(id, key)| KeyInfo {
                 key_id: id.clone(),
                 fingerprint: fingerprint(key),
             })
             .collect()
     }
 
-    pub(crate) fn select(&self, id: &str) -> Result<Encryption, JobError> {
+    pub(crate) fn select(
+        &self,
+        id: &str,
+        algorithm: EncryptionAlgorithm,
+    ) -> Result<Encryption, JobError> {
         self.available()
             .into_iter()
             .find(|key| key.key_id == id)
+            .map(|key| Encryption {
+                algorithm,
+                key_id: key.key_id,
+                fingerprint: key.fingerprint,
+            })
             .ok_or_else(|| {
                 JobError::new(
                     http::StatusCode::BAD_REQUEST,
@@ -137,25 +176,99 @@ fn associated(header: &[u8], context: &[u8]) -> Vec<u8> {
     aad
 }
 
+const AES_MAGIC: &[u8; 8] = b"BAKENC\0\x03";
+const AES_INFO: &[u8] = b"bak-aes-256-gcm-stream-be32-v3";
+
+fn file_key(key: &[u8; 32], salt: &[u8]) -> io::Result<Zeroizing<[u8; 32]>> {
+    let mut derived = Zeroizing::new([0; 32]);
+    hkdf::Hkdf::<Sha256>::new(Some(salt), key)
+        .expand(AES_INFO, derived.as_mut())
+        .map_err(|_| invalid())?;
+    Ok(derived)
+}
+
+enum EncryptStream {
+    XChaCha(EncryptorBE32<XChaCha20Poly1305>),
+    Aes(Box<EncryptorBE32<aes_gcm::Aes256Gcm>>),
+}
+impl EncryptStream {
+    fn next(&mut self, payload: Payload<'_, '_>) -> aead::Result<Vec<u8>> {
+        match self {
+            Self::XChaCha(s) => s.encrypt_next(payload),
+            Self::Aes(s) => s.encrypt_next(payload),
+        }
+    }
+    fn last(self, payload: Payload<'_, '_>) -> aead::Result<Vec<u8>> {
+        match self {
+            Self::XChaCha(s) => s.encrypt_last(payload),
+            Self::Aes(s) => s.encrypt_last(payload),
+        }
+    }
+}
+enum DecryptStream {
+    XChaCha(DecryptorBE32<XChaCha20Poly1305>),
+    Aes(Box<DecryptorBE32<aes_gcm::Aes256Gcm>>),
+}
+impl DecryptStream {
+    fn next(&mut self, payload: Payload<'_, '_>) -> aead::Result<Vec<u8>> {
+        match self {
+            Self::XChaCha(s) => s.decrypt_next(payload),
+            Self::Aes(s) => s.decrypt_next(payload),
+        }
+    }
+    fn last(self, payload: Payload<'_, '_>) -> aead::Result<Vec<u8>> {
+        match self {
+            Self::XChaCha(s) => s.decrypt_last(payload),
+            Self::Aes(s) => s.decrypt_last(payload),
+        }
+    }
+}
+
 pub(super) struct EncryptWriter<W> {
     inner: W,
-    stream: EncryptorBE32<XChaCha20Poly1305>,
+    stream: EncryptStream,
     buffer: Zeroizing<Vec<u8>>,
     aad: Vec<u8>,
 }
 
 impl<W: Write> EncryptWriter<W> {
-    pub(super) fn new(mut inner: W, key: &[u8; 32], context: &[u8]) -> io::Result<Self> {
-        let mut prefix = [0u8; PREFIX];
+    pub(super) fn new(
+        mut inner: W,
+        key: &[u8; 32],
+        context: &[u8],
+        algorithm: EncryptionAlgorithm,
+    ) -> io::Result<Self> {
+        let mut header = match algorithm {
+            EncryptionAlgorithm::XChaCha20Poly1305 => MAGIC.to_vec(),
+            EncryptionAlgorithm::Aes256Gcm => AES_MAGIC.to_vec(),
+        };
+        let random_len = match algorithm {
+            EncryptionAlgorithm::XChaCha20Poly1305 => PREFIX,
+            EncryptionAlgorithm::Aes256Gcm => 39,
+        };
+        header.resize(8 + random_len, 0);
         OsRng
-            .try_fill_bytes(&mut prefix)
+            .try_fill_bytes(&mut header[8..])
             .map_err(|_| io::Error::other("cannot generate encryption nonce"))?;
-        let mut header = MAGIC.to_vec();
-        header.extend_from_slice(&prefix);
+        let stream = match algorithm {
+            EncryptionAlgorithm::XChaCha20Poly1305 => {
+                EncryptStream::XChaCha(EncryptorBE32::from_aead(
+                    XChaCha20Poly1305::new(key.into()),
+                    aead::generic_array::GenericArray::from_slice(&header[8..]),
+                ))
+            }
+            EncryptionAlgorithm::Aes256Gcm => {
+                let derived = file_key(key, &header[8..40])?;
+                EncryptStream::Aes(Box::new(EncryptorBE32::from_aead(
+                    aes_gcm::Aes256Gcm::new(derived.as_ref().into()),
+                    aead::generic_array::GenericArray::from_slice(&header[40..]),
+                )))
+            }
+        };
         inner.write_all(&header)?;
         Ok(Self {
             inner,
-            stream: EncryptorBE32::from_aead(XChaCha20Poly1305::new(key.into()), (&prefix).into()),
+            stream,
             buffer: Zeroizing::new(Vec::with_capacity(CHUNK)),
             aad: associated(&header, context),
         })
@@ -164,7 +277,7 @@ impl<W: Write> EncryptWriter<W> {
     pub(super) fn finish(mut self) -> io::Result<W> {
         let encrypted = self
             .stream
-            .encrypt_last(Payload {
+            .last(Payload {
                 msg: &self.buffer,
                 aad: &self.aad,
             })
@@ -182,7 +295,7 @@ impl<W: Write> Write for EncryptWriter<W> {
         if self.buffer.len() == CHUNK {
             let encrypted = self
                 .stream
-                .encrypt_next(Payload {
+                .next(Payload {
                     msg: &self.buffer,
                     aad: &self.aad,
                 })
@@ -199,7 +312,7 @@ impl<W: Write> Write for EncryptWriter<W> {
 
 pub(super) struct DecryptReader<R> {
     inner: R,
-    stream: Option<DecryptorBE32<XChaCha20Poly1305>>,
+    stream: Option<DecryptStream>,
     buffer: Zeroizing<Vec<u8>>,
     offset: usize,
     aad: Vec<u8>,
@@ -207,19 +320,39 @@ pub(super) struct DecryptReader<R> {
 }
 
 impl<R: Read> DecryptReader<R> {
-    pub(super) fn new(mut inner: R, key: &[u8; 32], context: &[u8]) -> io::Result<Self> {
-        let mut header = [0u8; 8 + PREFIX];
+    pub(super) fn new(
+        mut inner: R,
+        key: &[u8; 32],
+        context: &[u8],
+        algorithm: EncryptionAlgorithm,
+    ) -> io::Result<Self> {
+        let (magic, length) = match algorithm {
+            EncryptionAlgorithm::XChaCha20Poly1305 => (MAGIC, 27),
+            EncryptionAlgorithm::Aes256Gcm => (AES_MAGIC, 47),
+        };
+        let mut header = vec![0; length];
         inner.read_exact(&mut header)?;
-        if &header[..8] != MAGIC {
+        if &header[..8] != magic {
             return Err(invalid());
         }
-        let prefix = aead::generic_array::GenericArray::from_slice(&header[8..]);
+        let stream = match algorithm {
+            EncryptionAlgorithm::XChaCha20Poly1305 => {
+                DecryptStream::XChaCha(DecryptorBE32::from_aead(
+                    XChaCha20Poly1305::new(key.into()),
+                    aead::generic_array::GenericArray::from_slice(&header[8..]),
+                ))
+            }
+            EncryptionAlgorithm::Aes256Gcm => {
+                let derived = file_key(key, &header[8..40])?;
+                DecryptStream::Aes(Box::new(DecryptorBE32::from_aead(
+                    aes_gcm::Aes256Gcm::new(derived.as_ref().into()),
+                    aead::generic_array::GenericArray::from_slice(&header[40..]),
+                )))
+            }
+        };
         Ok(Self {
             inner,
-            stream: Some(DecryptorBE32::from_aead(
-                XChaCha20Poly1305::new(key.into()),
-                prefix,
-            )),
+            stream: Some(stream),
             buffer: Zeroizing::new(Vec::new()),
             offset: 0,
             aad: associated(&header, context),
@@ -243,15 +376,9 @@ impl<R: Read> DecryptReader<R> {
             aad: &self.aad,
         };
         let plaintext = if n == encrypted.len() {
-            self.stream
-                .as_mut()
-                .ok_or_else(invalid)?
-                .decrypt_next(payload)
+            self.stream.as_mut().ok_or_else(invalid)?.next(payload)
         } else {
-            self.stream
-                .take()
-                .ok_or_else(invalid)?
-                .decrypt_last(payload)
+            self.stream.take().ok_or_else(invalid)?.last(payload)
         }
         .map_err(|_| invalid())?;
         self.buffer = Zeroizing::new(plaintext);
@@ -290,8 +417,13 @@ mod tests {
     use std::io::Cursor;
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-    fn encrypt(data: &[u8], key: &[u8; 32], context: &[u8]) -> io::Result<Vec<u8>> {
-        let mut writer = EncryptWriter::new(Vec::new(), key, context)?;
+    fn encrypt(
+        data: &[u8],
+        key: &[u8; 32],
+        context: &[u8],
+        algorithm: EncryptionAlgorithm,
+    ) -> io::Result<Vec<u8>> {
+        let mut writer = EncryptWriter::new(Vec::new(), key, context, algorithm)?;
         // Small writes exercise buffering independently of input read boundaries.
         for part in data.chunks(7919) {
             writer.write_all(part)?;
@@ -306,8 +438,14 @@ mod tests {
         }
     }
 
-    fn decrypt(data: &[u8], key: &[u8; 32], context: &[u8]) -> io::Result<Vec<u8>> {
-        let mut reader = DecryptReader::new(ShortReads(Cursor::new(data)), key, context)?;
+    fn decrypt(
+        data: &[u8],
+        key: &[u8; 32],
+        context: &[u8],
+        algorithm: EncryptionAlgorithm,
+    ) -> io::Result<Vec<u8>> {
+        let mut reader =
+            DecryptReader::new(ShortReads(Cursor::new(data)), key, context, algorithm)?;
         let mut out = Vec::new();
         reader.read_to_end(&mut out)?;
         Ok(out)
@@ -315,61 +453,121 @@ mod tests {
 
     #[test]
     fn streaming_boundaries_and_unique_nonces() -> TestResult {
-        for size in [0, 1, CHUNK - 1, CHUNK, CHUNK + 1, 2 * CHUNK, 3 * CHUNK + 17] {
-            let input: Vec<u8> = (0..size).map(|n| (n % 251) as u8).collect();
-            let a = encrypt(&input, &[7; 32], b"context")?;
-            let b = encrypt(&input, &[7; 32], b"context")?;
-            assert_ne!(a, b);
-            assert_eq!(decrypt(&a, &[7; 32], b"context")?, input);
-            assert!(decrypt(&a, &[8; 32], b"context").is_err());
-            assert!(decrypt(&a, &[7; 32], b"other-file").is_err());
+        for algorithm in [
+            EncryptionAlgorithm::XChaCha20Poly1305,
+            EncryptionAlgorithm::Aes256Gcm,
+        ] {
+            for size in [0, 1, CHUNK - 1, CHUNK, CHUNK + 1, 2 * CHUNK, 3 * CHUNK + 17] {
+                let input: Vec<u8> = (0..size).map(|n| (n % 251) as u8).collect();
+                let a = encrypt(&input, &[7; 32], b"context", algorithm)?;
+                let b = encrypt(&input, &[7; 32], b"context", algorithm)?;
+                assert_ne!(a, b);
+                assert_eq!(decrypt(&a, &[7; 32], b"context", algorithm)?, input);
+                assert!(decrypt(&a, &[8; 32], b"context", algorithm).is_err());
+                assert!(decrypt(&a, &[7; 32], b"other-file", algorithm).is_err());
+            }
         }
         Ok(())
     }
 
     #[test]
     fn tampering_truncation_reordering_and_trailing_data_are_rejected() -> TestResult {
-        let data: Vec<u8> = (0..CHUNK * 2).map(|n| (n % 251) as u8).collect();
-        let original = encrypt(&data, &[7; 32], b"context")?;
-        for offset in [0, 7, 8, 26, 27, CHUNK, original.len() - 1] {
-            let mut changed = original.clone();
-            changed[offset] ^= 1;
-            assert!(
-                decrypt(&changed, &[7; 32], b"context").is_err(),
-                "tampered byte {offset}"
-            );
-        }
-        for length in [
-            0,
-            8,
-            26,
-            27,
-            28,
-            27 + CHUNK + TAG,
-            original.len() - TAG,
-            original.len() - 1,
+        for algorithm in [
+            EncryptionAlgorithm::XChaCha20Poly1305,
+            EncryptionAlgorithm::Aes256Gcm,
         ] {
-            assert!(
-                decrypt(&original[..length], &[7; 32], b"context").is_err(),
-                "truncated at {length}"
-            );
+            let data: Vec<u8> = (0..CHUNK * 2).map(|n| (n % 251) as u8).collect();
+            let original = encrypt(&data, &[7; 32], b"context", algorithm)?;
+            for offset in [0, 7, 8, 26, 27, 39, 40, 46, CHUNK, original.len() - 1] {
+                let mut changed = original.clone();
+                changed[offset] ^= 1;
+                assert!(
+                    decrypt(&changed, &[7; 32], b"context", algorithm).is_err(),
+                    "tampered byte {offset}"
+                );
+            }
+            for length in [
+                0,
+                8,
+                26,
+                27,
+                28,
+                27 + CHUNK + TAG,
+                original.len() - TAG,
+                original.len() - 1,
+            ] {
+                assert!(
+                    decrypt(&original[..length], &[7; 32], b"context", algorithm).is_err(),
+                    "truncated at {length}"
+                );
+            }
+            let start = match algorithm {
+                EncryptionAlgorithm::XChaCha20Poly1305 => 27,
+                EncryptionAlgorithm::Aes256Gcm => 47,
+            };
+            let block = CHUNK + TAG;
+            let mut reordered = original.clone();
+            reordered[start..start + block]
+                .copy_from_slice(&original[start + block..start + 2 * block]);
+            reordered[start + block..start + 2 * block]
+                .copy_from_slice(&original[start..start + block]);
+            assert!(decrypt(&reordered, &[7; 32], b"context", algorithm).is_err());
+            let mut duplicated = original.clone();
+            duplicated.splice(start..start, original[start..start + block].iter().copied());
+            assert!(decrypt(&duplicated, &[7; 32], b"context", algorithm).is_err());
+            for trailing in [vec![0], vec![0; block]] {
+                let mut changed = original.clone();
+                changed.extend(trailing);
+                assert!(decrypt(&changed, &[7; 32], b"context", algorithm).is_err());
+            }
         }
-        let start = MAGIC.len() + PREFIX;
-        let block = CHUNK + TAG;
-        let mut reordered = original.clone();
-        reordered[start..start + block]
-            .copy_from_slice(&original[start + block..start + 2 * block]);
-        reordered[start + block..start + 2 * block]
-            .copy_from_slice(&original[start..start + block]);
-        assert!(decrypt(&reordered, &[7; 32], b"context").is_err());
-        let mut duplicated = original.clone();
-        duplicated.splice(start..start, original[start..start + block].iter().copied());
-        assert!(decrypt(&duplicated, &[7; 32], b"context").is_err());
-        for trailing in [vec![0], vec![0; block]] {
-            let mut changed = original.clone();
-            changed.extend(trailing);
-            assert!(decrypt(&changed, &[7; 32], b"context").is_err());
-        }
+        Ok(())
+    }
+
+    #[test]
+    fn aes_reference_vector_and_algorithm_mismatch() -> TestResult {
+        // Independently generated with Python hmac/hashlib and cryptography AESGCM.
+        let salt: Vec<u8> = (0..32).collect();
+        assert_eq!(
+            hex::encode(file_key(&[7; 32], &salt)?.as_ref()),
+            "04d4c4a4e3d57c40b4aea51c12ff130faea236388ab08fe2477211be1d292b32"
+        );
+        let encoded = hex::decode(
+            "42414b454e430003000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000102030405068ac44199b563bd8823da532557aab9e8294ec1baa67e30",
+        )?;
+        assert_eq!(
+            decrypt(
+                &encoded,
+                &[7; 32],
+                b"context",
+                EncryptionAlgorithm::Aes256Gcm
+            )?,
+            b"example"
+        );
+        assert!(
+            decrypt(
+                &encoded,
+                &[7; 32],
+                b"context",
+                EncryptionAlgorithm::XChaCha20Poly1305
+            )
+            .is_err()
+        );
+        let encoded = encrypt(
+            b"example",
+            &[7; 32],
+            b"context",
+            EncryptionAlgorithm::XChaCha20Poly1305,
+        )?;
+        assert!(
+            decrypt(
+                &encoded,
+                &[7; 32],
+                b"context",
+                EncryptionAlgorithm::Aes256Gcm
+            )
+            .is_err()
+        );
         Ok(())
     }
 
@@ -391,7 +589,7 @@ mod tests {
         }
         let files = BTreeMap::from([("main".to_string(), PathBuf::from("key"))]);
         let keys = Keyring::load(directory.path(), &files)?;
-        let selected = keys.select("main")?;
+        let selected = keys.select("main", EncryptionAlgorithm::XChaCha20Poly1305)?;
         assert_eq!(keys.resolve(&selected)?.len(), 32);
         assert!(Keyring::default().resolve(&selected).is_err());
         std::fs::write(&path, hex::encode([42; 32]))?;

@@ -57,7 +57,7 @@
     {
       "id": "FR-11",
       "name": "可选压缩与内容加密",
-      "description": "压缩选择无、Zstd 或自实现流式 LZ77，并可独立加密，构成六种模式。Zstd 等级 1–22；LZ77 窗口 4–1024 KiB、搜索上限 1–256。同时启用固定先压缩后加密。"
+      "description": "压缩选择无、Zstd 或自实现流式 LZ77，并可独立加密，构成九种模式。Zstd 等级 1–22；LZ77 窗口 4–1024 KiB、搜索上限 1–256。同时启用固定先压缩后加密。"
     },
     {
       "id": "FR-12",
@@ -346,7 +346,7 @@
         "NFR-07"
       ],
       "business_rules": [],
-      "notes": "web_ui 可省略，默认关闭；enabled=true 提供编译时嵌入的控制台。旧 archive_url/directory 字段被忽略；logging 已废弃。作业 schema v3、仓库 schema/format v4，旧数据库拒绝且不迁移。",
+      "notes": "web_ui 可省略，默认关闭；enabled=true 提供编译时嵌入的控制台。旧 archive_url/directory 字段被忽略；logging 已废弃。作业 schema v4、仓库 schema/format v5，旧数据库拒绝且不迁移。",
       "basic_flow": [
         {
           "id": "B1",
@@ -502,7 +502,7 @@
         {
           "id": "B1",
           "actor": "CLIENT",
-          "action": "提交 source、repository、完整 filter，可选的带 algorithm 标签的 compression 对象和 encryption_key_id；null/省略 compression 表示不压缩。"
+          "action": "提交 source、repository、完整 filter，可选的带 algorithm 标签的 compression 对象和 encryption 对象（algorithm、key_id）；null/省略 compression 表示不压缩。"
         },
         {
           "id": "B2",

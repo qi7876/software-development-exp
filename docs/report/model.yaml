@@ -17,8 +17,8 @@
       ],
       "details": [
         "浏览器可连接同一或另一台 bak API；连接名称、地址和明文 API key 保存在浏览器 origin 的 localStorage。",
-        "工作目录作业库 schema v3，仓库 schema/format v4；保留命名密钥文件以恢复旧备份。",
-        "普通文件选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 加密，形成六种模式；元数据和文件名仍为明文。"
+        "工作目录作业库 schema v4，仓库 schema/format v5；保留命名密钥文件以恢复旧备份。",
+        "普通文件选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 或 AES-256-GCM 加密，形成九种模式；元数据和文件名仍为明文。"
       ],
       "constraints": [
         "一个工作目录只运行一个服务实例，SQLite 使用本地文件系统。",
@@ -116,7 +116,7 @@
           "name": "jobs.sqlite3",
           "package": "Working directory",
           "type": "database",
-          "stereotype": "queue / history v3"
+          "stereotype": "queue / history v4"
         },
         {
           "id": "Source",
@@ -130,7 +130,7 @@
           "name": "repository.sqlite3",
           "package": "Local repository",
           "type": "database",
-          "stereotype": "metadata v4"
+          "stereotype": "metadata v5"
         },
         {
           "id": "Files",
@@ -564,7 +564,7 @@
       ],
       "details": [
         "BackupOptions.compression 为 Option<CompressionOptions>；None 禁用，Some 为 Zstd 或 LZ77 专属配置，API、任务与仓库元数据均使用带 algorithm 标签的对象。",
-        "Encryption 只包含 key_id 与 fingerprint，不保存密钥材料；Filter 的规则也随请求持久化。",
+        "Encryption 包含 algorithm、key_id 与 fingerprint，不保存密钥材料；Filter 的规则也随请求持久化。",
         "ManifestEntry 是结构体，kind 才是区分 File/Directory/Symlink 的枚举。UnixMetadata 包含纳秒时间戳。"
       ],
       "constraints": [
@@ -655,6 +655,7 @@
           "package": "Encoding settings",
           "stereotype": "struct",
           "attributes": [
+            "+ algorithm: EncryptionAlgorithm",
             "+ key_id: String",
             "+ fingerprint: String"
           ],
@@ -1405,7 +1406,7 @@
           "type": "message",
           "source": "Backup",
           "target": "Repo",
-          "text": "Commit v4 header / entries / metadata / counts"
+          "text": "Commit v5 header / entries / metadata / counts"
         },
         {
           "type": "return",
@@ -1594,7 +1595,7 @@
           "type": "message",
           "source": "Restore",
           "target": "Repo",
-          "text": "Read v4 metadata / match key and fingerprint"
+          "text": "Read v5 metadata / match key and fingerprint"
         },
         {
           "type": "message",

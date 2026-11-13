@@ -866,7 +866,7 @@ async fn http_stays_responsive_and_shutdown_finishes_only_the_active_job() -> Te
 }
 
 #[tokio::test]
-async fn six_storage_modes_keys_and_authenticated_corruption_through_http() -> TestResult {
+async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> TestResult {
     let mut server = TestServer::start().await?;
     server.stop().await?;
     for name in ["current", "previous"] {
@@ -905,31 +905,54 @@ async fn six_storage_modes_keys_and_authenticated_corruption_through_http() -> T
     std::os::unix::fs::symlink("random", server.path("source/link"))?;
     let original = read_tree(&server.path("source"))?;
     let mut encrypted_backups = BTreeMap::new();
-    for (index, (compression, key_id)) in [
-        (Value::Null, None),
-        (json!({"algorithm":"zstd","level":1}), None),
+    for (index, (compression, algorithm, key_id)) in [
+        (Value::Null, Value::Null, None),
+        (json!({"algorithm":"zstd","level":1}), Value::Null, None),
         (
             json!({"algorithm":"lz77","window_kib":8,"search_depth":16}),
+            Value::Null,
             None,
         ),
-        (Value::Null, Some("current")),
-        (json!({"algorithm":"zstd","level":7}), Some("current")),
+        (Value::Null, json!("xchacha20-poly1305"), Some("current")),
+        (
+            json!({"algorithm":"zstd","level":7}),
+            json!("xchacha20-poly1305"),
+            Some("current"),
+        ),
         (
             json!({"algorithm":"lz77","window_kib":64,"search_depth":32}),
+            json!("xchacha20-poly1305"),
+            Some("previous"),
+        ),
+        (Value::Null, json!("aes-256-gcm"), Some("current")),
+        (
+            json!({"algorithm":"zstd","level":7}),
+            json!("aes-256-gcm"),
+            Some("current"),
+        ),
+        (
+            json!({"algorithm":"lz77","window_kib":64,"search_depth":32}),
+            json!("aes-256-gcm"),
             Some("previous"),
         ),
     ]
     .into_iter()
     .enumerate()
     {
-        let job = server.submit("/api/backups", json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":compression, "encryption_key_id": key_id})).await?;
+        let job = server.submit("/api/backups", json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":compression, "encryption": key_id.map(|id| json!({"algorithm":algorithm,"key_id":id}))})).await?;
         let completed = server.wait_job(&job, false).await?;
         assert_eq!(completed["state"], "succeeded", "{completed}");
         let id = completed["result"]["backup_id"]
             .as_str()
             .ok_or("missing ID")?;
         if let Some(key_id) = key_id {
-            encrypted_backups.insert(key_id, id.to_string());
+            encrypted_backups.insert(
+                (
+                    algorithm.as_str().ok_or("missing algorithm")?.to_string(),
+                    key_id,
+                ),
+                id.to_string(),
+            );
         }
         let listed = server.get(LIST_PATH).await?;
         let summary = listed["backups"]
@@ -940,6 +963,9 @@ async fn six_storage_modes_keys_and_authenticated_corruption_through_http() -> T
             .ok_or("missing backup")?;
         assert_eq!(summary["compression"], compression);
         assert_eq!(!summary["encryption"].is_null(), key_id.is_some());
+        if key_id.is_some() {
+            assert_eq!(summary["encryption"]["algorithm"], algorithm);
+        }
         let payload = server
             .path("repo with space/backups")
             .join(id)
@@ -954,7 +980,11 @@ async fn six_storage_modes_keys_and_authenticated_corruption_through_http() -> T
                 assert!(encoded.starts_with(b"BAKLZ77\x01"));
             }
         } else {
-            assert!(encoded.starts_with(b"BAKENC\0\x02"));
+            assert!(encoded.starts_with(if algorithm == "aes-256-gcm" {
+                b"BAKENC\0\x03"
+            } else {
+                b"BAKENC\0\x02"
+            }));
             assert_ne!(encoded, random);
         }
         let destination = format!("restore-{index}");
@@ -991,7 +1021,7 @@ async fn six_storage_modes_keys_and_authenticated_corruption_through_http() -> T
         &SqliteConnectOptions::new().filename(server.path("repo with space/repository.sqlite3")),
     )
     .await?;
-    let bound_id = &encrypted_backups["previous"];
+    let bound_id = &encrypted_backups[&("aes-256-gcm".to_string(), "previous")];
     let original_config: String =
         sqlx::query_scalar("SELECT compression FROM backups WHERE backup_id = ?")
             .bind(bound_id)
@@ -1019,7 +1049,7 @@ async fn six_storage_modes_keys_and_authenticated_corruption_through_http() -> T
         .await?;
     connection.close().await?;
     let unknown = server.client.post(server.url("/api/backups")).bearer_auth(SECRET)
-        .json(&json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":null, "encryption_key_id":"unknown"})).send().await?;
+        .json(&json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":null, "encryption":{"algorithm":"aes-256-gcm","key_id":"unknown"}})).send().await?;
     assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
     let history = serde_json::to_string(&server.get("/api/jobs?limit=100").await?)?;
     for name in ["current", "previous"] {
@@ -1034,20 +1064,26 @@ async fn six_storage_modes_keys_and_authenticated_corruption_through_http() -> T
         };
         std::fs::write(server.path("config.json"), serde_json::to_vec(&config)?)?;
         server.restart().await?;
-        let destination = format!("restore-key-{scenario}");
-        std::fs::create_dir(server.path(&destination))?;
-        let restore = server.submit("/api/restores", json!({"repository":"repo with space", "backup_id":encrypted_backups["current"], "destination":destination})).await?;
-        let failed = server.wait_job(&restore, false).await?;
-        assert_eq!(failed["state"], "failed");
-        assert_eq!(failed["error"]["code"], 400);
-        assert!(read_tree(&server.path(&destination))?.is_empty());
+        for algorithm in ["xchacha20-poly1305", "aes-256-gcm"] {
+            let destination = format!("restore-key-{scenario}-{algorithm}");
+            std::fs::create_dir(server.path(&destination))?;
+            let restore = server.submit("/api/restores", json!({"repository":"repo with space", "backup_id":encrypted_backups[&(algorithm.to_string(), "current")], "destination":destination})).await?;
+            let failed = server.wait_job(&restore, false).await?;
+            assert_eq!(failed["state"], "failed");
+            assert_eq!(failed["error"]["code"], 400);
+            assert!(read_tree(&server.path(&destination))?.is_empty());
+        }
     }
-    std::fs::create_dir(server.path("restore-retained-key"))?;
-    let restore = server.submit("/api/restores", json!({"repository":"repo with space", "backup_id":encrypted_backups["previous"], "destination":"restore-retained-key"})).await?;
-    assert_eq!(
-        server.wait_job(&restore, false).await?["state"],
-        "succeeded"
-    );
+    for algorithm in ["xchacha20-poly1305", "aes-256-gcm"] {
+        let destination = format!("restore-retained-key-{algorithm}");
+        std::fs::create_dir(server.path(&destination))?;
+        let restore = server.submit("/api/restores", json!({"repository":"repo with space", "backup_id":encrypted_backups[&(algorithm.to_string(), "previous")], "destination":destination})).await?;
+        assert_eq!(
+            server.wait_job(&restore, false).await?["state"],
+            "succeeded"
+        );
+        assert_eq!(read_tree(&server.path(&destination))?, original);
+    }
     server.stop().await?;
     for path in [
         "jobs.sqlite3",
@@ -1078,7 +1114,7 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
             .create_if_missing(true),
     )
     .await?;
-    sqlx::raw_sql("CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve'); PRAGMA user_version = 3;").execute(&mut connection).await?;
+    sqlx::raw_sql("CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve'); PRAGMA user_version = 4;").execute(&mut connection).await?;
     connection.close().await?;
     let id = server.backup().await?;
     let failed = server.wait_job(&id, false).await?;
@@ -1087,7 +1123,7 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
         failed["error"]["message"]
             .as_str()
             .ok_or("missing error")?
-            .contains("schema version 3")
+            .contains("schema version 4")
     );
     assert!(!server.path("repo with space/backups").exists());
     let mut connection =
@@ -1102,7 +1138,7 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
         sqlx::query_scalar::<_, i64>("PRAGMA user_version")
             .fetch_one(&mut connection)
             .await?,
-        3
+        4
     );
     connection.close().await?;
     server.stop().await
@@ -1147,6 +1183,38 @@ async fn compression_configuration_validates_before_admission_and_persists() -> 
     assert_eq!(
         last["jobs"][0]["request"]["compression"],
         json!({"algorithm":"lz77","window_kib":1024,"search_depth":256})
+    );
+    server.stop().await
+}
+
+#[tokio::test]
+async fn encryption_configuration_rejects_invalid_requests_before_admission() -> TestResult {
+    let mut server = TestServer::start().await?;
+    for encryption in [
+        json!(true),
+        json!("aes-256-gcm"),
+        json!({}),
+        json!({"algorithm":"unknown","key_id":"current"}),
+        json!({"algorithm":"aes-256-gcm"}),
+        json!({"key_id":"current"}),
+        json!({"algorithm":null,"key_id":"current"}),
+        json!({"algorithm":"aes-256-gcm","key_id":42}),
+        json!({"algorithm":"aes-256-gcm","key_id":""}),
+        json!({"algorithm":"aes-256-gcm","key_id":"unknown"}),
+        json!({"algorithm":"aes-256-gcm","key_id":"current","extra":true}),
+    ] {
+        let response = server.client.post(server.url("/api/backups")).bearer_auth(SECRET)
+            .json(&json!({"source":"source","repository":"repo with space","filter":unfiltered(),"encryption":encryption})).send().await?;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{encryption}");
+    }
+    let response = server.client.post(server.url("/api/backups")).bearer_auth(SECRET)
+        .json(&json!({"source":"source","repository":"repo with space","filter":unfiltered(),"encryption_key_id":null})).send().await?;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(
+        server.get("/api/jobs?limit=100").await?["jobs"]
+            .as_array()
+            .ok_or("missing jobs")?
+            .is_empty()
     );
     server.stop().await
 }

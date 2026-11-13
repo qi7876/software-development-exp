@@ -1,6 +1,6 @@
 use super::{
     JobError,
-    crypto::{DecryptReader, EncryptWriter, Encryption, Keyring},
+    crypto::{DecryptReader, EncryptWriter, Encryption, EncryptionAlgorithm, Keyring},
 };
 use std::{
     fs::File,
@@ -91,6 +91,21 @@ impl<'a> Content<'a> {
 
     fn context(&self, path: &Path) -> io::Result<Vec<u8>> {
         // Tuple order and serde's path representation are part of encrypted format v2.
+        if self
+            .options
+            .encryption
+            .as_ref()
+            .is_some_and(|e| e.algorithm == EncryptionAlgorithm::Aes256Gcm)
+        {
+            return serde_json::to_vec(&(
+                self.backup_id,
+                path,
+                &self.options.compression,
+                self.options.encryption.as_ref().map(|e| &e.fingerprint),
+                EncryptionAlgorithm::Aes256Gcm,
+            ))
+            .map_err(io::Error::other);
+        }
         serde_json::to_vec(&(
             self.backup_id,
             path,
@@ -102,7 +117,16 @@ impl<'a> Content<'a> {
 
     pub(super) fn writer(&self, file: File, path: &Path) -> io::Result<ContentWriter> {
         let writer = match self.key {
-            Some(key) => Sink::Encrypted(EncryptWriter::new(file, key, &self.context(path)?)?),
+            Some(key) => Sink::Encrypted(EncryptWriter::new(
+                file,
+                key,
+                &self.context(path)?,
+                self.options
+                    .encryption
+                    .as_ref()
+                    .ok_or_else(|| io::Error::other("missing encryption configuration"))?
+                    .algorithm,
+            )?),
             None => Sink::Plain(file),
         };
         match &self.options.compression {
@@ -118,7 +142,16 @@ impl<'a> Content<'a> {
 
     pub(super) fn reader(&self, file: File, path: &Path) -> io::Result<ContentReader> {
         let reader: Box<dyn Read> = match self.key {
-            Some(key) => Box::new(DecryptReader::new(file, key, &self.context(path)?)?),
+            Some(key) => Box::new(DecryptReader::new(
+                file,
+                key,
+                &self.context(path)?,
+                self.options
+                    .encryption
+                    .as_ref()
+                    .ok_or_else(|| io::Error::other("missing encryption configuration"))?
+                    .algorithm,
+            )?),
             None => Box::new(file),
         };
         match &self.options.compression {
