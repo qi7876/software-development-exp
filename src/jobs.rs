@@ -25,7 +25,7 @@ use tokio::sync::{Notify, watch};
 use uuid::Uuid;
 
 const JOBS_SCHEMA: storage::Schema = storage::Schema {
-    version: 3,
+    version: 4,
     sql: "
 CREATE TABLE jobs (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -687,7 +687,7 @@ mod encryption_tests {
         let directory = crate::test_support::TestDirectory::new()?;
         let path = directory.path().join("jobs.sqlite3");
         let schema = storage::Schema {
-            version: 2,
+            version: 3,
             sql: "CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve');",
         };
         let pool = storage::open(&path, schema, true).await?;
@@ -710,73 +710,78 @@ mod encryption_tests {
 
     #[tokio::test]
     async fn queued_encryption_pins_key_across_restart() -> Result<(), Box<dyn std::error::Error>> {
-        for scenario in ["same", "missing", "changed"] {
-            let directory = crate::test_support::TestDirectory::new()?;
-            let root = directory.path();
-            std::fs::create_dir(root.join("source"))?;
-            std::fs::create_dir(root.join("repository"))?;
-            std::fs::write(root.join("source/file"), b"secret data")?;
-            std::fs::write(root.join("key"), hex::encode([7; 32]))?;
-            let files = BTreeMap::from([("main".to_string(), PathBuf::from("key"))]);
-            let keys = crypto::Keyring::load(root, &files)?;
-            let encryption = keys.select("main")?;
-            let jobs = JobManager::open(root.to_owned(), keys).await?;
-            let job = jobs
-                .submit(JobRequest::Backup {
-                    source: "source".into(),
-                    repository: "repository".into(),
-                    filter: Box::new(crate::test_support::unfiltered()?),
-                    options: BackupOptions {
-                        compression: Some(CompressionOptions::Zstd(ZstdOptions { level: 7 })),
-                        encryption: Some(encryption.clone()),
-                    },
-                })
-                .await?;
-            jobs.close().await;
-            if scenario == "changed" {
-                std::fs::write(root.join("key"), hex::encode([8; 32]))?;
-            }
-            let keys = if scenario == "missing" {
-                crypto::Keyring::default()
-            } else {
-                crypto::Keyring::load(root, &files)?
-            };
-            let jobs = JobManager::open(root.to_owned(), keys).await?;
-            let (stop, stopped) = watch::channel(false);
-            let worker_jobs = jobs.clone();
-            let worker = tokio::spawn(async move { worker_jobs.run_worker(stopped).await });
-            let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                loop {
-                    let current = jobs
-                        .get_job(&job.job_id)
-                        .await?
-                        .ok_or_else(|| JobError::internal("missing job"))?;
-                    if !matches!(current.state, JobState::Queued | JobState::Running) {
-                        return Ok::<_, JobError>(current);
+        for algorithm in [
+            crypto::EncryptionAlgorithm::XChaCha20Poly1305,
+            crypto::EncryptionAlgorithm::Aes256Gcm,
+        ] {
+            for scenario in ["same", "missing", "changed"] {
+                let directory = crate::test_support::TestDirectory::new()?;
+                let root = directory.path();
+                std::fs::create_dir(root.join("source"))?;
+                std::fs::create_dir(root.join("repository"))?;
+                std::fs::write(root.join("source/file"), b"secret data")?;
+                std::fs::write(root.join("key"), hex::encode([7; 32]))?;
+                let files = BTreeMap::from([("main".to_string(), PathBuf::from("key"))]);
+                let keys = crypto::Keyring::load(root, &files)?;
+                let encryption = keys.select("main", algorithm)?;
+                let jobs = JobManager::open(root.to_owned(), keys).await?;
+                let job = jobs
+                    .submit(JobRequest::Backup {
+                        source: "source".into(),
+                        repository: "repository".into(),
+                        filter: Box::new(crate::test_support::unfiltered()?),
+                        options: BackupOptions {
+                            compression: Some(CompressionOptions::Zstd(ZstdOptions { level: 7 })),
+                            encryption: Some(encryption.clone()),
+                        },
+                    })
+                    .await?;
+                jobs.close().await;
+                if scenario == "changed" {
+                    std::fs::write(root.join("key"), hex::encode([8; 32]))?;
+                }
+                let keys = if scenario == "missing" {
+                    crypto::Keyring::default()
+                } else {
+                    crypto::Keyring::load(root, &files)?
+                };
+                let jobs = JobManager::open(root.to_owned(), keys).await?;
+                let (stop, stopped) = watch::channel(false);
+                let worker_jobs = jobs.clone();
+                let worker = tokio::spawn(async move { worker_jobs.run_worker(stopped).await });
+                let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    loop {
+                        let current = jobs
+                            .get_job(&job.job_id)
+                            .await?
+                            .ok_or_else(|| JobError::internal("missing job"))?;
+                        if !matches!(current.state, JobState::Queued | JobState::Running) {
+                            return Ok::<_, JobError>(current);
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
                     }
-                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                })
+                .await??;
+                stop.send_replace(true);
+                worker.await??;
+                match outcome.state {
+                    JobState::Succeeded(_) => assert_eq!(scenario, "same"),
+                    JobState::Failed(error) => {
+                        assert_ne!(scenario, "same", "{}", error.message);
+                        assert_eq!(error.code, StatusCode::BAD_REQUEST);
+                        assert!(!root.join("repository/backups").exists());
+                    }
+                    _ => return Err("job did not finish".into()),
                 }
-            })
-            .await??;
-            stop.send_replace(true);
-            worker.await??;
-            match outcome.state {
-                JobState::Succeeded(_) => assert_eq!(scenario, "same"),
-                JobState::Failed(error) => {
-                    assert_ne!(scenario, "same", "{}", error.message);
-                    assert_eq!(error.code, StatusCode::BAD_REQUEST);
-                    assert!(!root.join("repository/backups").exists());
-                }
-                _ => return Err("job did not finish".into()),
+                let saved = serde_json::to_string(&outcome.request)?;
+                assert!(saved.contains(&encryption.fingerprint));
+                assert_eq!(
+                    serde_json::from_str::<Value>(&saved)?["compression"]["level"],
+                    7
+                );
+                assert!(!saved.contains(&hex::encode([7; 32])));
+                jobs.close().await;
             }
-            let saved = serde_json::to_string(&outcome.request)?;
-            assert!(saved.contains(&encryption.fingerprint));
-            assert_eq!(
-                serde_json::from_str::<Value>(&saved)?["compression"]["level"],
-                7
-            );
-            assert!(!saved.contains(&hex::encode([7; 32])));
-            jobs.close().await;
         }
         Ok(())
     }

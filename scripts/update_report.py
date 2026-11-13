@@ -370,7 +370,7 @@ def _draw_workflow(path: Path) -> None:
         "Browser / API\n202 + job ID",
         "Durable FIFO\njob queue",
         "Filter / encode\nZstd / LZ77 / AEAD",
-        "Sync / publish\nmetadata v4",
+        "Sync / publish\nmetadata v5",
         "List published\nbackups",
         "Decode / verify\nUnix metadata",
     )
@@ -405,7 +405,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "bak 是面向个人用户的本地文件备份软件。当前提供全量备份、已发布备份列表和完整恢复，"
-        "支持筛选、Unix 元数据、符号链接、可选 Zstd/LZ77 压缩和 XChaCha20-Poly1305 内容加密，"
+        "支持筛选、Unix 元数据、符号链接、可选 Zstd/LZ77 压缩和 XChaCha20-Poly1305 / AES-256-GCM 内容加密，"
         "通过认证流、原始大小与 SHA-256 校验验证恢复结果，并以持久化作业提供可查询状态。",
     )
     _heading(document, anchor, "1.2 综合描述", 2)
@@ -499,7 +499,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
             (
                 "POST /api/backups",
                 "JSON: source、repository、filter、compression；可选 "
-                "compression 为 null 或算法配置对象，另可指定 encryption_key_id；先入库再返回 "
+                "compression 为 null 或算法配置对象，另可指定 encryption 对象（algorithm、key_id）；先入库再返回 "
                 "202/Location。",
             ),
             (
@@ -580,8 +580,8 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "backups/<backup_id>/ 镜像保存源相对路径，"
         "载荷保留原名，内容可原样、只压缩、只加密或先压缩再加密；空目录和符号链接有独立条目。"
         "文件与目录同步后，一次提交头、条目、Unix 根元数据与统计。"
-        "作业库 schema v3、仓库 format/schema "
-        "v4，旧数据库拒绝且不迁移。",
+        "作业库 schema v4、仓库 format/schema "
+        "v5，旧数据库拒绝且不迁移。",
     )
     _paragraph(
         document,
@@ -769,7 +769,7 @@ def _populate_system_design(
                 "构建与依赖",
                 "Cargo 与 Cargo.lock；uv 管理文档依赖；"
                 "axum、Tokio、SQLx/SQLite、Zstd、SHA-256、RustCrypto "
-                "XChaCha20-Poly1305、regex、serde。",
+                "XChaCha20-Poly1305 / AES-256-GCM、regex、serde。",
             ),
             (
                 "版本控制",
@@ -860,7 +860,7 @@ def _populate_system_design(
     for boundary in (
         "一个 bak 进程；HTTP、worker 和阻塞文件操作通过普通 Rust 调用与 Tokio 协作。",
         "API 只经 JobManager 门面访问业务；私有模块不为测试暴露。",
-        "仓库 format/schema v4、作业库 v3；"
+        "仓库 format/schema v5、作业库 v4；"
         "过滤和可选编码已实现，旧数据库与 JSON manifest "
         "不读取或迁移。",
         "作业和仓库分属两个数据库；元数据提交与作业终态提交之间存在独立失败边界。",
@@ -893,7 +893,7 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             (
                 "应用集成 / 端到端测试",
                 "tests/server.rs 运行实际二进制，以 HTTP "
-                "验证认证、六种编码模式、密钥、完整闭环、历史、响应和 "
+                "验证认证、九种编码模式、密钥、完整闭环、历史、响应和 "
                 "SIGTERM/SIGKILL 恢复；Playwright "
                 "使用真实服务验证 UI。",
             ),
@@ -953,7 +953,7 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
                 "正则优先级、时间边界、目录剪枝、计数、权限/时间、符号链接和根属性恢复。",
             ),
             (
-                "六模式与密钥",
+                "九模式与密钥",
                 "原样、压缩、加密和先压缩后加密；错误密钥、替换密钥、截断、块重排"
                 "、尾随数据及认证失败。",
             ),
