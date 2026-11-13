@@ -299,6 +299,19 @@ test(
     await refreshUntil(page, () =>
       Boolean(document.querySelector(".job .badge.succeeded")),
     );
+    const scheduledHistory = /\/api\/jobs(?:\?|$)/;
+    await page.route(scheduledHistory, async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.jobs[0].schedule_id = "daily-browser";
+      body.jobs[0].scheduled_for = 1794528000000;
+      await route.fulfill({ response, json: body });
+    });
+    await page.locator("#refresh-jobs").click();
+    await page.locator(".job details summary").first().click();
+    await page.getByText("daily-browser", { exact: true }).waitFor();
+    assert.equal(await page.locator(".job dt").filter({ hasText: "计划时间" }).count(), 1);
+    await page.unroute(scheduledHistory);
     await page.getByRole("button", { name: "查看备份", exact: true }).click();
     await page.locator(".backup-row button").waitFor();
     assert.equal(

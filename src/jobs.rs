@@ -843,3 +843,52 @@ mod encryption_tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod schedule_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn schedule_admission_rolls_back_and_running_work_blocks_next_tick()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = crate::test_support::TestDirectory::new()?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
+        let request = JobRequest::Backup {
+            source: "source".into(),
+            repository: "repo".into(),
+            filter: Box::new(Filter::default()),
+            options: BackupOptions::default(),
+        };
+        jobs.initialize_schedule("daily", 100).await?;
+        sqlx::raw_sql("CREATE TRIGGER reject_scheduled BEFORE INSERT ON jobs BEGIN SELECT RAISE(ABORT, 'injected admission failure'); END;").execute(&jobs.pool).await?;
+        assert!(
+            jobs.schedule_tick("daily", 101, Some(&request))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT minute FROM schedule_cursors WHERE schedule_id = 'daily'"
+            )
+            .fetch_one(&jobs.pool)
+            .await?,
+            100
+        );
+        sqlx::query("DROP TRIGGER reject_scheduled")
+            .execute(&jobs.pool)
+            .await?;
+        jobs.schedule_tick("daily", 101, Some(&request)).await?;
+        let job = jobs.claim().await?.ok_or("missing queued job")?;
+        jobs.schedule_tick("daily", 102, Some(&request)).await?;
+        assert!(jobs.claim().await?.is_none());
+        jobs.finish(&job.job_id, Err(JobError::internal("test failure")))
+            .await?;
+        jobs.schedule_tick("daily", 102, Some(&request)).await?;
+        assert!(jobs.claim().await?.is_none());
+        jobs.schedule_tick("daily", 103, Some(&request)).await?;
+        assert!(jobs.claim().await?.is_some());
+        jobs.close().await;
+        Ok(())
+    }
+}

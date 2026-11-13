@@ -25,7 +25,7 @@ Task history is paginated, while repository backup listing currently returns all
 
 Implement the documented hybrid pack design only after measuring small-file workloads. Preserve per-file integrity checks, define a new format version, and test truncated/damaged packs as well as ordinary round trips. Individual files within a pack share its damage exposure.
 
-Permissions, modification times, symbolic links, and directory synchronization on non-Unix platforms remain unsupported. Define required preservation semantics before claiming broader platform support. Filtering and file-content encryption are implemented. Scheduling, encrypted metadata, and remote storage remain later extensions.
+Permissions, modification times, symbolic links, and directory synchronization on non-Unix platforms remain unsupported. Define required preservation semantics before claiming broader platform support. Filtering, file-content encryption and configuration-driven scheduled backups are implemented. Encrypted metadata and remote storage remain later extensions.
 
 The service currently uses one shared Bearer secret and plain HTTP. Non-local deployment requires a deliberate transport/authentication setup; separate users and permission isolation are outside this MVP. Packaging and automated CI should follow the actual supported operating systems and run the unified check command, including browser checks where dependencies are installed.
 

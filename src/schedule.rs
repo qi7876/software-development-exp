@@ -271,6 +271,16 @@ mod tests {
                     .is_time_matching(&time(no)?.with_timezone(&scheduler.timezone))?
             );
         }
+        // Spring's missing local 02:30 has no matching UTC minute.
+        let spring = scheduler(config("30 2 * * *", "America/New_York"))?;
+        for minute in 0..180 {
+            let utc = time("2026-03-08T06:00:00Z")? + chrono::Duration::minutes(minute);
+            assert!(
+                !spring.plans[0]
+                    .cron
+                    .is_time_matching(&utc.with_timezone(&spring.timezone))?
+            );
+        }
         let scheduler = scheduler(config("30 1 * * *", "America/New_York"))?;
         for utc in ["2026-11-01T05:30:00Z", "2026-11-01T06:30:00Z"] {
             assert!(
