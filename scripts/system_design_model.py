@@ -207,12 +207,12 @@ def validate_model(model: Model) -> None:
     uc_ids = {case["id"] for case in requirements["use_cases"]}
     fr_ids = {requirement["id"] for requirement in requirements["functional_requirements"]}
     nfr_ids = {requirement["id"] for requirement in requirements["nonfunctional_requirements"]}
-    if len(diagrams) != 7:
-        raise ValueError("docs/report/model.yaml must define exactly seven diagrams")
+    if len(diagrams) != 8:
+        raise ValueError("docs/report/model.yaml must define exactly eight diagrams")
     ids = [diagram.get("id", "") for diagram in diagrams]
     if len(ids) != len(set(ids)):
         raise ValueError("diagram IDs must be unique")
-    expected_kinds = {"class": 2, "sequence": 3, "component": 2}
+    expected_kinds = {"class": 2, "sequence": 4, "component": 2}
     actual_kinds = {
         kind: sum(diagram["kind"] == kind for diagram in diagrams) for kind in expected_kinds
     }
@@ -222,7 +222,7 @@ def validate_model(model: Model) -> None:
         "container": 1,
         "component": 1,
         "logical-class": 2,
-        "sequence": 3,
+        "sequence": 4,
     }
     actual_views = {
         view: sum(diagram["view"] == view for diagram in diagrams) for view in expected_views

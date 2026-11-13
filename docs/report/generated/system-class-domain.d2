@@ -16,6 +16,8 @@ diagram: "Job and Repository Data Types" {
       "+ job_id": "String"
       "+ request": "JobRequest"
       "+ state": "JobState"
+      "+ schedule_id": "Option<String>"
+      "+ scheduled_for": "Option<i64>"
     }
     JobRequest: "<<enum>>\nJobRequest" {
       shape: class
@@ -50,6 +52,11 @@ diagram: "Job and Repository Data Types" {
       shape: class
       "+ window_kib": "u16"
       "+ search_depth": "u16"
+    }
+    Algorithm: "<<enum>>\nEncryptionAlgorithm" {
+      shape: class
+      "+ XChaCha20Poly1305"
+      "+ Aes256Gcm"
     }
   }
   package_2: "Repository data" {
@@ -144,5 +151,9 @@ diagram: "Job and Repository Data Types" {
     target-arrowhead.label: "0..1"
     source-arrowhead.shape: diamond
     source-arrowhead.style.filled: true
+  }
+  package_1.Encryption -- package_1.Algorithm: "selected algorithm" {
+    source-arrowhead.label: "1"
+    target-arrowhead.label: "1"
   }
 }

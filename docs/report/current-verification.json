@@ -1,8 +1,8 @@
 {
-  "recorded_at": "2026-10-31T15:53:51.863249+08:00",
-  "production_revision": "61ecd3c7832165c46eae0a7e3b898b484c70fe90",
-  "source_tree": "28597797df7061949756b611b98f1d2c503c9932",
-  "environment": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "recorded_at": "2026-11-13T11:04:44.631570+08:00",
+  "production_revision": "58e319c2ab68544a9b938189175c9848e50beb91",
+  "source_tree": "ead5d377cc7e810eb6888bbf59facc81572c2988",
+  "environment": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
   "checks": [
     {
       "command": "cargo fmt --all --check",
@@ -11,12 +11,12 @@
     },
     {
       "command": "cargo clippy --all-targets --all-features -- -D warnings",
-      "result": "通过，无警告",
+      "result": "通过",
       "exit_code": 0
     },
     {
       "command": "cargo test --all-targets",
-      "result": "73 项单元/组件测试和 12 项真实 HTTP 集成测试通过；1 项手动测量在普通测试中按设计跳过，已单独执行通过",
+      "result": "78 项单元/组件测试和 13 项 HTTP 集成测试通过；1 项手动测量忽略",
       "exit_code": 0
     },
     {
@@ -26,12 +26,12 @@
     },
     {
       "command": "npm --prefix web run check",
-      "result": "JavaScript 语法检查通过",
+      "result": "通过",
       "exit_code": 0
     },
     {
       "command": "BAK_BROWSER_CHANNEL=chrome npm --prefix web test",
-      "result": "5 组真实浏览器流程通过",
+      "result": "5 组浏览器流程通过，包含计划来源展示",
       "exit_code": 0
     },
     {
@@ -46,7 +46,7 @@
     },
     {
       "command": "uv run python -m unittest discover -s docs/report/tests",
-      "result": "9 项测试通过，包括本地 Word 保护检查，无跳过",
+      "result": "9 项测试通过，无跳过；包含 Word 保留章节与渲染图表检查",
       "exit_code": 0
     },
     {
@@ -56,18 +56,14 @@
     },
     {
       "command": "uv run scripts/update_system_design.py --check",
-      "result": "设计 D2/PNG 无漂移",
-      "exit_code": 0
-    },
-    {
-      "command": "cargo test --profile profiling jobs::lz77::measurements::measure_samples -- --ignored --nocapture",
-      "result": "1 项手动测量通过，6 条样本记录见 lz77-measurements.json",
+      "result": "8 个设计视图 D2/PNG 无漂移",
       "exit_code": 0
     }
   ],
-  "scope": "LZ77 feature and report regression; codec-only measurements recorded separately, no rerun of historical end-to-end stability/Instruments measurements.",
+  "scope": "Current architecture report refresh: configured Cron scheduling, dual AEAD algorithms, manual browser refresh, report preservation and generated diagrams; historical performance, stability, Instruments and codec benchmarks were not rerun.",
   "historical_evidence": "verification.json (2026-10-14)",
   "entrypoint": "BAK_BROWSER_CHANNEL=chrome uv run scripts/check.py --report --web-ui",
   "historical_measurements_rerun": false,
-  "codec_measurements": "lz77-measurements.json"
+  "codec_measurements": "lz77-measurements.json",
+  "document_revision": "443850847409c1fcc646f14c6747d1261f6c2d9a"
 }

@@ -4,8 +4,8 @@
 
 长期维护的架构视图为 [C1](../architecture/system-context.md) 和 [C2](../architecture/containers.md)；使用方式、限制与开发入口见根 [README](../../README.md)。
 
-- `use-cases.yaml`：JSON 格式的 YAML 1.2；维护 12 项功能需求、7 项非功能约束、9 个用例和需求追踪。
-- `model.yaml`：7 个设计视图，包括运行/存储和模块构件图、2 个类型/模块图，以及启动、备份和恢复时序图。
+- `use-cases.yaml`：JSON 格式的 YAML 1.2；维护 13 项功能需求、7 项非功能约束、10 个用例和需求追踪。
+- `model.yaml`：8 个设计视图，包括运行/存储和模块构件图、2 个类型/模块图，以及启动、备份、恢复和定时触发时序图。
 - `generated/`：模型生成的 D2、PNG 和实现流程图；修改输入模型与生成脚本，不直接编辑产物。
 - `current-verification.json`：当前代码版本的功能回归、文档校验与执行环境记录。
 - `lz77-measurements.json`：当前优化构建中 Zstd/LZ77 对三类 1 MiB 样本的内存编解码记录，不含文件 IO、HTTP 或加密成本。
