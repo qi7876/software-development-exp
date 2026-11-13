@@ -22,16 +22,16 @@ const state = {
   repositoryRequest: 0,
 };
 const statuses = {
-  queued: "排队中",
-  running: "执行中",
-  succeeded: "已完成",
-  failed: "失败",
+  queued: "Queued",
+  running: "Running",
+  succeeded: "Succeeded",
+  failed: "Failed",
 };
 const views = {
-  backup: "创建备份",
-  repository: "备份仓库",
-  jobs: "任务记录",
-  connections: "连接管理",
+  backup: "Create backup",
+  repository: "Backup repository",
+  jobs: "Task records",
+  connections: "Connections",
 };
 const storageKey = "bak.connections.v1";
 
@@ -89,7 +89,7 @@ function empty(title, description = "") {
 }
 
 function date(value) {
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
     timeStyle: "medium",
   }).format(new Date(value));
@@ -112,19 +112,19 @@ async function requestApi(connection, path, options, signal) {
     });
     body = await response.json();
   } catch (error) {
-    if (signal.aborted) throw new DOMException("连接已取消", "AbortError");
+    if (signal.aborted) throw new DOMException("Connection cancelled", "AbortError");
     throw new Error(
       options.method === "POST"
-        ? "未收到完整的服务响应，任务可能已提交。请先刷新任务记录，确认后再重试。"
-        : "无法连接 API，请检查地址、服务状态和跨域配置。HTTPS 页面应连接 HTTPS API。",
+        ? "No complete response from the service. The task may have been submitted. Refresh task records and check before retrying."
+        : "Cannot reach the API. Check the address, service status and CORS settings. An HTTPS page must connect to an HTTPS API.",
     );
   }
-  if (signal.aborted) throw new DOMException("连接已取消", "AbortError");
+  if (signal.aborted) throw new DOMException("Connection cancelled", "AbortError");
   if (!response.ok) {
     const error = new Error(
       response.status === 401
-        ? "访问密钥无效，请检查后重新连接。"
-        : body?.error?.message || `请求失败（${response.status}）`,
+        ? "Invalid access key. Check it and reconnect."
+        : body?.error?.message || `Request failed (${response.status})`,
     );
     error.status = response.status;
     throw error;
@@ -138,7 +138,7 @@ async function api(path, options = {}) {
     return await requestApi(state.connection, path, options, session.signal);
   } catch (error) {
     if (session.signal.aborted)
-      throw new DOMException("连接已取消", "AbortError");
+      throw new DOMException("Connection cancelled", "AbortError");
     if (error.status === 401) {
       const connection = state.connection;
       resetSession();
@@ -169,7 +169,7 @@ function resetSession() {
   state.page = 0;
   state.displayedPage = 0;
   state.next = null;
-  $("connection-state").textContent = "未连接";
+  $("connection-state").textContent = "Disconnected";
   $("connection-status").dataset.state = "disconnected";
   $("version").textContent = "";
   ["source", "backup-repository", "repository-path", "destination"].forEach(
@@ -185,7 +185,7 @@ function resetSession() {
   $("compression-level").value = "3";
   $("compression-level-slider").value = "3";
   $("encryption-algorithm").value = "none";
-  $("encryption-key").replaceChildren(new Option("选择服务端密钥", ""));
+  $("encryption-key").replaceChildren(new Option("Select a server key", ""));
   updateEncodingOptions();
   document.querySelectorAll("[data-connected]").forEach((element) => {
     element.disabled = true;
@@ -196,17 +196,17 @@ function resetSession() {
   ["repository-button", "restore-button"].forEach((id) => {
     $(id).disabled = false;
   });
-  $("jobs-page").textContent = "第 1 页";
+  $("jobs-page").textContent = "Page 1";
   $("backup-job-link").hidden = true;
   $("restore-dialog").close();
   ["connection", "backup", "repository", "jobs", "restore"].forEach((name) =>
     message(`${name}-message`),
   );
-  $("repository-label").textContent = "尚未载入仓库";
-  $("jobs-updated").textContent = "连接后载入任务记录，点击“刷新”更新状态。";
-  $("job-list").replaceChildren(empty("尚未连接服务。"));
+  $("repository-label").textContent = "No repository loaded";
+  $("jobs-updated").textContent = "Task records load after connecting. Click Refresh to update.";
+  $("job-list").replaceChildren(empty("Not connected."));
   delete $("job-list").dataset.snapshot;
-  $("backup-list").replaceChildren(empty("尚未载入仓库。"));
+  $("backup-list").replaceChildren(empty("No repository loaded."));
   renderConnections();
 }
 
@@ -222,7 +222,7 @@ function normalizeUrl(value) {
     url.hash
   ) {
     throw new Error(
-      "请输入 HTTP / HTTPS 地址和端口，不包含用户名、路径或查询参数。",
+      "Enter an HTTP or HTTPS address and port, without username, path or query.",
     );
   }
   return url.origin;
@@ -241,7 +241,7 @@ function saveConnections() {
   } catch {
     message(
       "storage-message",
-      "浏览器无法保存连接，修改仅在当前页面有效。请检查浏览器存储设置。",
+      "The browser cannot save connections. Changes apply to this page only. Check browser storage settings.",
       true,
     );
   }
@@ -257,7 +257,7 @@ function resetEditor() {
   state.editingUrl = null;
   $("api-url").value = location.origin;
   $("secret").value = "";
-  $("connection-form-title").textContent = "添加连接";
+  $("connection-form-title").textContent = "Add connection";
   $("cancel-edit-connection").hidden = true;
 }
 
@@ -266,7 +266,7 @@ function editConnection(connection) {
   state.editingUrl = connection.url;
   $("api-url").value = connection.url;
   $("secret").value = connection.key;
-  $("connection-form-title").textContent = "编辑连接";
+  $("connection-form-title").textContent = "Edit connection";
   $("cancel-edit-connection").hidden = false;
   message("connection-message");
 }
@@ -275,14 +275,14 @@ function renderConnections() {
   const list = $("connection-list");
   list.replaceChildren();
   if (!state.connections.length) {
-    list.append(empty("没有已保存的连接。请在下方添加。"));
+    list.append(empty("No saved connections. Add one below."));
     return;
   }
   const table = node("table", "data-table connections-table");
-  table.append(node("caption", "sr-only", "已保存的 API 连接"));
+  table.append(node("caption", "sr-only", "Saved API connections"));
   const head = node("thead");
   const header = node("tr");
-  for (const label of ["API 地址", "状态", "操作"]) {
+  for (const label of ["API address", "Status", "Actions"]) {
     const cell = node("th", "", label);
     cell.scope = "col";
     header.append(cell);
@@ -294,22 +294,22 @@ function renderConnections() {
     const active = state.connection?.url === connection.url;
     row.append(
       node("td", "mono", connection.url),
-      node("td", "", active ? "当前连接" : "未连接"),
+      node("td", "", active ? "Current" : "Disconnected"),
     );
     const actions = node("td", "connection-actions");
-    const connect = node("button", "", "连接");
+    const connect = node("button", "", "Connect");
     connect.type = "button";
     connect.disabled = active;
     connect.addEventListener("click", () => {
       void connectProfile(connection);
     });
-    const edit = node("button", "", "编辑");
+    const edit = node("button", "", "Edit");
     edit.type = "button";
     edit.addEventListener("click", () => {
       editConnection(connection);
       $("api-url").focus();
     });
-    const remove = node("button", "danger", "删除");
+    const remove = node("button", "danger", "Delete");
     remove.type = "button";
     remove.addEventListener("click", () => {
       cancelConnectionAttempt();
@@ -320,7 +320,7 @@ function renderConnections() {
       if (state.selectedUrl === connection.url) state.selectedUrl = null;
       if (state.editingUrl === connection.url) resetEditor();
       saveConnections();
-      message("connection-message", "连接已删除。");
+      message("connection-message", "Connection deleted.");
       renderConnections();
     });
     actions.append(connect, edit, remove);
@@ -337,7 +337,7 @@ async function connectProfile(connection, save = false) {
   state.connectionAttempt = attempt;
   const editingUrl = state.editingUrl;
   $("connect-button").disabled = true;
-  message("connection-message", `正在验证 ${connection.url}…`);
+  message("connection-message", `Verifying ${connection.url}…`);
   try {
     const status = await requestApi(
       connection,
@@ -346,7 +346,7 @@ async function connectProfile(connection, save = false) {
       attempt.signal,
     );
     if (!status || typeof status.version !== "string")
-      throw new Error("该地址未返回有效的 bak API 状态。");
+      throw new Error("This address did not return a valid bak API status.");
     if (attempt !== state.connectionAttempt) return;
     if (save) {
       state.connections = state.connections.filter(
@@ -360,7 +360,7 @@ async function connectProfile(connection, save = false) {
     state.connected = true;
     state.selectedUrl = connection.url;
     saveConnections();
-    $("connection-state").textContent = "已连接";
+    $("connection-state").textContent = "Connected";
     $("connection-status").dataset.state = "connected";
     $("version").textContent = `v${status.version}`;
     document.querySelectorAll("[data-connected]").forEach((element) => {
@@ -372,7 +372,7 @@ async function connectProfile(connection, save = false) {
     updateEncodingOptions();
     $("refresh-jobs").disabled = false;
     renderConnections();
-    message("connection-message", "已连接。");
+    message("connection-message", "Connected.");
     await refreshJobs();
   } catch (error) {
     if (attempt === state.connectionAttempt)
@@ -393,13 +393,13 @@ $("connect-form").addEventListener("submit", (event) => {
       url,
       key: $("secret").value,
     };
-    if (!connection.key) throw new Error("请输入访问密钥。");
+    if (!connection.key) throw new Error("Enter the access key.");
     if (
       state.connections.some(
         (item) => item.url === url && item.url !== state.editingUrl,
       )
     ) {
-      throw new Error("该地址已保存，请编辑已有连接。");
+      throw new Error("This address is already saved. Edit the existing connection.");
     }
     void connectProfile(connection, true);
   } catch (error) {
@@ -437,7 +437,7 @@ function restoreConnections() {
   } catch {
     message(
       "storage-message",
-      "无法读取浏览器中的连接配置，请重新添加连接。",
+      "Cannot read saved connections from the browser. Add the connection again.",
       true,
     );
   }
@@ -450,13 +450,13 @@ function restoreConnections() {
 
 async function loadBackups(repository) {
   const request = ++state.repositoryRequest;
-  message("repository-message", "正在读取备份…");
+  message("repository-message", "Reading backups…");
   $("repository-button").disabled = true;
   // Previous results must not appear to belong to a newly requested repository.
   state.repository = "";
   state.backups = [];
-  $("repository-label").textContent = "正在载入";
-  $("backup-list").replaceChildren(empty("正在载入备份", repository));
+  $("repository-label").textContent = "Loading";
+  $("backup-list").replaceChildren(empty("Loading backups", repository));
   try {
     const result = await api(
       `/api/backups?${new URLSearchParams({ repository })}`,
@@ -467,14 +467,14 @@ async function loadBackups(repository) {
     $("repository-path").value = repository;
     if (!$("backup-repository").value.trim())
       $("backup-repository").value = repository;
-    $("repository-label").textContent = `${result.backups.length} 份备份`;
+    $("repository-label").textContent = `${result.backups.length} ${result.backups.length === 1 ? "backup" : "backups"}`;
     message("repository-message");
     renderBackups();
   } catch (error) {
     if (request !== state.repositoryRequest) return;
-    $("repository-label").textContent = "载入失败";
+    $("repository-label").textContent = "Load failed";
     $("backup-list").replaceChildren(
-      empty("无法载入仓库", "检查目录是否存在及服务是否可访问，然后重试。"),
+      empty("Cannot load repository", "Check that the directory exists and the service can access it, then retry."),
     );
     report("repository-message", error);
   } finally {
@@ -487,14 +487,14 @@ function renderBackups() {
   const list = $("backup-list");
   list.replaceChildren();
   if (!state.backups.length) {
-    list.append(empty("仓库中没有已完成的备份。"));
+    list.append(empty("No completed backups in the repository."));
     return;
   }
   const table = node("table", "data-table");
-  table.append(node("caption", "sr-only", "当前仓库的已完成备份"));
+  table.append(node("caption", "sr-only", "Completed backups in the current repository"));
   const head = node("thead");
   const header = node("tr");
-  for (const label of ["创建时间", "备份编号", "存储模式", "操作"]) {
+  for (const label of ["Created", "Backup ID", "Storage mode", "Actions"]) {
     const cell = node("th", "", label);
     cell.scope = "col";
     header.append(cell);
@@ -509,7 +509,7 @@ function renderBackups() {
     created.append(time);
     const info = node("td", "mono", backup.backup_id);
     const action = node("td");
-    const button = node("button", "", "恢复");
+    const button = node("button", "", "Restore");
     button.type = "button";
     button.addEventListener("click", () => {
       state.selection = {
@@ -533,7 +533,7 @@ function renderBackups() {
       $("restore-button").disabled = !available;
       message(
         "restore-message",
-        available ? "" : "服务端缺少匹配的加密密钥，请配置后重新连接。",
+        available ? "" : "The server lacks the matching encryption key. Configure it and reconnect.",
         !available,
       );
       $("restore-dialog").showModal();
@@ -559,18 +559,18 @@ async function submitted(job, id) {
   state.cursors = [null];
   await refreshJobs();
   if (session.signal.aborted) return;
-  message(id, `${job.kind === "backup" ? "备份" : "恢复"}任务已提交。`);
+  message(id, `${job.kind === "backup" ? "Backup" : "Restore"} task submitted.`);
   if (id === "backup-message") $("backup-job-link").hidden = false;
 }
 
 function compressionDescription(compression) {
-  if (!compression) return "不压缩";
+  if (!compression) return "No compression";
   if (compression.algorithm === "zstd")
-    return `Zstd · 等级 ${compression.level}`;
-  return `LZ77 · ${compression.window_kib} KiB · ${compression.search_depth} 候选`;
+    return `Zstd · level ${compression.level}`;
+  return `LZ77 · ${compression.window_kib} KiB · ${compression.search_depth} candidates`;
 }
 function storageMode(backup) {
-  return `${compressionDescription(backup.compression)} · ${backup.encryption ? (backup.encryption.algorithm === "aes-256-gcm" ? "AES-256-GCM" : "XChaCha20-Poly1305") : "不加密"}`;
+  return `${compressionDescription(backup.compression)} · ${backup.encryption ? (backup.encryption.algorithm === "aes-256-gcm" ? "AES-256-GCM" : "XChaCha20-Poly1305") : "No encryption"}`;
 }
 function compressionOptions() {
   if ($("compression-algorithm").value === "none") return null;
@@ -607,8 +607,6 @@ function updateEncodingOptions() {
   $("encryption-key").required = encrypted;
   $("encryption-key").disabled = !encrypted;
   $("encryption-help").hidden = hasKeys;
-  $("encryption-scope").hidden = !encrypted;
-  $("encoding-order").hidden = !encrypted || algorithm === "none";
 }
 $("compression-algorithm").addEventListener("change", updateEncodingOptions);
 $("encryption-algorithm").addEventListener("change", updateEncodingOptions);
@@ -631,8 +629,8 @@ function updateFilterSummary() {
     ),
   ).length;
   $("filter-summary").textContent = count
-    ? `过滤条件 · ${count} 项`
-    : "过滤条件";
+    ? `Filters · ${count}`
+    : "Filters";
 }
 
 function clearFilter() {
@@ -670,7 +668,7 @@ function backupFilter() {
         parts.some((part, i) => part !== actual[i])
       ) {
         input.focus();
-        throw new Error("请输入有效的本地日期时间。");
+        throw new Error("Enter a valid local date and time.");
       }
       range[bound] = time.toISOString();
     }
@@ -681,7 +679,7 @@ function backupFilter() {
     ) {
       $(`filter-${field}-before`).focus();
       throw new Error(
-        `${field === "mtime" ? "修改" : "访问"}时间的起始须早于截止。`,
+        `The ${field === "mtime" ? "modified" : "accessed"} time start must be earlier than the end.`,
       );
     }
     filter[field] = range;
@@ -696,10 +694,10 @@ $("backup-form").addEventListener("submit", async (event) => {
   const source = $("source").value.trim();
   const repository = $("backup-repository").value.trim();
   if (!source || !repository)
-    return message("backup-message", "请输入源目录和仓库路径。", true);
+    return message("backup-message", "Enter the source directory and repository path.", true);
   $("backup-button").disabled = true;
   $("backup-job-link").hidden = true;
-  message("backup-message", "正在提交备份任务…");
+  message("backup-message", "Submitting backup task…");
   try {
     const filter = backupFilter();
     const job = await api("/api/backups", {
@@ -734,9 +732,9 @@ $("restore-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const destination = $("destination").value.trim();
   if (!state.selection || !destination)
-    return message("restore-message", "请输入恢复目标目录。", true);
+    return message("restore-message", "Enter the restore destination directory.", true);
   $("restore-button").disabled = true;
-  message("restore-message", "正在提交恢复任务…");
+  message("restore-message", "Submitting restore task…");
   try {
     const job = await api("/api/restores", {
       method: "POST",
@@ -769,9 +767,9 @@ async function refreshJobs() {
     state.displayedPage = state.page;
     renderJobs();
     message("jobs-message");
-    $("connection-state").textContent = "已连接";
+    $("connection-state").textContent = "Connected";
     $("connection-status").dataset.state = "connected";
-    $("jobs-updated").textContent = `最近更新 ${date(Date.now())}`;
+    $("jobs-updated").textContent = `Last updated ${date(Date.now())}`;
     if (
       state.repository &&
       result.jobs.some(
@@ -790,9 +788,9 @@ async function refreshJobs() {
     if (request !== state.jobsRequest) return;
     state.page = state.displayedPage;
     report("jobs-message", error);
-    $("connection-state").textContent = "连接异常";
+    $("connection-state").textContent = "Connection error";
     $("connection-status").dataset.state = "error";
-    $("jobs-updated").textContent = "更新失败，当前显示上次读取的结果，请点击“刷新”重试。";
+    $("jobs-updated").textContent = "Update failed. Showing the last result. Click Refresh to retry.";
   } finally {
     if (request === state.jobsRequest && state.connected) {
       $("refresh-jobs").disabled = false;
@@ -803,7 +801,7 @@ async function refreshJobs() {
 }
 
 function renderJobs() {
-  $("jobs-page").textContent = `第 ${state.page + 1} 页`;
+  $("jobs-page").textContent = `Page ${state.page + 1}`;
   const list = $("job-list");
   const snapshot = JSON.stringify(state.jobs);
   if (list.dataset.snapshot === snapshot) return;
@@ -820,7 +818,7 @@ function renderJobs() {
     : null;
   list.replaceChildren();
   if (!state.jobs.length) {
-    list.append(empty("没有任务记录。"));
+    list.append(empty("No task records."));
     return;
   }
   for (const job of state.jobs) {
@@ -832,7 +830,7 @@ function renderJobs() {
       node(
         "span",
         "job-title",
-        job.kind === "backup" ? "创建备份" : "恢复文件",
+        job.kind === "backup" ? "Create backup" : "Restore files",
       ),
       node("span", `badge ${job.state}`, statuses[job.state] || job.state),
       time,
@@ -848,8 +846,8 @@ function renderJobs() {
           "p",
           "job-result",
           job.kind === "backup"
-            ? `备份编号：${job.result.backup_id}`
-            : `已恢复并校验：${job.result.destination}`,
+            ? `Backup ID: ${job.result.backup_id}`
+            : `Restored and verified: ${job.result.destination}`,
         ),
       );
     if (job.error)
@@ -859,36 +857,36 @@ function renderJobs() {
     const details = node("details");
     details.dataset.job = job.job_id;
     details.open = expanded.has(job.job_id);
-    details.append(node("summary", "", "任务详情"));
+    details.append(node("summary", "", "Details"));
     const fields = node("dl");
     const values = [
-      ["任务编号", job.job_id],
-      ["仓库", job.request.repository],
-      ["开始时间", job.started_at === null ? "尚未开始" : date(job.started_at)],
+      ["Task ID", job.job_id],
+      ["Repository", job.request.repository],
+      ["Started", job.started_at === null ? "Not started" : date(job.started_at)],
       [
-        "结束时间",
-        job.finished_at === null ? "尚未结束" : date(job.finished_at),
+        "Finished",
+        job.finished_at === null ? "Not finished" : date(job.finished_at),
       ],
     ];
     if (job.schedule_id)
-      values.unshift(["计划标识", job.schedule_id], ["计划时间", date(job.scheduled_for)]);
+      values.unshift(["Schedule ID", job.schedule_id], ["Scheduled for", date(job.scheduled_for)]);
     if (job.kind === "restore")
-      values.unshift(["备份编号", job.request.backup_id]);
+      values.unshift(["Backup ID", job.request.backup_id]);
     if (job.kind === "backup" && job.request.compression)
       values.push([
-        "压缩配置",
+        "Compression",
         compressionDescription(job.request.compression),
       ]);
     for (const [label, value] of values)
       fields.append(
         node("dt", "", label),
-        node("dd", label === "任务编号" ? "mono job-id" : "", value),
+        node("dd", label === "Task ID" ? "mono job-id" : "", value),
       );
     details.append(fields);
     const actions = node("div", "job-actions");
     actions.append(details);
     if (job.kind === "backup" && job.state === "succeeded") {
-      const browse = node("button", "", "查看备份");
+      const browse = node("button", "", "View backup");
       browse.type = "button";
       browse.dataset.job = job.job_id;
       browse.addEventListener("click", () => {

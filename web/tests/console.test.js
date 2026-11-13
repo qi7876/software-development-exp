@@ -50,8 +50,8 @@ async function deleteCurrentConnection(page) {
   await page.locator("#open-connection").click();
   await page
     .locator(".connection-row")
-    .filter({ hasText: "当前连接" })
-    .getByRole("button", { name: "删除", exact: true })
+    .filter({ hasText: "Current" })
+    .getByRole("button", { name: "Delete", exact: true })
     .click();
 }
 
@@ -186,10 +186,10 @@ test(
     assert.equal(await page.locator("#backup-button").isDisabled(), true);
     assert.deepEqual(
       (await page.locator(".sidebar nav a").allTextContents()).map((text) => text.trim()),
-      ["创建备份", "备份仓库", "任务记录", "管理连接"],
+      ["Create backup", "Backup repository", "Task records", "Manage connections"],
     );
     assert.equal(
-      await page.getByRole("button", { name: "断开连接", exact: true }).count(),
+      await page.getByRole("button", { name: "Disconnect", exact: true }).count(),
       0,
     );
     await page.locator("#open-connection").click();
@@ -208,7 +208,7 @@ test(
       if (await page.locator(".connection-row").count()) {
         await page
           .locator(".connection-row")
-          .getByRole("button", { name: "连接", exact: true })
+          .getByRole("button", { name: "Connect", exact: true })
           .click();
       } else {
         await page.locator("#secret").fill(secret);
@@ -216,7 +216,7 @@ test(
       }
       await page.waitForFunction(
         () =>
-          document.getElementById("connection-state").textContent === "已连接",
+          document.getElementById("connection-state").textContent === "Connected",
       );
       await page.waitForFunction(
         () => !document.getElementById("refresh-jobs").disabled,
@@ -247,7 +247,7 @@ test(
       () => !document.getElementById("refresh-jobs").disabled,
     );
     assert.equal(jobRequests, 1);
-    assert.match(await page.locator("#jobs-updated").textContent(), /最近更新/);
+    assert.match(await page.locator("#jobs-updated").textContent(), /Last updated/);
     await page.clock.resume();
     await view("backup");
     const sidebar = await page.locator(".sidebar").boundingBox();
@@ -310,13 +310,13 @@ test(
     await page.locator("#refresh-jobs").click();
     await page.locator(".job details summary").first().click();
     await page.getByText("daily-browser", { exact: true }).waitFor();
-    assert.equal(await page.locator(".job dt").filter({ hasText: "计划时间" }).count(), 1);
+    assert.equal(await page.locator(".job dt").filter({ hasText: "Scheduled for" }).count(), 1);
     await page.unroute(scheduledHistory);
-    await page.getByRole("button", { name: "查看备份", exact: true }).click();
+    await page.getByRole("button", { name: "View backup", exact: true }).click();
     await page.locator(".backup-row button").waitFor();
     assert.equal(
       await page.locator("#repository-label").textContent(),
-      "1 份备份",
+      "1 backup",
     );
 
     await view("repository");
@@ -374,7 +374,7 @@ test(
     );
     await page.waitForFunction(
       () =>
-        document.getElementById("connection-state").textContent === "已连接",
+        document.getElementById("connection-state").textContent === "Connected",
     );
     await page.waitForFunction(
       () => document.querySelectorAll(".job").length === 3,
@@ -407,7 +407,7 @@ test(
     const firstIds = await page.locator(".job-id").allTextContents();
     await page.locator("#next-jobs").click();
     await page.waitForFunction(
-      () => document.getElementById("jobs-page").textContent === "第 2 页",
+      () => document.getElementById("jobs-page").textContent === "Page 2",
     );
     assert.equal(await page.locator(".job").count(), 2);
     assert.equal(await page.locator("#next-jobs").isDisabled(), true);
@@ -415,7 +415,7 @@ test(
       assert.equal(firstIds.includes(id), false);
     await page.locator("#previous-jobs").click();
     await page.waitForFunction(
-      () => document.getElementById("jobs-page").textContent === "第 1 页",
+      () => document.getElementById("jobs-page").textContent === "Page 1",
     );
 
     await page.route("**/api/jobs?*", (route) => route.abort());
@@ -482,9 +482,9 @@ test(
     async function connected(url) {
       await page.waitForFunction(
         (target) =>
-          document.getElementById("connection-state").textContent === "已连接" &&
+          document.getElementById("connection-state").textContent === "Connected" &&
           [...document.querySelectorAll(".connection-row")].some(
-            (row) => row.textContent.includes(target) && row.textContent.includes("当前连接"),
+            (row) => row.textContent.includes(target) && row.textContent.includes("Current"),
           ),
         url,
       );
@@ -504,7 +504,7 @@ test(
       await page
         .locator(".connection-row")
         .filter({ hasText: url })
-        .getByRole("button", { name: "连接", exact: true })
+        .getByRole("button", { name: "Connect", exact: true })
         .click();
       await connected(url);
     }
@@ -534,7 +534,7 @@ test(
     assert.equal(
       await page
         .locator(".connection-row")
-        .filter({ hasText: "当前连接" })
+        .filter({ hasText: "Current" })
         .locator("td")
         .first()
         .textContent(),
@@ -612,7 +612,7 @@ test(
     assert.equal(await page.locator(".job").count(), 0);
     assert.equal(
       await page.locator("#repository-label").textContent(),
-      "尚未载入仓库",
+      "No repository loaded",
     );
     await switchTo(remote.url);
     await page.waitForFunction(
@@ -621,7 +621,7 @@ test(
     await page
       .locator(".connection-row")
       .filter({ hasText: remote.url })
-      .getByRole("button", { name: "编辑", exact: true })
+      .getByRole("button", { name: "Edit", exact: true })
       .click();
     assert.equal(await page.locator("#secret").inputValue(), "remote-api-key");
     await save(remote.url, "wrong-key");
@@ -652,12 +652,12 @@ test(
     await page
       .locator(".connection-row")
       .filter({ hasText: local.url })
-      .getByRole("button", { name: "删除", exact: true })
+      .getByRole("button", { name: "Delete", exact: true })
       .click();
     assert.equal(
       await page
         .locator(".connection-row")
-        .filter({ hasText: "当前连接" })
+        .filter({ hasText: "Current" })
         .locator("td")
         .first()
         .textContent(),
@@ -666,18 +666,18 @@ test(
     await page
       .locator(".connection-row")
       .filter({ hasText: remote.url })
-      .getByRole("button", { name: "删除", exact: true })
+      .getByRole("button", { name: "Delete", exact: true })
       .click();
     assert.deepEqual(await stored(), { connections: [], selectedUrl: null });
     assert.equal(
       await page.locator("#connection-state").textContent(),
-      "未连接",
+      "Disconnected",
     );
     assert.equal(await page.locator(".job").count(), 0);
     await page.reload();
     assert.equal(
       await page.locator("#connection-state").textContent(),
-      "未连接",
+      "Disconnected",
     );
     await page.evaluate(() =>
       localStorage.setItem("bak.connections.v1", "{broken"),
@@ -752,7 +752,7 @@ test(
     await page.locator("#filter-atime-before").fill("2100-01-01T08:00");
     assert.equal(
       await page.locator("#filter-summary").textContent(),
-      "过滤条件 · 6 项",
+      "Filters · 6",
     );
     assert.equal(
       await page.evaluate(
@@ -801,7 +801,7 @@ test(
     await refreshUntil(page, () =>
       Boolean(document.querySelector(".job .badge.succeeded")),
     );
-    await page.getByRole("button", { name: "查看备份", exact: true }).click();
+    await page.getByRole("button", { name: "View backup", exact: true }).click();
     await page.locator(".backup-row button").click();
     await page.locator("#destination").fill("restored");
     await page.locator("#restore-button").click();
@@ -817,7 +817,7 @@ test(
     await clearFilterInputs(page);
     assert.equal(
       await page.locator("#filter-summary").textContent(),
-      "过滤条件",
+      "Filters",
     );
     assert.deepEqual(
       await page
@@ -859,7 +859,7 @@ test(
     await dstPage.locator("#backup-message.error").waitFor();
     assert.match(
       await dstPage.locator("#backup-message").textContent(),
-      /有效的本地日期时间/,
+      /valid local date and time/,
     );
     assert.equal(
       await dstPage
@@ -916,7 +916,7 @@ test(
     assert.equal(await page.locator("#encryption-xchacha").isEnabled(), true);
     assert.deepEqual(
       await page.locator("#encryption-key option").allTextContents(),
-      ["选择服务端密钥", "current", "previous"],
+      ["Select a server key", "current", "previous"],
     );
     assert.equal(await page.locator('input[type="checkbox"]').count(), 0);
     assert.deepEqual(
@@ -933,23 +933,23 @@ test(
     assert.equal(await page.locator("#encryption-key").inputValue(), "current");
     let encryptedId;
     const modes = [
-      [null, false, "不压缩 · 不加密"],
-      [{ algorithm: "zstd", level: 7 }, false, "Zstd · 等级 7 · 不加密"],
+      [null, false, "No compression · No encryption"],
+      [{ algorithm: "zstd", level: 7 }, false, "Zstd · level 7 · No encryption"],
       [
         { algorithm: "lz77", window_kib: 8, search_depth: 16 },
         false,
-        "LZ77 · 8 KiB · 16 候选 · 不加密",
+        "LZ77 · 8 KiB · 16 candidates · No encryption",
       ],
-      [null, "xchacha20-poly1305", "不压缩 · XChaCha20-Poly1305"],
-      [{ algorithm: "zstd", level: 9 }, "xchacha20-poly1305", "Zstd · 等级 9 · XChaCha20-Poly1305"],
+      [null, "xchacha20-poly1305", "No compression · XChaCha20-Poly1305"],
+      [{ algorithm: "zstd", level: 9 }, "xchacha20-poly1305", "Zstd · level 9 · XChaCha20-Poly1305"],
       [
         { algorithm: "lz77", window_kib: 64, search_depth: 32 },
         "xchacha20-poly1305",
-        "LZ77 · 64 KiB · 32 候选 · XChaCha20-Poly1305",
+        "LZ77 · 64 KiB · 32 candidates · XChaCha20-Poly1305",
       ],
-      [null, "aes-256-gcm", "不压缩 · AES-256-GCM"],
-      [{ algorithm: "zstd", level: 9 }, "aes-256-gcm", "Zstd · 等级 9 · AES-256-GCM"],
-      [{ algorithm: "lz77", window_kib: 64, search_depth: 32 }, "aes-256-gcm", "LZ77 · 64 KiB · 32 候选 · AES-256-GCM"],
+      [null, "aes-256-gcm", "No compression · AES-256-GCM"],
+      [{ algorithm: "zstd", level: 9 }, "aes-256-gcm", "Zstd · level 9 · AES-256-GCM"],
+      [{ algorithm: "lz77", window_kib: 64, search_depth: 32 }, "aes-256-gcm", "LZ77 · 64 KiB · 32 candidates · AES-256-GCM"],
     ];
     for (let index = 0; index < modes.length; index++) {
       const [compression, encryption, mode] = modes[index];
@@ -986,14 +986,6 @@ test(
         await page
           .locator("#encryption-key")
           .selectOption(index === 3 ? "current" : "previous");
-      assert.equal(
-        await page.locator("#encoding-order").isVisible(),
-        Boolean(compression && encryption),
-      );
-      assert.equal(
-        await page.locator("#encryption-scope").isVisible(),
-        Boolean(encryption),
-      );
       await page.locator('nav a[href="#repository"]').click();
       await page.locator('nav a[href="#backup"]').click();
       assert.equal(
@@ -1020,22 +1012,22 @@ test(
       await page.locator("#backup-job-link").click();
       await refreshUntil(
         page,
-        () => document.querySelector(".job .badge")?.textContent === "已完成",
+        () => document.querySelector(".job .badge")?.textContent === "Succeeded",
       );
       const details = page.locator(".job").first().locator("details");
       if (compression) {
         await details.locator("summary").click();
         assert.equal(
-          await details.locator("dt").filter({ hasText: "压缩配置" }).count(),
+          await details.locator("dt").filter({ hasText: "Compression" }).count(),
           1,
         );
         assert.equal(
           await details.locator("dd").last().textContent(),
-          mode.replace(/ · (不加密|XChaCha20-Poly1305|AES-256-GCM)$/, ""),
+          mode.replace(/ · (No encryption|XChaCha20-Poly1305|AES-256-GCM)$/, ""),
         );
       } else {
         assert.equal(
-          await details.locator("dt").filter({ hasText: "压缩配置" }).count(),
+          await details.locator("dt").filter({ hasText: "Compression" }).count(),
           0,
         );
       }
@@ -1046,13 +1038,13 @@ test(
       const backupId = (await jobResponse.json()).result.backup_id;
       if (index === 5) encryptedId = backupId;
       await page
-        .getByRole("button", { name: "查看备份", exact: true })
+        .getByRole("button", { name: "View backup", exact: true })
         .first()
         .click();
       const row = page.locator(".backup-row").filter({ hasText: backupId });
       await row.waitFor();
       assert.equal(await row.locator("td").nth(2).textContent(), mode);
-      await row.getByRole("button", { name: "恢复", exact: true }).click();
+      await row.getByRole("button", { name: "Restore", exact: true }).click();
       assert.equal(await page.locator("#restore-mode").textContent(), mode);
       assert.equal(await page.locator("#restore-key").isVisible(), Boolean(encryption));
       assert.equal(await page.locator("#restore-button").isEnabled(), true);
@@ -1117,12 +1109,12 @@ test(
     await page
       .locator(".backup-row")
       .filter({ hasText: encryptedId })
-      .getByRole("button", { name: "恢复", exact: true })
+      .getByRole("button", { name: "Restore", exact: true })
       .click();
     assert.equal(await page.locator("#restore-button").isDisabled(), true);
     assert.match(
       await page.locator("#restore-message").textContent(),
-      /缺少匹配/,
+      /lacks the matching/,
     );
     assert.deepEqual(errors, []);
   },

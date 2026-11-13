@@ -2,24 +2,157 @@
 
 `bak` is a file backup manager for individual users, designed to provide reliable, verifiable local backups that can be restored. A single binary runs an axum HTTP service on Tokio and includes a browser console. Users access backups, restores, and durable task history through the console or curl using a Bearer secret key. The current MVP supports backup and restore execution on Unix.
 
-## Development and usage
+## Quick start
+
+You need the Rust toolchain specified in `rust-toolchain.toml`. Backup and restore run on Unix only (Linux and macOS).
+
+```shell
+# 1. Prepare a working directory with source, repository and restore folders
+mkdir -p working-directory-example/source working-directory-example/repository working-directory-example/restored
+
+# 2. Generate the encryption key that the example config.json refers to
+cargo run -- keygen --output working-directory-example/backup.key
+
+# 3. Start the service
+cargo run -- -d working-directory-example
+
+# 4. Check that it answers
+curl -H 'Authorization: Bearer example-local-test-key' http://127.0.0.1:8080/api/status
+```
+
+Open <http://127.0.0.1:8080/> for the browser console. The service prints `Listening on ...` when it is ready and stops cleanly on Ctrl-C or SIGTERM. For a release build, run `cargo build --release` and use `target/release/bak` in place of `cargo run --`.
+
+Step 2 is needed because `backup.key` is not stored in git. If you do not want encryption, remove the `encryption` section from `working-directory-example/config.json` instead.
+
+## User guide
+
+### Concepts
+
+- **Working directory**: the folder passed with `-d`. It holds `config.json` and the task database `jobs.sqlite3`. Relative paths in requests and in the configuration resolve against it. Run only one service per working directory.
+- **Source**: the directory to back up.
+- **Repository**: a directory that stores backups. One repository can hold many backups, each identified by a backup ID. Source and repository must not contain each other.
+- **Task**: backups and restores run as queued tasks, one at a time in submission order. Submitting returns at once; you check the outcome in Task records. Tasks and their results survive a restart.
+
+All paths refer to the machine running bak, even if you open the console from another device. Directories must exist before you use them, because bak does not create them.
+
+### Configure the service
+
+`config.json` in the working directory:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `listen` | yes | Address and port, for example `127.0.0.1:8080`. Use `0.0.0.0:8080` to accept connections from other machines. |
+| `secret_key` | yes | Non-empty API key. Clients send it as `Authorization: Bearer <secret_key>`. |
+| `web_ui.enabled` | no | Serve the browser console. Defaults to false. |
+| `encryption.keys` | no | Map of key IDs to key file paths. See [Encryption keys](#encryption-keys). |
+| `scheduled_backups` | no | Cron-based backup plans. See [Scheduled backups](#scheduled-backups). |
+
+The service refuses to start, with a message, if `config.json` is missing or invalid, `secret_key` is empty, or a configured key file cannot be read. Restart the service after any change to `config.json`. The obsolete `web_ui.archive_url` and `web_ui.directory` fields are accepted but ignored. The former `logging` section must be removed.
+
+Treat `secret_key` as a password. Anyone who has it can read and write any path the service can reach. bak has no built-in TLS, so keep `listen` on loopback or put a reverse proxy with HTTPS in front when exposing it.
+
+### Connect the console
+
+1. Open the console and select **Manage connections**.
+2. Enter the API address (`127.0.0.1:8080`) and the key, then select **Verify and save**.
+
+The console remembers connections in the browser and reconnects to the last one on reload. It can also manage other bak servers. See [Browser console](#browser-console) for details on storage, switching and cross-origin use.
+
+### Create a backup
+
+1. Put files in the source directory, for example `working-directory-example/source`.
+2. Open **Create backup**. Enter the source (`source`) and repository (`repository`), either absolute or relative to the working directory.
+3. Choose compression and encryption (see below) and optionally set filters.
+4. Select **Create backup**, then **View tasks**, and select **Refresh** until the task shows **Succeeded**. Task details show the backup ID and the settings used.
+
+The same request with curl:
+
+```shell
+curl -i -H 'Authorization: Bearer example-local-test-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"source","repository":"repository","compression":{"algorithm":"zstd","level":3},"encryption":null,"filter":{"relative_path":{"include":[],"exclude":[]},"uid":{"include":[],"exclude":[]},"gid":{"include":[],"exclude":[]},"mode":{"include":[],"exclude":[]},"atime":{},"mtime":{}}}' \
+  http://127.0.0.1:8080/api/backups
+```
+
+The response is `202 Accepted` with a `Location` header. Poll that URL until `state` is `succeeded` or `failed`.
+
+Keep source files unchanged while a backup runs, because bak does not detect concurrent modification.
+
+### Choose compression and encryption
+
+| Setting | Options | Notes |
+| --- | --- | --- |
+| Compression | None, Zstd, LZ77 | Zstd level 1–22 (default 3). LZ77 is the project's own codec with a 4–1024 KiB window and a search depth of 1–256. |
+| Encryption | None, XChaCha20-Poly1305, AES-256-GCM | Needs a key configured on the server. |
+
+When both are used, files are compressed first and then encrypted. Encryption covers regular-file contents only. File names, directory structure, Unix metadata, sizes, checksums and symbolic link targets stay visible in the repository. The console defaults to Zstd level 3 with no encryption. API clients must choose explicitly, and omitted or null `compression` means uncompressed.
+
+Restore reads the codec and key from the backup, so you never enter these settings again.
+
+### Filter what is backed up
+
+The **Filters** section limits a backup by relative path, UID, GID, permissions (four-digit octal such as `0644`), modified time and accessed time. Rules:
+
+- Enter one regular expression per line. Blank lines are ignored.
+- A file must satisfy every field (AND). Within a field, any include pattern may match (OR), and any exclude match rejects the entry.
+- A rejected directory skips its whole subtree, so include patterns must also permit the parent directories.
+
+Examples:
+
+| Goal | Relative path include | Relative path exclude |
+| --- | --- | --- |
+| Only the `docs` folder | `^docs(/\|$)` | |
+| Everything except logs and `tmp` | | `\.log$`<br>`^tmp(/\|$)` |
+
+`\.txt$` alone matches only `.txt` files in the top level of the source, because every subdirectory is rejected before its contents are examined. To take `.txt` files from the subdirectory `a`, list both the directory and its files as separate include lines: `^a$` and `^a/.*\.txt$`.
+
+Invalid patterns are not rejected when you submit. The task fails with a 400 error in Task records.
+
+### Browse and restore
+
+1. Open **Backup repository**, enter the repository path and select **Load backups**. After a backup, **View backup** in the task opens its repository directly.
+2. Choose a backup and select **Restore**.
+3. Enter a destination that is an existing, empty directory outside the repository (for example `restored`), then select **Start restore**.
+4. Check the result in Task records and inspect the destination.
+
+Restore verifies every file's size and SHA-256 checksum, and authenticates encrypted data. If a restore fails or is interrupted, partial files can remain in the destination and are not cleaned up. Use a fresh empty directory for the next attempt. Restoring an encrypted backup requires the same key (same ID and contents) in the server configuration. Without it, **Restore** is disabled and the dialog explains why.
+
+### Check task history
+
+**Task records** lists tasks newest first, 20 per page. Nothing refreshes by itself; select **Refresh** to update. Open **Details** on a task for its ID, repository, start and finish times, and compression, or its schedule ID and time for scheduled runs. A task that was `running` when the service stopped is marked failed on the next start and is never retried automatically.
+
+### Schedule backups, encrypt, and call the API
+
+- Automatic daily or hourly backups: [Scheduled backups](#scheduled-backups).
+- Creating and rotating keys: [Encryption keys](#encryption-keys).
+- Using curl or scripts instead of the console: [HTTP API](#http-api).
+
+### Troubleshooting
+
+| Symptom | Likely cause and fix |
+| --- | --- |
+| Service exits at start | Read the printed message. Usual causes are a missing or malformed `config.json`, an empty `secret_key`, an unreadable key file, or a `logging` section. |
+| **Invalid access key** | The key differs from `secret_key`. Fix it in **Manage connections**. |
+| **Cannot reach the API** | Wrong address, service not running, a server listening on loopback only, or an HTTPS console talking to an HTTP API (mixed content). |
+| Encryption is unavailable | No keys configured or the service was not restarted after adding them. See [Encryption keys](#encryption-keys). |
+| Backup task failed | Open Details or the error line: the source or repository does not exist, they overlap, or a filter is invalid. |
+| Restore is disabled | The server has no key matching the backup's key ID and fingerprint. Add the original key and restart. |
+| Restore failed immediately | The destination is missing, not empty, or overlaps the repository. |
+| Response lost after submitting | The task may already be queued. Refresh Task records before submitting again, because a retry creates another task. |
+
+## Development
 
 Install the Rust toolchain specified in `rust-toolchain.toml`. Install uv to run the complete local checks.
 
 ```shell
-mkdir -p working-directory-example/source working-directory-example/repository working-directory-example/restored
-cargo run -- -d working-directory-example
-curl -H 'Authorization: Bearer example-local-test-key' http://127.0.0.1:8080/api/status
 uv run scripts/check.py
 ```
 
-Specify an existing working directory containing `config.json`. Supported command-line options are `--help` / `-h`, `--version` / `-v`, and `--working-directory` / `-d`.
-
-Configuration contains `listen`, a nonempty `secret_key`, and optional `web_ui` settings; see [the example](working-directory-example/config.json). Set `web_ui.enabled` to true to serve the embedded console; omission defaults to false. The example enables it. No asset downloads, frontend build, or separate web server are needed. The obsolete `web_ui.archive_url` and `web_ui.directory` fields are accepted but ignored. Relative request paths resolve against the working directory. The former `logging` section must be removed: supplying it prevents startup with an explanation. SQLite job history replaces optional JSONL logs.
+Supported command-line options are `--help` / `-h`, `--version` / `-v`, and `--working-directory` / `-d`. The `keygen` subcommand is described in [Encryption keys](#encryption-keys). Specify an existing working directory containing `config.json`. SQLite job history replaces optional JSONL logs.
 
 ## Browser console
 
-With the example service running, open <http://127.0.0.1:8080/> and click Manage connections below Task records in the sidebar. Add an API address such as `127.0.0.1:8080` and its key (`example-local-test-key` for the example). Verify and save checks the key against `/api/status`, saves the connection, and activates it. Saved connections can be switched, edited, or deleted on this page; the four sidebar entries open backup, repository, task records, and connection management views. Connection status and version remain at the bottom without an API address, with a green indicator when connected and a red indicator when disconnected or a refresh fails; there is no separate Disconnect button.
+With the example service running, open <http://127.0.0.1:8080/> and click Manage connections below Task records in the sidebar. Add an API address such as `127.0.0.1:8080` and its key (`example-local-test-key` for the example). Verify and save checks the key against `/api/status`, saves the connection, and activates it. Saved connections can be switched, edited, or deleted on this page; the four sidebar entries open backup, repository, task records, and connection management views. Connection status and version remain at the bottom without an API address, with a filled black square when connected, a hollow square when disconnected, and a red square when a refresh fails; there is no separate Disconnect button.
 
 Addresses accept HTTP/HTTPS origins with an optional port; omitting the scheme uses HTTP. Paths, query strings, URL credentials, and fragments are not accepted. The console may use its own API or another reachable server, including servers with `web_ui.enabled=false`. The target must run a version that supports cross-origin API requests. Remote servers must listen on a reachable interface (for example, `0.0.0.0:8080` rather than loopback only). For an HTTPS console, use HTTPS remote APIs to avoid browser mixed-content restrictions; bak has no built-in TLS, so HTTPS needs a reverse proxy.
 
@@ -28,12 +161,12 @@ Normalized API addresses, keys, and the last selected connection are stored in `
 Switching verifies the target before replacing the active connection. A failed check preserves the current service. A successful switch aborts old page requests and clears paths, loaded backups, and task records so data from different servers is not mixed. Already submitted server jobs continue independently.
 
 1. Put files in `working-directory-example/source`. In the console, create a backup with source `source` and repository `repository`. Compression defaults to enabled; encryption defaults to disabled.
-2. Follow View task to the task records and click Refresh to check for success. View backup opens the repository directly; an existing repository can also be loaded by path from the repository view.
-3. Choose a backup, click restore, and enter `restored`, an existing empty directory. Submission opens the task records. Check the result and restored contents.
+2. Follow View tasks to the task records and click Refresh to check for success. View backup opens the repository directly; an existing repository can also be loaded by path from the repository view.
+3. Choose a backup, click Restore, and enter `restored`, an existing empty directory. Submission opens the task records. Check the result and restored contents.
 
-The backup form directly displays the **过滤条件** section for relative path, UID, GID, octal permissions, modification time, and access time. Regex inputs accept one pattern per line; blank lines are ignored. Fields combine with AND, include patterns with OR, and exclusions take precedence. Conditions apply to files, directories, and symlinks; a rejected directory skips its entire subtree, so include patterns must also permit ancestors. Local date/time inputs use the browser timezone, with second precision, inclusive starts, and exclusive ends. Inputs remain while navigating within one service and are cleared when deleting the active connection or successfully switching services. Regex validation happens during job execution; invalid patterns appear as failed jobs.
+The backup form directly displays the **Filters** section for relative path, UID, GID, octal permissions, modification time, and access time. Regex inputs accept one pattern per line; blank lines are ignored. Fields combine with AND, include patterns with OR, and exclusions take precedence. Conditions apply to files, directories, and symlinks; a rejected directory skips its entire subtree, so include patterns must also permit ancestors. Local date/time inputs use the browser timezone, with second precision, inclusive starts, and exclusive ends. Inputs remain while navigating within one service and are cleared when deleting the active connection or successfully switching services. Regex validation happens during job execution; invalid patterns appear as failed jobs.
 
-Backup storage displays separate **压缩** and **加密** sections without checkboxes. The compression algorithm selector offers None, Zstd, and the project's own streaming LZ77 codec; the encryption algorithm selector offers None, XChaCha20-Poly1305, and AES-256-GCM, giving nine storage modes. Selecting 无 skips the corresponding process and hides and disables its parameters. Encryption requires a configured server key; without one, its algorithm option is unavailable while 无 remains selectable. Combining compression with encryption always compresses first. The UI defaults to Zstd level 3 without encryption; restoration automatically selects the saved codec and key.
+Backup storage displays separate **Compression** and **Encryption** sections without checkboxes. The compression algorithm selector offers None, Zstd, and the project's own streaming LZ77 codec; the encryption algorithm selector offers None, XChaCha20-Poly1305, and AES-256-GCM, giving nine storage modes. Selecting None skips the corresponding process and hides and disables its parameters. Encryption requires a configured server key; without one, its algorithm option is unavailable while None remains selectable. Combining compression with encryption always compresses first. The UI defaults to Zstd level 3 without encryption; restoration automatically selects the saved codec and key.
 
 Zstd levels range from 1 to 22 (default 3), using a synchronized slider and number field. LZ77 instead exposes a history window of 4–1024 KiB (default 64) and a candidate search limit of 1–256 (default 32). These creation settings apply to this backup; restore reads its saved format automatically. Switching algorithms retains each algorithm's inputs and disables hidden controls; turning compression off retains the inputs. A successful service switch or deletion of the active connection resets the settings. Task details, backup summaries and the restore dialog show the actual codec and parameters. See the [LZ77 format and design](docs/architecture/lz77.md).
 
@@ -41,7 +174,7 @@ Encryption protects regular-file contents only. Filenames, directory structure, 
 
 All paths refer to the device running bak, including when the browser is on another device. Source, repository, and restore destination directories must exist. No OS directory picker or automatic directory creation is provided. Source and repository must not overlap; restore destination must be empty and outside the repository. Symbolic links are preserved; special files are skipped. Keep source files unchanged during a backup. Failed or interrupted restores can leave partial output.
 
-The console supports desktop and tablet windows (768 CSS pixels and wider). Page content follows the available width up to 1040 CSS pixels, with flexible margins. Form fields wrap to one column when space is limited; wide tables scroll within their lists. System fonts, a monochrome palette, consistent spacing, and inline SVG navigation/action icons provide visual hierarchy. Form controls retain native interaction, focus indicators, and disabled states with a consistent monospace font and font size for inputs, selects, and textareas. Single-line inputs and selects share a common height; select arrows have inset spacing. The two-column layout places navigation in the left sidebar and flat page content on the right, without card containers. The Create backup button is at the upper right of the backup page. The four sidebar entries open separate views, preserve form inputs when switching views within one service, and support browser back/forward navigation. Task records load once after connecting or submitting a task; further status updates use the Refresh button, with no background polling. They show server-side errors and paginate through persisted history. Task IDs and execution timestamps expand under Details. A connection failure is also shown in the sidebar and can be retried with Refresh; an invalid key opens connection management for correction. The UI shows task states rather than byte progress. Requests that lose their response are not automatically resubmitted: inspect history before retrying. The service uses one shared key rather than separate user accounts.
+The console supports desktop and tablet windows (768 CSS pixels and wider). Page content follows the available width up to 1040 CSS pixels, with flexible margins. Form fields wrap to one column when space is limited; wide tables scroll within their lists. System fonts, a black-white-gray palette, square-cornered bordered boxes, and no icons or shadows provide visual hierarchy; task states are distinguished by border style and fill, and only errors and failed tasks use red. The console text is in English. Form controls retain native interaction, focus indicators, and disabled states with a consistent monospace font and font size for inputs, selects, and textareas. Single-line inputs and selects share a common height; select arrows have inset spacing. The two-column layout places navigation in the left sidebar and page content on the right in bordered boxes. The Create backup button is at the upper right of the backup page. The four sidebar entries open separate views, preserve form inputs when switching views within one service, and support browser back/forward navigation. Task records load once after connecting or submitting a task; further status updates use the Refresh button, with no background polling. They show server-side errors and paginate through persisted history. Task IDs and execution timestamps expand under Details. A connection failure is also shown in the sidebar and can be retried with Refresh; an invalid key opens connection management for correction. The UI shows task states rather than byte progress. Requests that lose their response are not automatically resubmitted: inspect history before retrying. The service uses one shared key rather than separate user accounts.
 
 Browser assets live in `web/` and are embedded at Rust compile time; rebuild after editing them. Node.js 20 or later is needed only for the optional browser checks:
 
