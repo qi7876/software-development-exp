@@ -969,13 +969,13 @@ async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> 
         let payload = server
             .path("repo with space/backups")
             .join(id)
-            .join("random");
+            .join("archive.bak");
         let encoded = std::fs::read(&payload)?;
         if key_id.is_none() {
             if compression["algorithm"] == "zstd" {
-                assert_eq!(zstd::decode_all(encoded.as_slice())?, random);
+                assert!(zstd::decode_all(encoded.as_slice())?.starts_with(b"BAKARC\0\x01"));
             } else if compression.is_null() {
-                assert_eq!(encoded, random);
+                assert!(encoded.starts_with(b"BAKARC\0\x01"));
             } else {
                 assert!(encoded.starts_with(b"BAKLZ77\x01"));
             }
@@ -1114,7 +1114,7 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
             .create_if_missing(true),
     )
     .await?;
-    sqlx::raw_sql("CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve'); PRAGMA user_version = 4;").execute(&mut connection).await?;
+    sqlx::raw_sql("CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve'); PRAGMA user_version = 5;").execute(&mut connection).await?;
     connection.close().await?;
     let id = server.backup().await?;
     let failed = server.wait_job(&id, false).await?;
@@ -1123,7 +1123,7 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
         failed["error"]["message"]
             .as_str()
             .ok_or("missing error")?
-            .contains("schema version 4")
+            .contains("schema version 5")
     );
     assert!(!server.path("repo with space/backups").exists());
     let mut connection =
@@ -1138,7 +1138,7 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
         sqlx::query_scalar::<_, i64>("PRAGMA user_version")
             .fetch_one(&mut connection)
             .await?,
-        4
+        5
     );
     connection.close().await?;
     server.stop().await

@@ -17,8 +17,8 @@
       ],
       "details": [
         "浏览器可连接同一或另一台 bak API；地址和明文 API key 保存在浏览器 origin 的 localStorage。",
-        "工作目录作业库 schema v5，仓库 schema/format v5；保留命名密钥文件以恢复旧备份。",
-        "普通文件选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 或 AES-256-GCM 加密，形成九种模式；元数据和文件名仍为明文。",
+        "工作目录作业库 schema v5，仓库 schema/format v6；保留命名密钥文件以恢复旧备份。",
+        "自实现顺序归档后选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 或 AES-256-GCM 加密，形成九种模式；元数据和文件名仍为明文。",
         "配置式定时备份使用 IANA 时区与分钟级 Cron，复用 FIFO；停机不补跑，同一计划有未完成任务时跳过。"
       ],
       "constraints": [
@@ -133,14 +133,14 @@
           "name": "repository.sqlite3",
           "package": "Local repository",
           "type": "database",
-          "stereotype": "metadata v5"
+          "stereotype": "metadata v6"
         },
         {
           "id": "Files",
-          "name": "backups/<backup_id>/",
+          "name": "backups/<backup_id>/archive.bak",
           "package": "Local repository",
           "type": "folder",
-          "stereotype": "encoded file contents"
+          "stereotype": "one encoded archive"
         },
         {
           "id": "Dest",
@@ -249,7 +249,7 @@
       "details": [
         "main/args/config 负责服务启动与 keygen 分支；启动加载 Keyring 后交给 JobManager。",
         "server::ui 提供编译时静态资源，server::api 处理认证、CORS、校验和响应；worker 以 spawn_blocking 执行业务。",
-        "backup 使用 filter 严格目录剪枝；content 组合可选 Zstd/LZ77 和加密 IO；lz77 自行实现环形窗口与哈希匹配，crypto 管理密钥和 STREAM 帧，repository 原子保存完整编码配置。",
+        "backup 使用 filter 严格目录剪枝；archive 顺序打包条目、数据和校验尾部；content 组合可选 Zstd/LZ77 和加密 IO；lz77 自行实现环形窗口与哈希匹配，crypto 管理密钥和 STREAM 帧，repository 原子保存完整编码配置。",
         "schedule::Scheduler 编译计划、匹配时区与 Cron；JobManager 在一个事务中推进 UTC 游标并判断活动任务后入队，服务器监督调度器、worker 和 HTTP。"
       ],
       "constraints": [
@@ -404,6 +404,13 @@
           "type": "component",
           "package": "Server boundary",
           "stereotype": "Cron / IANA timezone"
+        },
+        {
+          "id": "Archive",
+          "name": "jobs::archive",
+          "type": "component",
+          "package": "Job subsystem",
+          "stereotype": "sequential packing / verification"
         }
       ],
       "relations": [
@@ -536,14 +543,14 @@
         {
           "source": "Backup",
           "target": "Content",
-          "label": "Encode files",
+          "label": "Encode archive",
           "direction": "auto",
           "style": "solid"
         },
         {
           "source": "Restore",
           "target": "Content",
-          "label": "Decode files",
+          "label": "Decode archive",
           "direction": "auto",
           "style": "solid"
         },
@@ -586,6 +593,20 @@
           "source": "Scheduler",
           "target": "Crypto",
           "label": "Resolve configured key identity",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Backup",
+          "target": "Archive",
+          "label": "Pack entries into one stream",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Restore",
+          "target": "Archive",
+          "label": "Verify and unpack entries",
           "direction": "auto",
           "style": "solid"
         }
@@ -907,7 +928,7 @@
       ],
       "details": [
         "JobManager 持有 Arc<Keyring>，提交时固定标识与指纹，worker 执行前再次匹配。",
-        "Content 选择可选 CompressionOptions 和 Encryption；LZ77 通过 Encoder/Decoder 流式处理，组合顺序固定先压缩后加密。",
+        "archive 打包后由 Content 选择可选 CompressionOptions 和 Encryption；LZ77 通过 Encoder/Decoder 流式处理，组合顺序固定先压缩后加密。",
         "Filter::compile 在备份执行时校验正则和时间范围，CompiledFilter::matches 决定目录是否继续遍历。",
         "Scheduler 使用 croner / chrono-tz；AES 使用 HKDF-SHA256 派生独立文件密钥，两个算法共用 STREAM BE32 读写和最终块验证。"
       ],
@@ -1411,7 +1432,7 @@
       "details": [
         "提交时校验等级并固定命名密钥指纹；正则/时间范围在执行时编译，失败发生在载荷写入前。",
         "目录剪枝同时作用于路径和元数据条件；符号链接只保存目标。",
-        "完成编码与同步后一次提交头、条目、根元数据和统计，再单独提交作业终态。",
+        "完成归档、编码与同步后一次提交头、条目、根元数据和统计，再单独提交作业终态。",
         "LZ77 的候选搜索、历史窗口和 IO 均有限制；完成编解码终止标记后再完成加密最终认证块。"
       ],
       "constraints": [
@@ -1519,13 +1540,13 @@
           "type": "message",
           "source": "Backup",
           "target": "Backup",
-          "text": "Encode raw / Zstd / LZ77 / AEAD / Zstd then AEAD"
+          "text": "Pack headers / data / SHA-256; compress then encrypt archive"
         },
         {
           "type": "message",
           "source": "Backup",
           "target": "Repo",
-          "text": "Synchronize payload files and directories"
+          "text": "Synchronize archive and ancestor directories"
         },
         {
           "type": "alt",
@@ -1535,7 +1556,7 @@
           "type": "message",
           "source": "Backup",
           "target": "Repo",
-          "text": "Commit v5 header / entries / metadata / counts"
+          "text": "Commit v6 header / entries / metadata / counts"
         },
         {
           "type": "return",
@@ -1604,7 +1625,7 @@
       "details": [
         "备份列表返回编码模式与密钥信息；界面做匹配提示，worker 仍独立校验。",
         "读取仓库头后匹配密钥，验证全部相对路径，再创建文件、目录和符号链接。",
-        "逆向解码并验证最终认证块、原文大小与哈希；子项完成后应用目录与根元数据。"
+        "顺序解包、核对条目头并验证结束标记、最终认证块、原文大小与哈希；子项完成后应用目录与根元数据。"
       ],
       "constraints": [
         "恢复不接受编码参数，由备份记录自动决定。",
@@ -1724,7 +1745,7 @@
           "type": "message",
           "source": "Restore",
           "target": "Repo",
-          "text": "Read v5 metadata / match key and fingerprint"
+          "text": "Read v6 metadata / match key and fingerprint"
         },
         {
           "type": "message",
@@ -1740,7 +1761,7 @@
           "type": "message",
           "source": "Restore",
           "target": "Dest",
-          "text": "Create new / decrypt / Zstd or LZ77 / verify tags and hash"
+          "text": "Decode archive / match headers / verify size and SHA-256"
         },
         {
           "type": "message",

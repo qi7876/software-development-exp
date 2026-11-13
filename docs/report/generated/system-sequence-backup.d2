@@ -22,11 +22,11 @@ diagram: "Accepted Job to Published Full Backup" {
   Jobs -> DB: "Claim oldest queued job as running"
   Jobs -> Backup: "Execute through spawn_blocking"
   Backup -> Backup: "Match pinned key / compile filter /\nprune traversal"
-  Backup -> Backup: "Encode raw / Zstd / LZ77 / AEAD / Zstd\nthen AEAD"
-  Backup -> Repo: "Synchronize payload files and\ndirectories"
+  Backup -> Backup: "Pack headers / data / SHA-256; compress\nthen encrypt archive"
+  Backup -> Repo: "Synchronize archive and ancestor\ndirectories"
   fragment_9: alt {
     branch_9: "[Payload processing succeeded]" {
-      Backup -> Repo: "Commit v5 header / entries / metadata /\ncounts"
+      Backup -> Repo: "Commit v6 header / entries / metadata /\ncounts"
       Backup -> Jobs: "backup_id" {style.stroke-dash: 5}
       Jobs -> DB: "Commit succeeded result"
     }
