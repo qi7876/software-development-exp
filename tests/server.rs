@@ -946,7 +946,13 @@ async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> 
             .as_str()
             .ok_or("missing ID")?;
         if let Some(key_id) = key_id {
-            encrypted_backups.insert(key_id, id.to_string());
+            encrypted_backups.insert(
+                (
+                    algorithm.as_str().ok_or("missing algorithm")?.to_string(),
+                    key_id,
+                ),
+                id.to_string(),
+            );
         }
         let listed = server.get(LIST_PATH).await?;
         let summary = listed["backups"]
@@ -1015,7 +1021,7 @@ async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> 
         &SqliteConnectOptions::new().filename(server.path("repo with space/repository.sqlite3")),
     )
     .await?;
-    let bound_id = &encrypted_backups["previous"];
+    let bound_id = &encrypted_backups[&("aes-256-gcm".to_string(), "previous")];
     let original_config: String =
         sqlx::query_scalar("SELECT compression FROM backups WHERE backup_id = ?")
             .bind(bound_id)
@@ -1058,20 +1064,26 @@ async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> 
         };
         std::fs::write(server.path("config.json"), serde_json::to_vec(&config)?)?;
         server.restart().await?;
-        let destination = format!("restore-key-{scenario}");
-        std::fs::create_dir(server.path(&destination))?;
-        let restore = server.submit("/api/restores", json!({"repository":"repo with space", "backup_id":encrypted_backups["current"], "destination":destination})).await?;
-        let failed = server.wait_job(&restore, false).await?;
-        assert_eq!(failed["state"], "failed");
-        assert_eq!(failed["error"]["code"], 400);
-        assert!(read_tree(&server.path(&destination))?.is_empty());
+        for algorithm in ["xchacha20-poly1305", "aes-256-gcm"] {
+            let destination = format!("restore-key-{scenario}-{algorithm}");
+            std::fs::create_dir(server.path(&destination))?;
+            let restore = server.submit("/api/restores", json!({"repository":"repo with space", "backup_id":encrypted_backups[&(algorithm.to_string(), "current")], "destination":destination})).await?;
+            let failed = server.wait_job(&restore, false).await?;
+            assert_eq!(failed["state"], "failed");
+            assert_eq!(failed["error"]["code"], 400);
+            assert!(read_tree(&server.path(&destination))?.is_empty());
+        }
     }
-    std::fs::create_dir(server.path("restore-retained-key"))?;
-    let restore = server.submit("/api/restores", json!({"repository":"repo with space", "backup_id":encrypted_backups["previous"], "destination":"restore-retained-key"})).await?;
-    assert_eq!(
-        server.wait_job(&restore, false).await?["state"],
-        "succeeded"
-    );
+    for algorithm in ["xchacha20-poly1305", "aes-256-gcm"] {
+        let destination = format!("restore-retained-key-{algorithm}");
+        std::fs::create_dir(server.path(&destination))?;
+        let restore = server.submit("/api/restores", json!({"repository":"repo with space", "backup_id":encrypted_backups[&(algorithm.to_string(), "previous")], "destination":destination})).await?;
+        assert_eq!(
+            server.wait_job(&restore, false).await?["state"],
+            "succeeded"
+        );
+        assert_eq!(read_tree(&server.path(&destination))?, original);
+    }
     server.stop().await?;
     for path in [
         "jobs.sqlite3",

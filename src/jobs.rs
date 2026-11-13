@@ -776,6 +776,10 @@ mod encryption_tests {
                 let saved = serde_json::to_string(&outcome.request)?;
                 assert!(saved.contains(&encryption.fingerprint));
                 assert_eq!(
+                    serde_json::from_str::<Value>(&saved)?["encryption"]["algorithm"],
+                    serde_json::to_value(algorithm)?
+                );
+                assert_eq!(
                     serde_json::from_str::<Value>(&saved)?["compression"]["level"],
                     7
                 );

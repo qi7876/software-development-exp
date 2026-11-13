@@ -26,7 +26,7 @@ diagram: "Accepted Job to Published Full Backup" {
   Backup -> Repo: "Synchronize payload files and\ndirectories"
   fragment_9: alt {
     branch_9: "[Payload processing succeeded]" {
-      Backup -> Repo: "Commit v4 header / entries / metadata /\ncounts"
+      Backup -> Repo: "Commit v5 header / entries / metadata /\ncounts"
       Backup -> Jobs: "backup_id" {style.stroke-dash: 5}
       Jobs -> DB: "Commit succeeded result"
     }

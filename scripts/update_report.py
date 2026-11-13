@@ -405,7 +405,8 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "bak 是面向个人用户的本地文件备份软件。当前提供全量备份、已发布备份列表和完整恢复，"
-        "支持筛选、Unix 元数据、符号链接、可选 Zstd/LZ77 压缩和 XChaCha20-Poly1305 / AES-256-GCM 内容加密，"
+        "支持筛选、Unix 元数据、符号链接、可选 Zstd/LZ77 压缩和 "
+        "XChaCha20-Poly1305 / AES-256-GCM 内容加密，"
         "通过认证流、原始大小与 SHA-256 校验验证恢复结果，并以持久化作业提供可查询状态。",
     )
     _heading(document, anchor, "1.2 综合描述", 2)
@@ -499,7 +500,9 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
             (
                 "POST /api/backups",
                 "JSON: source、repository、filter、compression；可选 "
-                "compression 为 null 或算法配置对象，另可指定 encryption 对象（algorithm、key_id）；先入库再返回 "
+                "compression 为 null 或算法配置对象，"
+                "另可指定 encryption 对象（algorithm、key_id）；"
+                "先入库再返回 "
                 "202/Location。",
             ),
             (
