@@ -30,7 +30,7 @@ diagram: "bak: Runtime and Local Storage" {
   package_1: "Single server process" {
     style.font-size: 36
     style.fill: white
-    Server: "<<API and FIFO worker>>\nbak: axum + Tokio + SQLx" {
+    Server: "<<API / scheduler / FIFO\nworker>>\nbak: axum + Tokio + SQLx" {
       shape: rectangle
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
@@ -85,11 +85,11 @@ diagram: "bak: Runtime and Local Storage" {
   }
   package_0.Client -> package_0.Browser: "Use console"
   package_0.Browser -> package_0.Profiles: "Save profiles and API keys"
-  package_0.Browser -> package_1.Server: "Bearer API / CORS; poll jobs"
+  package_0.Browser -> package_1.Server: "Bearer API / CORS; query jobs"
   package_0.Client -> package_1.Server: "HTTP automation"
   package_1.Server -> package_2.Config: "Load at startup"
   package_1.Server -> package_3.Keys: "Load immutable keyring"
-  package_1.Server -> package_2.Jobs: "Queue / claim / complete / recover"
+  package_1.Server -> package_2.Jobs: "Queue / cursors / claim / recover"
   package_1.Server -> package_3.Source: "Filter and read entries"
   package_1.Server -> package_4.Repo: "Publish / list / read"
   package_1.Server -> package_4.Files: "Encode / decode payloads"

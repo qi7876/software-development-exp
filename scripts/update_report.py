@@ -561,6 +561,12 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
                 "bak keygen --output PATH",
                 "生成 256 位随机密钥，Unix 权限 0600，拒绝覆盖已有文件，不要求 -d。",
             ),
+            (
+                "scheduled_backups",
+                "可省略；timezone 为 IANA 时区，plans 为命名计划数组。"
+                "计划包含 id、enabled、五字段 cron、source、repository、filter、"
+                "compression、encryption。",
+            ),
             ("logging", "废弃字段；出现此字段启动失败，应删除。作业历史固定存入 SQLite。"),
         ),
         (5.4, 8.6),
@@ -602,9 +608,9 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         anchor,
         "控制台包含创建备份、备份仓库、任务记录及连接管理。"
         "localStorage 按浏览器 origin "
-        "保存名称、地址和明文 API key；"
+        "保存规范化 API 地址和明文 API key；"
         "先验证候选服务再切换，成功后终止旧请求并清空服务相关输入与结果，"
-        "失败保留原服务。任务每 3 秒刷新，支持历史翻页。",
+        "失败保留原服务。连接或提交后加载任务，后续通过刷新按钮更新，支持历史翻页。",
     )
     _paragraph(
         document,
@@ -622,9 +628,9 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "使用双向同步的滑块和数字输入框，仅在本次备份启用压缩时生效。"
         "内部 BackupOptions 的压缩和加密均为 "
         "Option；None 禁用，Some 保存 "
-        "Zstd/LZ77 专属配置或密钥标识/指纹。"
+        "Zstd/LZ77 专属配置或加密算法、密钥标识与指纹。"
         "API、任务和仓库保存带 algorithm 标签的压缩配置，"
-        "null 表示不压缩；完整配置纳入加密载荷 v2 的认证数据。",
+        "null 表示不压缩；完整配置纳入 XChaCha 载荷 v2 或 AES 载荷 v3 的认证数据。",
     )
     _paragraph(
         document,
@@ -641,10 +647,45 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "命名密钥在启动时加载，排队任务固定 key_id 和 "
-        "fingerprint；重启后替换同名密钥不会静默改变任务。"
+        "fingerprint 和 algorithm；重启后替换同名密钥不会静默改变任务。"
         "加密只保护普通文件内容，文件名、大小、校验和、Unix "
         "元数据和链接目标仍可见。浏览器从不保存服务端加密密钥；"
         "API 认证 key 与加密密钥独立，服务端仍可读取明文。",
+    )
+    _paragraph(
+        document,
+        anchor,
+        "XChaCha20-Poly1305 保留 v2 认证分块格式；AES-256-GCM 使用 v3 头部，"
+        "包含 32 字节随机盐和 7 字节 STREAM nonce 前缀。HKDF-SHA256 从配置密钥派生"
+        "每文件独立的 32 字节密钥。两种算法均采用 128 KiB 分块、16 字节标签和必需的最终块；"
+        "认证数据绑定头部、备份、路径、压缩配置与密钥指纹，AES 另绑定算法。",
+    )
+    _heading(document, anchor, "3.5 配置式定时备份", 2)
+    _paragraph(
+        document,
+        anchor,
+        "示例：timezone=Asia/Shanghai，cron=0 2 * * * 表示每天当地 02:00。"
+        "配置修改后重启生效；示例计划默认禁用。省略筛选表示不过滤，省略压缩默认 Zstd 3，"
+        "compression=null 禁用压缩，省略加密表示不加密；相对路径以工作目录解析。"
+        "启用计划在启动时校验规则与密钥，无效设置阻止启动；文件系统错误在执行时成为失败任务。",
+    )
+    _paragraph(
+        document,
+        anchor,
+        "Scheduler 每秒检查当前 UTC 分钟，转为配置时区后匹配五字段 Cron。"
+        "启动分钟及停机、休眠或时钟前跳错过的分钟不补跑；UTC 高水位防止回拨重复。"
+        "夏令时缺失时间跳过，重复本地时间按不同 UTC 分钟分别匹配。"
+        "JobManager 在同一 SQLite 写事务中推进 schedule_cursors 并检查同计划 queued/running 作业，"
+        "忙碌则跳过本次触发；成功入队后才通知 FIFO worker。失败任务不自动重试。",
+    )
+    _paragraph(
+        document,
+        anchor,
+        "任务保存配置快照以及 schedule_id、scheduled_for（匹配分钟的 UTC Unix 毫秒）；"
+        "手动任务这两个字段均为空。任务详情展示计划来源，无计划管理 API 或页面。"
+        "调度器与 HTTP、worker 共同受监督；调度失败使服务失败退出，"
+        "正常关闭停止新增任务并等待活动操作，已提交 queued 作业留给重启。"
+        "作业库升级至 v5 不迁移，已有 v5 仓库仍可继续使用。",
     )
     _heading(document, anchor, "4. 非功能约束")
     _table(
@@ -772,7 +813,7 @@ def _populate_system_design(
                 "构建与依赖",
                 "Cargo 与 Cargo.lock；uv 管理文档依赖；"
                 "axum、Tokio、SQLx/SQLite、Zstd、SHA-256、RustCrypto "
-                "XChaCha20-Poly1305 / AES-256-GCM、regex、serde。",
+                "XChaCha20-Poly1305 / AES-256-GCM、HKDF-SHA256、croner、chrono-tz、regex、serde。",
             ),
             (
                 "版本控制",
@@ -847,6 +888,7 @@ def _populate_system_design(
             ("sequence-configure", 9),
             ("sequence-backup", 10),
             ("sequence-restore", 11),
+            ("sequence-schedule", 12),
         ),
         1,
     ):
@@ -861,7 +903,7 @@ def _populate_system_design(
         )
     _heading(document, anchor, "5. 设计边界")
     for boundary in (
-        "一个 bak 进程；HTTP、worker 和阻塞文件操作通过普通 Rust 调用与 Tokio 协作。",
+        "一个 bak 进程；HTTP、调度器、worker 和阻塞文件操作通过 Rust 调用与 Tokio 协作。",
         "API 只经 JobManager 门面访问业务；私有模块不为测试暴露。",
         "仓库 format/schema v5、作业库 v5；"
         "过滤和可选编码已实现，旧数据库与 JSON manifest "
@@ -968,7 +1010,12 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
                 "路径与完整性错误",
                 "恢复写入前拒绝危险元数据路径；大小、哈希或压缩数据不一致不能报告成功。",
             ),
-            ("SIGTERM", "活动作业完成，queued 留给下一次启动；HTTP 在活动操作期间响应。"),
+            (
+                "定时备份与事务边界",
+                "时区、日历和夏令时、忙碌跳过、重启去重、时钟跳变、入队失败回滚；"
+                "任务 API 和网页来源展示、调度停止及备份恢复闭环。",
+            ),
+            ("SIGTERM", "停止调度；活动作业完成，queued 留给下一次启动；HTTP 在活动操作期间响应。"),
             (
                 "SIGKILL",
                 "重启将 interrupted running 标为 "

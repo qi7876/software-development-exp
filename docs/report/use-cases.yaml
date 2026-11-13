@@ -1,6 +1,6 @@
 {
-  "version": "4.0",
-  "updated": "2026-10-31",
+  "version": "5.0",
+  "updated": "2026-11-13",
   "author": "项目开发者",
   "system": "bak Local Backup Service",
   "functional_requirements": [
@@ -32,7 +32,7 @@
     {
       "id": "FR-06",
       "name": "持久化作业与历史",
-      "description": "请求先入库再返回 202/Location；单 worker FIFO 执行，单作业查询与游标分页历史显示请求、状态、结果、错误及执行时间。"
+      "description": "请求先入库再返回 202/Location；单 worker FIFO 执行，单作业查询与游标分页历史显示请求、状态、结果、错误及执行时间。 任务保存可空的 schedule_id 与 scheduled_for，区分手动和定时来源。"
     },
     {
       "id": "FR-07",
@@ -42,7 +42,7 @@
     {
       "id": "FR-08",
       "name": "浏览器控制台与连接管理",
-      "description": "提供创建备份、仓库恢复、任务记录及连接管理；浏览器保存连接名称、地址、API key 与选中连接，验证成功才切换服务。"
+      "description": "提供创建备份、仓库恢复、任务记录及连接管理；浏览器保存地址、API key 与选中连接，验证成功才切换服务。"
     },
     {
       "id": "FR-09",
@@ -57,12 +57,17 @@
     {
       "id": "FR-11",
       "name": "可选压缩与内容加密",
-      "description": "压缩选择无、Zstd 或自实现流式 LZ77，并可独立加密，构成九种模式。Zstd 等级 1–22；LZ77 窗口 4–1024 KiB、搜索上限 1–256。同时启用固定先压缩后加密。"
+      "description": "压缩选择无、Zstd 或自实现流式 LZ77，并可独立加密，构成九种模式。Zstd 等级 1–22；LZ77 窗口 4–1024 KiB、搜索上限 1–256。同时启用固定先压缩后加密。 加密可选择 XChaCha20-Poly1305 或 AES-256-GCM，形成九种组合；恢复自动读取保存的算法与密钥。"
     },
     {
       "id": "FR-12",
       "name": "命名密钥生成与使用",
       "description": "keygen 创建随机 256 位密钥文件且拒绝覆盖；启动加载命名密钥，任务与备份固定标识和指纹，密钥缺失或变化时明确失败。"
+    },
+    {
+      "id": "FR-13",
+      "name": "配置式定时备份",
+      "description": "通过 scheduled_backups 配置 IANA 时区、五字段 Cron、源路径、仓库、筛选及编码参数；复用持久化队列，停机不补跑，同计划有未完成任务时跳过，来源与计划时间可查询。"
     }
   ],
   "nonfunctional_requirements": [
@@ -150,7 +155,8 @@
         "UC-06",
         "UC-07",
         "UC-08",
-        "UC-09"
+        "UC-09",
+        "UC-10"
       ],
       "associations": [
         [
@@ -212,6 +218,10 @@
         [
           "KEYS",
           "UC-05"
+        ],
+        [
+          "CLIENT",
+          "UC-10"
         ]
       ]
     },
@@ -232,7 +242,8 @@
         "UC-06",
         "UC-07",
         "UC-08",
-        "UC-09"
+        "UC-09",
+        "UC-10"
       ],
       "associations": [
         [
@@ -274,6 +285,10 @@
         [
           "KEYS",
           "UC-09"
+        ],
+        [
+          "CLIENT",
+          "UC-10"
         ]
       ]
     },
@@ -464,9 +479,9 @@
         "SRC",
         "TGT"
       ],
-      "trigger": "POST /api/backups。",
+      "trigger": "POST /api/backups，或已校验的定时计划提交备份任务。",
       "preconditions": [
-        "有效 Bearer key；已有源和仓库目录，规范化路径不重叠。"
+        "手动请求要求有效 Bearer key；已有源和仓库目录，规范化路径不重叠。"
       ],
       "success": "同步载荷后原子发布头、条目、根元数据和统计；成功作业仅返回 backup_id。",
       "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
@@ -663,7 +678,7 @@
         "符号链接按记录目标重建，不读取目标；目录元数据在子项后恢复，最后恢复根元数据。",
         "密钥标识和指纹都须匹配；失败恢复可留下部分输出，不自动清理。"
       ],
-      "notes": "恢复只需 repository、backup_id、destination；编码模式与密钥从元数据自动选择。界面缺少匹配密钥时禁用恢复，服务端执行仍独立校验。 LZ77 验证自定义头部、窗口、回引用、结束标记和尾随数据；完整压缩配置纳入加密载荷 v2 的认证数据。",
+      "notes": "恢复只需 repository、backup_id、destination；编码模式与密钥从元数据自动选择。界面缺少匹配密钥时禁用恢复，服务端执行仍独立校验。 LZ77 验证自定义头部、窗口、回引用、结束标记和尾随数据；完整压缩配置纳入 XChaCha 载荷 v2 或 AES 载荷 v3 的认证数据。",
       "basic_flow": [
         {
           "id": "B1",
@@ -740,7 +755,7 @@
         "NFR-05"
       ],
       "business_rules": [],
-      "notes": "默认每页 20 条、limit 为 1–100；按插入序列倒序，用字符串游标避免 JS 精度损失，新增记录不会造成旧页重复。浏览器每 3 秒刷新。失败作业查询仍为 HTTP 200，操作错误见 error.code。",
+      "notes": "默认每页 20 条、limit 为 1–100；按插入序列倒序，用字符串游标避免 JS 精度损失，新增记录不会造成旧页重复。浏览器手动刷新。失败作业查询仍为 HTTP 200，操作错误见 error.code。",
       "basic_flow": [
         {
           "id": "B1",
@@ -805,7 +820,9 @@
         "NFR-05",
         "NFR-07"
       ],
-      "business_rules": [],
+      "business_rules": [
+        "正常关闭同时停止调度入队；重启初始化调度进度但不补跑停机分钟。"
+      ],
       "notes": "SIGKILL 回归验证进程中断；不等于断电或文件系统崩溃验证。已中断操作不自动重试。",
       "basic_flow": [
         {
@@ -878,12 +895,12 @@
         "NFR-06"
       ],
       "business_rules": [],
-      "notes": "localStorage 按浏览器 origin 保存连接名称、地址和明文 API key；重新打开验证选中服务。断开保留连接但停止自动重连，删除移除密钥。无独立前端部署和 API 代理。",
+      "notes": "localStorage 按浏览器 origin 保存地址和明文 API key；重新打开验证选中服务。断开保留连接但停止自动重连，删除移除密钥。无独立前端部署和 API 代理。",
       "basic_flow": [
         {
           "id": "B1",
           "actor": "CLIENT",
-          "action": "打开控制台连接管理，输入名称、HTTP/HTTPS origin 和 API key。"
+          "action": "打开控制台连接管理，输入 HTTP/HTTPS origin 和 API key。"
         },
         {
           "id": "B2",
@@ -988,6 +1005,116 @@
           "condition": "配置密钥无效、缺失或同名密钥被替换",
           "steps": [
             "无效文件导致启动失败；操作所需密钥缺失或指纹不同则明确失败。"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UC-10",
+      "name": "Run configured scheduled backup",
+      "kind": "main",
+      "priority": "高",
+      "goal": "按配置的时间与备份参数自动创建全量备份，避免重复触发和积压。",
+      "primary_actor": "CLIENT",
+      "supporting_actors": [
+        "SRC",
+        "TGT"
+      ],
+      "trigger": "服务在线时进入匹配 Cron 的 UTC 分钟。",
+      "preconditions": [
+        "计划启用且已通过启动校验；单实例持有工作目录；源与仓库在执行时可访问。"
+      ],
+      "success": "事务保存计划进度及任务，复用 FIFO 完成备份；任务历史可查询计划标识和 UTC 计划时间。",
+      "failure": "忙碌或错过的时间点跳过；执行失败记录任务，调度数据库错误导致服务失败退出。",
+      "includes": [
+        "UC-03",
+        "UC-06"
+      ],
+      "extension_points": [],
+      "extends": null,
+      "parent": null,
+      "requirements": [
+        "FR-13",
+        "FR-03",
+        "FR-06",
+        "FR-07",
+        "FR-11",
+        "FR-12"
+      ],
+      "nfr": [
+        "NFR-01",
+        "NFR-02",
+        "NFR-03",
+        "NFR-04",
+        "NFR-05"
+      ],
+      "business_rules": [
+        "配置修改后重启生效；省略筛选表示全部文件，省略压缩默认 Zstd 3，省略加密表示不加密。",
+        "启动分钟与停机错过分钟不补跑；UTC 高水位避免回拨重复；夏令时缺失时间跳过，重复时间分别匹配。",
+        "同一计划有 queued/running 作业时推进进度但不入队；不同计划和手动任务共用 FIFO。",
+        "任务保存配置快照与密钥指纹；修改或删除计划不更改已有排队任务。"
+      ],
+      "notes": "计划通过服务端配置管理，无计划管理 API 或页面。调度器与 HTTP、worker 共同受监督关闭。",
+      "basic_flow": [
+        {
+          "id": "B1",
+          "actor": "CLIENT",
+          "action": "配置稳定计划标识、时区、Cron、路径和备份参数，启动或重启服务。"
+        },
+        {
+          "id": "B2",
+          "actor": "系统",
+          "action": "校验配置和启用计划密钥，编译规则，初始化持久化 UTC 分钟进度。"
+        },
+        {
+          "id": "B3",
+          "actor": "系统",
+          "action": "每秒检查当前分钟，转换到 IANA 时区后匹配 Cron，不扫描遗漏分钟。"
+        },
+        {
+          "id": "B4",
+          "actor": "系统",
+          "action": "事务推进进度，检查同计划活动任务，满足条件时保存 queued 任务及来源。"
+        },
+        {
+          "id": "B5",
+          "actor": "系统",
+          "action": "提交后唤醒 worker，复用备份流程，用户在任务详情查询计划标识与计划时间。"
+        }
+      ],
+      "alternative_flows": [
+        {
+          "id": "A1",
+          "from": "B4",
+          "condition": "同计划已有 queued/running 作业",
+          "steps": [
+            "本次不入队，仍提交分钟进度，等待下一次匹配。"
+          ]
+        }
+      ],
+      "exception_flows": [
+        {
+          "id": "E1",
+          "from": "B2",
+          "condition": "时区、Cron、筛选、压缩或启用计划密钥无效",
+          "steps": [
+            "启动失败并输出计划诊断。"
+          ]
+        },
+        {
+          "id": "E2",
+          "from": "B4",
+          "condition": "数据库入队或事务提交失败",
+          "steps": [
+            "事务回滚；调度器错误由服务监督并触发失败退出。"
+          ]
+        },
+        {
+          "id": "E3",
+          "from": "B5",
+          "condition": "备份执行失败",
+          "steps": [
+            "保存失败任务，下次匹配仍可触发；无自动重试。"
           ]
         }
       ]

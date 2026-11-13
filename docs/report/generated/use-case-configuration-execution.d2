@@ -72,6 +72,11 @@ diagram: "Service Lifecycle and Full Backup" {
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
+    UC_10: "UC-10\nRun configured scheduled\nbackup" {
+      shape: oval
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
   }
   CLIENT -- system.UC_01
   CLIENT -- system.UC_02
@@ -83,7 +88,10 @@ diagram: "Service Lifecycle and Full Backup" {
   CLIENT -- system.UC_08
   CLIENT -- system.UC_09
   KEYS -- system.UC_09
+  CLIENT -- system.UC_10
   AUT -> CLIENT: {target-arrowhead.style.filled: false}
   system.UC_03 -> system.UC_06: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
   system.UC_08 -> system.UC_02: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_10 -> system.UC_03: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
+  system.UC_10 -> system.UC_06: "<<include>>" {style.stroke-dash: 5; target-arrowhead.shape: arrow}
 }

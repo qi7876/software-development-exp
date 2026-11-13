@@ -1,6 +1,6 @@
 {
-  "version": "4.0",
-  "updated": "2026-10-31",
+  "version": "5.0",
+  "updated": "2026-11-13",
   "title": "bak 当前实现系统设计",
   "diagrams": [
     {
@@ -16,7 +16,7 @@
         }
       ],
       "details": [
-        "浏览器可连接同一或另一台 bak API；连接名称、地址和明文 API key 保存在浏览器 origin 的 localStorage。",
+        "浏览器可连接同一或另一台 bak API；地址和明文 API key 保存在浏览器 origin 的 localStorage。",
         "工作目录作业库 schema v5，仓库 schema/format v5；保留命名密钥文件以恢复旧备份。",
         "普通文件选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 或 AES-256-GCM 加密，形成九种模式；元数据和文件名仍为明文。",
         "配置式定时备份使用 IANA 时区与分钟级 Cron，复用 FIFO；停机不补跑，同一计划有未完成任务时跳过。"
@@ -36,7 +36,8 @@
           "UC-06",
           "UC-07",
           "UC-08",
-          "UC-09"
+          "UC-09",
+          "UC-10"
         ],
         "requirements": [
           "FR-01",
@@ -50,7 +51,8 @@
           "FR-09",
           "FR-10",
           "FR-11",
-          "FR-12"
+          "FR-12",
+          "FR-13"
         ],
         "nfr": [
           "NFR-01",
@@ -96,7 +98,7 @@
           "name": "bak: axum + Tokio + SQLx",
           "package": "Single server process",
           "type": "component",
-          "stereotype": "API and FIFO worker"
+          "stereotype": "API / scheduler / FIFO worker"
         },
         {
           "id": "Config",
@@ -166,7 +168,7 @@
         {
           "source": "Browser",
           "target": "Server",
-          "label": "Bearer API / CORS; poll jobs",
+          "label": "Bearer API / CORS; query jobs",
           "direction": "auto",
           "style": "solid"
         },
@@ -194,7 +196,7 @@
         {
           "source": "Server",
           "target": "Jobs",
-          "label": "Queue / claim / complete / recover",
+          "label": "Queue / cursors / claim / recover",
           "direction": "auto",
           "style": "solid"
         },
@@ -238,12 +240,17 @@
         {
           "element": "本图",
           "responsibility": "模块按现有职责组织，HTTP 通过 JobManager 门面调用业务，私有模块不为测试暴露。"
+        },
+        {
+          "element": "schedule::Scheduler",
+          "responsibility": "配置校验、分钟匹配、调用持久化入队；不直接读写备份载荷。"
         }
       ],
       "details": [
         "main/args/config 负责服务启动与 keygen 分支；启动加载 Keyring 后交给 JobManager。",
         "server::ui 提供编译时静态资源，server::api 处理认证、CORS、校验和响应；worker 以 spawn_blocking 执行业务。",
-        "backup 使用 filter 严格目录剪枝；content 组合可选 Zstd/LZ77 和加密 IO；lz77 自行实现环形窗口与哈希匹配，crypto 管理密钥和 STREAM 帧，repository 原子保存完整编码配置。"
+        "backup 使用 filter 严格目录剪枝；content 组合可选 Zstd/LZ77 和加密 IO；lz77 自行实现环形窗口与哈希匹配，crypto 管理密钥和 STREAM 帧，repository 原子保存完整编码配置。",
+        "schedule::Scheduler 编译计划、匹配时区与 Cron；JobManager 在一个事务中推进 UTC 游标并判断活动任务后入队，服务器监督调度器、worker 和 HTTP。"
       ],
       "constraints": [
         "图中元素对应现有模块，无独立前端服务、API 代理或新增框架。",
@@ -259,7 +266,8 @@
           "UC-06",
           "UC-07",
           "UC-08",
-          "UC-09"
+          "UC-09",
+          "UC-10"
         ],
         "requirements": [
           "FR-01",
@@ -273,7 +281,8 @@
           "FR-09",
           "FR-10",
           "FR-11",
-          "FR-12"
+          "FR-12",
+          "FR-13"
         ],
         "nfr": [
           "NFR-01",
@@ -388,6 +397,13 @@
           "type": "component",
           "package": "Job subsystem",
           "stereotype": "hash-chain LZ77 codec"
+        },
+        {
+          "id": "Scheduler",
+          "name": "schedule::Scheduler",
+          "type": "component",
+          "package": "Server boundary",
+          "stereotype": "Cron / IANA timezone"
         }
       ],
       "relations": [
@@ -544,6 +560,34 @@
           "label": "Streaming encoder / decoder",
           "direction": "auto",
           "style": "solid"
+        },
+        {
+          "source": "Server",
+          "target": "Scheduler",
+          "label": "Prepare / initialize / supervise",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Scheduler",
+          "target": "Jobs",
+          "label": "Atomic cursor / guarded admission",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Scheduler",
+          "target": "Filter",
+          "label": "Validate configured filters",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Scheduler",
+          "target": "Crypto",
+          "label": "Resolve configured key identity",
+          "direction": "auto",
+          "style": "solid"
         }
       ]
     },
@@ -566,10 +610,11 @@
       "details": [
         "BackupOptions.compression 为 Option<CompressionOptions>；None 禁用，Some 为 Zstd 或 LZ77 专属配置，API、任务与仓库元数据均使用带 algorithm 标签的对象。",
         "Encryption 包含 algorithm、key_id 与 fingerprint，不保存密钥材料；Filter 的规则也随请求持久化。",
-        "ManifestEntry 是结构体，kind 才是区分 File/Directory/Symlink 的枚举。UnixMetadata 包含纳秒时间戳。"
+        "ManifestEntry 是结构体，kind 才是区分 File/Directory/Symlink 的枚举。UnixMetadata 包含纳秒时间戳。",
+        "手动作业的 schedule_id/scheduled_for 均为空；定时作业保存稳定计划标识和匹配分钟的 UTC Unix 毫秒。"
       ],
       "constraints": [
-        "仓库保存完整算法配置，加密载荷 v2 对配置进行认证；恢复自动使用记录的解码器。",
+        "仓库保存完整算法配置，XChaCha 载荷 v2 或 AES 载荷 v3 对配置进行认证；恢复自动使用记录的解码器。",
         "SHA-256 与 original_size 始终针对原文，跳过统计只计已遇到的条目。"
       ],
       "trace": {
@@ -578,7 +623,8 @@
           "UC-04",
           "UC-05",
           "UC-06",
-          "UC-09"
+          "UC-09",
+          "UC-10"
         ],
         "requirements": [
           "FR-03",
@@ -588,7 +634,8 @@
           "FR-09",
           "FR-10",
           "FR-11",
-          "FR-12"
+          "FR-12",
+          "FR-13"
         ],
         "nfr": [
           "NFR-01",
@@ -614,7 +661,9 @@
           "attributes": [
             "+ job_id: String",
             "+ request: JobRequest",
-            "+ state: JobState"
+            "+ state: JobState",
+            "+ schedule_id: Option<String>",
+            "+ scheduled_for: Option<i64>"
           ],
           "operations": []
         },
@@ -736,6 +785,17 @@
             "+ search_depth: u16"
           ],
           "operations": []
+        },
+        {
+          "id": "Algorithm",
+          "name": "EncryptionAlgorithm",
+          "package": "Encoding settings",
+          "stereotype": "enum",
+          "attributes": [
+            "+ XChaCha20Poly1305",
+            "+ Aes256Gcm"
+          ],
+          "operations": []
         }
       ],
       "relations": [
@@ -818,6 +878,14 @@
           "source_multiplicity": "1",
           "target_multiplicity": "0..1",
           "label": "lz77 variant"
+        },
+        {
+          "source": "Encryption",
+          "target": "Algorithm",
+          "type": "association",
+          "source_multiplicity": "1",
+          "target_multiplicity": "1",
+          "label": "selected algorithm"
         }
       ]
     },
@@ -840,7 +908,8 @@
       "details": [
         "JobManager 持有 Arc<Keyring>，提交时固定标识与指纹，worker 执行前再次匹配。",
         "Content 选择可选 CompressionOptions 和 Encryption；LZ77 通过 Encoder/Decoder 流式处理，组合顺序固定先压缩后加密。",
-        "Filter::compile 在备份执行时校验正则和时间范围，CompiledFilter::matches 决定目录是否继续遍历。"
+        "Filter::compile 在备份执行时校验正则和时间范围，CompiledFilter::matches 决定目录是否继续遍历。",
+        "Scheduler 使用 croner / chrono-tz；AES 使用 HKDF-SHA256 派生独立文件密钥，两个算法共用 STREAM BE32 读写和最终块验证。"
       ],
       "constraints": [
         "Zstd level 为 1–22；LZ77 窗口 4–1024 KiB，候选上限 1–256，编码与解码均有界缓冲。",
@@ -856,7 +925,8 @@
           "UC-06",
           "UC-07",
           "UC-08",
-          "UC-09"
+          "UC-09",
+          "UC-10"
         ],
         "requirements": [
           "FR-01",
@@ -870,7 +940,8 @@
           "FR-09",
           "FR-10",
           "FR-11",
-          "FR-12"
+          "FR-12",
+          "FR-13"
         ],
         "nfr": [
           "NFR-01",
@@ -913,7 +984,9 @@
             "+ get_job(id): Option<JobInfo>",
             "+ list_jobs(limit, before): Value",
             "+ list_backups(path): Vec<RepoBackupInfo>",
-            "+ run_worker(stop): Result"
+            "+ run_worker(stop): Result",
+            "+ initialize_schedule(id, minute): Result",
+            "+ schedule_tick(id, minute, request): Result"
           ]
         },
         {
@@ -926,7 +999,7 @@
           ],
           "operations": [
             "+ load(directory, files): Keyring",
-            "+ select(id): Encryption",
+            "+ select(id, algorithm): Encryption",
             "+ resolve(encryption): &[u8;32]"
           ]
         },
@@ -993,6 +1066,21 @@
           "operations": [
             "+ Encoder::new(writer, options): Encoder",
             "+ Decoder::new(reader): Decoder"
+          ]
+        },
+        {
+          "id": "Scheduler",
+          "name": "Scheduler",
+          "package": "HTTP boundary",
+          "stereotype": "struct",
+          "attributes": [
+            "- timezone: Tz",
+            "- plans: Vec<Plan>"
+          ],
+          "operations": [
+            "+ prepare(config, keys): Scheduler",
+            "+ initialize(jobs, now): Result",
+            "+ run(jobs, stop): Result"
           ]
         }
       ],
@@ -1084,6 +1172,14 @@
           "source_multiplicity": "",
           "target_multiplicity": "",
           "label": "encode / decode"
+        },
+        {
+          "source": "Scheduler",
+          "target": "Manager",
+          "type": "dependency",
+          "source_multiplicity": "",
+          "target_multiplicity": "",
+          "label": "guarded admission"
         }
       ]
     },
@@ -1102,7 +1198,8 @@
       "details": [
         "配置和命名密钥只在启动时加载；无效密钥或旧作业库版本导致启动失败。",
         "静态资源可公开访问；浏览器选择服务后通过认证状态接口获取版本与密钥指纹。",
-        "keygen 是独立命令，不启动 HTTP 服务；此图只展示服务启动与正常关闭。"
+        "keygen 是独立命令，不启动 HTTP 服务；此图只展示服务启动与正常关闭。",
+        "无效计划或调度任务异常使服务失败退出；正常关闭等待调度器和 worker 后再关闭数据库。"
       ],
       "constraints": [
         "配置不热加载，更换密钥配置后重启并重新连接。",
@@ -1114,7 +1211,8 @@
           "UC-02",
           "UC-07",
           "UC-08",
-          "UC-09"
+          "UC-09",
+          "UC-10"
         ],
         "requirements": [
           "FR-01",
@@ -1122,7 +1220,8 @@
           "FR-06",
           "FR-07",
           "FR-08",
-          "FR-12"
+          "FR-12",
+          "FR-13"
         ],
         "nfr": [
           "NFR-01",
@@ -1163,6 +1262,11 @@
           "id": "Server",
           "name": "server",
           "type": "boundary"
+        },
+        {
+          "id": "Scheduler",
+          "name": "Scheduler",
+          "type": "control"
         }
       ],
       "steps": [
@@ -1206,7 +1310,25 @@
           "type": "message",
           "source": "Main",
           "target": "Server",
-          "text": "Bind listener and supervise worker"
+          "text": "Prepare scheduler, then bind HTTP"
+        },
+        {
+          "type": "message",
+          "source": "Server",
+          "target": "Scheduler",
+          "text": "Validate plans / resolve keys"
+        },
+        {
+          "type": "message",
+          "source": "Scheduler",
+          "target": "Jobs",
+          "text": "Initialize UTC cursors; no catch-up"
+        },
+        {
+          "type": "message",
+          "source": "Jobs",
+          "target": "DB",
+          "text": "Advance persisted startup minute"
         },
         {
           "type": "message",
@@ -1243,6 +1365,12 @@
           "source": "User",
           "target": "Server",
           "text": "Request graceful shutdown"
+        },
+        {
+          "type": "message",
+          "source": "Server",
+          "target": "Scheduler",
+          "text": "Stop admitting scheduled work"
         },
         {
           "type": "message",
@@ -1651,6 +1779,173 @@
           "source": "API",
           "target": "Client",
           "text": "200 + durable result or error"
+        }
+      ]
+    },
+    {
+      "id": "sequence-schedule",
+      "kind": "sequence",
+      "view": "sequence",
+      "title": "Scheduled Backup: Minute Check and Durable Admission",
+      "purpose": "说明定时计划如何复用现有备份队列，以及重复触发、忙碌和失败的事务边界。",
+      "responsibilities": [
+        {
+          "element": "Scheduler",
+          "responsibility": "只匹配当前 UTC 分钟转换后的本地时间；不补跑错过分钟。"
+        },
+        {
+          "element": "JobManager / jobs.sqlite3",
+          "responsibility": "事务推进游标并检查活动任务，提交后通知 worker。"
+        }
+      ],
+      "details": [
+        "计划配置包含稳定标识、时区、五字段 Cron、路径、筛选和编码，启动后固定快照。",
+        "同计划忙碌仍推进游标；失败不会阻塞下次计划，不自动重试。",
+        "UTC 高水位持久化；时钟前跳不补跑，后跳不重复；重启从下一分钟继续。"
+      ],
+      "constraints": [
+        "每个工作目录仅运行一个实例；调度器不单独执行文件操作。",
+        "游标与入队共享事务，仓库元数据与任务终态仍属于不同提交边界。"
+      ],
+      "trace": {
+        "use_cases": [
+          "UC-10",
+          "UC-03",
+          "UC-06",
+          "UC-07"
+        ],
+        "requirements": [
+          "FR-13",
+          "FR-03",
+          "FR-06",
+          "FR-07"
+        ],
+        "nfr": [
+          "NFR-03",
+          "NFR-05"
+        ]
+      },
+      "participants": [
+        {
+          "id": "Clock",
+          "name": "UTC wall clock",
+          "type": "participant"
+        },
+        {
+          "id": "Scheduler",
+          "name": "Scheduler",
+          "type": "control"
+        },
+        {
+          "id": "Jobs",
+          "name": "JobManager / worker",
+          "type": "control"
+        },
+        {
+          "id": "DB",
+          "name": "jobs.sqlite3",
+          "type": "database"
+        },
+        {
+          "id": "Backup",
+          "name": "backup",
+          "type": "control"
+        }
+      ],
+      "steps": [
+        {
+          "type": "loop",
+          "text": "Every second; inspect current minute only"
+        },
+        {
+          "type": "message",
+          "source": "Clock",
+          "target": "Scheduler",
+          "text": "Current UTC minute"
+        },
+        {
+          "type": "message",
+          "source": "Scheduler",
+          "target": "Scheduler",
+          "text": "Convert IANA timezone / match Cron"
+        },
+        {
+          "type": "opt",
+          "text": "New matching minute"
+        },
+        {
+          "type": "message",
+          "source": "Scheduler",
+          "target": "Jobs",
+          "text": "schedule_tick(id, minute, request)"
+        },
+        {
+          "type": "message",
+          "source": "Jobs",
+          "target": "DB",
+          "text": "BEGIN; advance cursor if newer"
+        },
+        {
+          "type": "alt",
+          "text": "Cursor advanced and no active job"
+        },
+        {
+          "type": "message",
+          "source": "Jobs",
+          "target": "DB",
+          "text": "Insert queued snapshot / schedule origin"
+        },
+        {
+          "type": "return",
+          "source": "DB",
+          "target": "Jobs",
+          "text": "COMMIT"
+        },
+        {
+          "type": "message",
+          "source": "Jobs",
+          "target": "Jobs",
+          "text": "Notify FIFO worker after commit"
+        },
+        {
+          "type": "else",
+          "text": "Duplicate minute or active plan"
+        },
+        {
+          "type": "message",
+          "source": "Jobs",
+          "target": "DB",
+          "text": "COMMIT without another queued job"
+        },
+        {
+          "type": "end",
+          "text": ""
+        },
+        {
+          "type": "end",
+          "text": ""
+        },
+        {
+          "type": "end",
+          "text": ""
+        },
+        {
+          "type": "message",
+          "source": "Jobs",
+          "target": "Backup",
+          "text": "Claim oldest queued job / execute"
+        },
+        {
+          "type": "return",
+          "source": "Backup",
+          "target": "Jobs",
+          "text": "Published backup_id or error"
+        },
+        {
+          "type": "message",
+          "source": "Jobs",
+          "target": "DB",
+          "text": "Persist terminal result separately"
         }
       ]
     }

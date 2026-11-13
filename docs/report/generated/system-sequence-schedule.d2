@@ -1,0 +1,38 @@
+# Generated from docs/report/model.yaml; do not edit directly.
+direction: down
+**.style.font-size: 32
+(** -> **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** -- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+(** <- **)[*].style: {font-size: 32; bold: true; italic: false; font-color: "#1E293B"}
+diagram: "Scheduled Backup: Minute Check and Durable Admission" {
+  style.font-size: 44
+  style.fill: white
+  style.stroke: transparent
+  shape: sequence_diagram
+  Clock: "UTC wall clock" {shape: rectangle}
+  Scheduler: "<<control>>\nScheduler" {shape: rectangle}
+  Jobs: "<<control>>\nJobManager / worker" {shape: rectangle}
+  DB: "jobs.sqlite3" {shape: cylinder}
+  Backup: "<<control>>\nbackup" {shape: rectangle}
+  fragment_0: "loop [Every second; inspect current\nminute only]" {
+    Clock -> Scheduler: "Current UTC minute"
+    Scheduler -> Scheduler: "Convert IANA timezone / match Cron"
+    fragment_3: "opt [New matching minute]" {
+      Scheduler -> Jobs: "schedule_tick(id, minute, request)"
+      Jobs -> DB: "BEGIN; advance cursor if newer"
+      fragment_6: alt {
+        branch_6: "[Cursor advanced and no active job]" {
+          Jobs -> DB: "Insert queued snapshot / schedule origin"
+          DB -> Jobs: "COMMIT" {style.stroke-dash: 5}
+          Jobs -> Jobs: "Notify FIFO worker after commit"
+        }
+        branch_10: "[Duplicate minute or active plan]" {
+          Jobs -> DB: "COMMIT without another queued job"
+        }
+      }
+    }
+  }
+  Jobs -> Backup: "Claim oldest queued job / execute"
+  Backup -> Jobs: "Published backup_id or error" {style.stroke-dash: 5}
+  Jobs -> DB: "Persist terminal result separately"
+}

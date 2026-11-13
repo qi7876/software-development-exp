@@ -90,6 +90,10 @@ class ReportPreservationTests(unittest.TestCase):
                 "localStorage",
                 "当前功能回归",
                 "历史测量",
+                "配置式定时备份",
+                "schedule_cursors",
+                "scheduled_for",
+                "HKDF-SHA256",
             ]:
                 self.assertIn(required, text)
             for outdated in [
@@ -97,6 +101,8 @@ class ReportPreservationTests(unittest.TestCase):
                 "当前没有 Web 控制台",
                 "界面尚未实现",
                 "当前不恢复权限",
+                "任务每 3 秒刷新",
+                "当前未实现计划调度",
             ]:
                 self.assertNotIn(outdated, text)
 

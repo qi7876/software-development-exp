@@ -15,6 +15,14 @@ diagram: "Facade, Modules and Data Access" {
       shape: class
       "+ router(jobs, key, web_ui_enabled)": "Router"
     }
+    Scheduler: "<<struct>>\nScheduler" {
+      shape: class
+      "- timezone": "Tz"
+      "- plans": "Vec<Plan>"
+      "+ prepare(config, keys)": "Scheduler"
+      "+ initialize(jobs, now)": "Result"
+      "+ run(jobs, stop)": "Result"
+    }
   }
   package_1: "Job subsystem" {
     style.font-size: 36
@@ -29,12 +37,14 @@ diagram: "Facade, Modules and Data Access" {
       "+ list_jobs(limit, before)": "Value"
       "+ list_backups(path)": "Vec<RepoBackupInfo>"
       "+ run_worker(stop)": "Result"
+      "+ initialize_schedule(id, minute)": "Result"
+      "+ schedule_tick(id, minute, request)": "Result"
     }
     Keys: "<<struct>>\nKeyring" {
       shape: class
       "- keys": "BTreeMap"
       "+ load(directory, files)": "Keyring"
-      "+ select(id)": "Encryption"
+      "+ select(id, algorithm)": "Encryption"
       "+ resolve(encryption)": "&[u8;32]"
     }
   }
@@ -114,6 +124,10 @@ diagram: "Facade, Modules and Data Access" {
     style.stroke-dash: 5
   }
   package_2.Content -> package_2.Lz77: "encode / decode" {
+    target-arrowhead.shape: arrow
+    style.stroke-dash: 5
+  }
+  package_0.Scheduler -> package_1.Manager: "guarded admission" {
     target-arrowhead.shape: arrow
     style.stroke-dash: 5
   }
