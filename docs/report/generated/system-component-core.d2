@@ -94,6 +94,11 @@ diagram: "bak: Module Responsibilities" {
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
+    Archive: "<<sequential packing /\nverification>>\njobs::archive" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
   }
   package_0.Main -> package_2.Jobs: "Open durable manager"
   package_0.Main -> package_1.Server: "Run service"
@@ -113,12 +118,14 @@ diagram: "bak: Module Responsibilities" {
   package_0.Main -> package_2.Crypto: "Generate / load keys"
   package_2.Jobs -> package_2.Crypto: "Share Keyring"
   package_2.Backup -> package_2.Filter: "Compile and match"
-  package_2.Backup -> package_2.Content: "Encode files"
-  package_2.Restore -> package_2.Content: "Decode files"
+  package_2.Backup -> package_2.Content: "Encode archive"
+  package_2.Restore -> package_2.Content: "Decode archive"
   package_2.Content -> package_2.Crypto: "Authenticated stream wrappers"
   package_2.Content -> package_2.Lz77: "Streaming encoder / decoder"
   package_1.Server -> package_1.Scheduler: "Prepare / initialize / supervise"
   package_1.Scheduler -> package_2.Jobs: "Atomic cursor / guarded admission"
   package_1.Scheduler -> package_2.Filter: "Validate configured filters"
   package_1.Scheduler -> package_2.Crypto: "Resolve configured key identity"
+  package_2.Backup -> package_2.Archive: "Pack entries into one stream"
+  package_2.Restore -> package_2.Archive: "Verify and unpack entries"
 }

@@ -2,7 +2,7 @@
 
 Compression and encryption are runtime choices per backup, not Cargo feature switches. Compression is absent or a tagged `CompressionOptions` variant: Zstd (level 1–22, default 3) or project LZ77 (window 4–1024 KiB, default 64; candidate search limit 1–256, default 32). The UI defaults to Zstd without encryption, while an omitted/null API compression configuration disables it. Complete parameters persist in task requests and repository metadata. Restore automatically selects the saved codec.
 
-SHA-256 and original sizes always describe plaintext. Combining features means source → selected compression → encryption → disk; restore applies the inverse. Each writer finishes compression, then encryption, then synchronizes its output before metadata publication. Readers must consume the encoded stream completely, including codec end markers and the authenticated final block, before success. See [project LZ77](lz77.md) for its separate framing and matching contract.
+SHA-256 and original sizes always describe plaintext. Combining features means source entries → archive → selected compression → encryption → disk; restore applies the inverse. Each writer finishes compression, then encryption, then synchronizes its output before metadata publication. Readers must consume the encoded stream completely, including codec end markers and the authenticated final block, before success. See [project LZ77](lz77.md) for its separate framing and matching contract.
 
 ## Key lifecycle
 
@@ -21,11 +21,11 @@ The fixed 27-byte header consists of:
 | Bytes | Meaning |
 | --- | --- |
 | 0–7 | `b"BAKENC\0\x02"` magic and payload version |
-| 8–26 | Fresh random 19-byte STREAM nonce prefix, generated independently for each file |
+| 8–26 | Fresh random 19-byte STREAM nonce prefix, generated independently for each archive |
 
-The encryption input is split into 131072-byte full blocks, each written with `encrypt_next`, followed by a shorter final block written with `encrypt_last`. Each ciphertext block adds a 16-byte tag. A final block is mandatory even when its plaintext is empty, including empty files and exact multiples of the block size. There are no length prefixes: full ciphertext blocks have length 131088, and the shorter final block occupies the remainder at EOF. Reads fill a block across short input reads; input read boundaries carry no framing meaning.
+The encryption input is split into 131072-byte full blocks, each written with `encrypt_next`, followed by a shorter final block written with `encrypt_last`. Each ciphertext block adds a 16-byte tag. A final block is mandatory even when its plaintext is empty, including exact multiples of the block size. There are no length prefixes: full ciphertext blocks have length 131088, and the shorter final block occupies the remainder at EOF. Reads fill a block across short input reads; input read boundaries carry no framing meaning.
 
-For every block, AAD is the fixed header followed by compact serde JSON for the tuple `(backup_id, relative_path, compression_configuration, key_fingerprint)`. Tuple order, JSON encoding, path representation, algorithm tags, parameters, and null encoding are part of this format. This binds payloads to their file, backup, mode, key, and header. Key identifier names are routing metadata; key fingerprints identify material.
+For every block, AAD is the fixed header followed by compact serde JSON for the tuple `(backup_id, relative_path, compression_configuration, key_fingerprint)`. Tuple order, JSON encoding, path representation, algorithm tags, parameters, and null encoding are part of this format. The path is the fixed `archive.bak` name in repository v6. This binds the complete archive to its backup, mode, key and encryption header. Key identifier names are routing metadata; key fingerprints identify material.
 
 A reader accepts EOF only after successful final-block authentication. Missing/partial headers, invalid magic, incomplete blocks, missing final tags, changed/reordered/duplicated blocks, extra trailing bytes, wrong keys, and changed associated data fail decoding. The STREAM counter limit fails explicitly rather than wrapping. Memory is bounded by a few blocks plus codec buffers, including the bounded LZ77 history and index; neither backup nor restore buffers a complete file.
 
@@ -33,14 +33,14 @@ A reader accepts EOF only after successful final-block authentication. Missing/p
 
 Algorithm identifier: `aes256gcm-stream-be32-v3`. Uses RustCrypto AES-256-GCM and STREAM BE32, with the same chunk sizes, tags, mandatory final block, error handling and bounded buffering as XChaCha above.
 
-The 47-byte header contains `b"BAKENC\0\x03"` (bytes 0–7), a fresh OS-random 32-byte salt (8–39), and an independently random 7-byte STREAM nonce prefix (40–46). STREAM adds its four-byte counter and final flag to form the 12-byte AES-GCM nonce. Derive each file's 32-byte key with HKDF-SHA256: IKM is the configured key, salt is the header salt, and info is `b"bak-aes-256-gcm-stream-be32-v3"`. This avoids relying on a short random nonce prefix for uniqueness across files. Temporary file keys use zeroizing containers.
+The 47-byte header contains `b"BAKENC\0\x03"` (bytes 0–7), a fresh OS-random 32-byte salt (8–39), and an independently random 7-byte STREAM nonce prefix (40–46). STREAM adds its four-byte counter and final flag to form the 12-byte AES-GCM nonce. Derive each archive's 32-byte key with HKDF-SHA256: IKM is the configured key, salt is the header salt, and info is `b"bak-aes-256-gcm-stream-be32-v3"`. This avoids relying on a short random nonce prefix for uniqueness across archives. Temporary archive keys use zeroizing containers.
 
-AAD is the complete header followed by compact serde JSON for `(backup_id, relative_path, compression_configuration, key_fingerprint, algorithm)`, where algorithm is `"aes-256-gcm"`. Metadata chooses the decoder, which requires the matching header; there is no fallback to another algorithm. XChaCha retains its v2 header and AAD unchanged. The same configured key may serve both algorithms; only AES derives a per-file key.
+AAD is the complete header followed by compact serde JSON for `(backup_id, relative_path, compression_configuration, key_fingerprint, algorithm)`, where algorithm is `"aes-256-gcm"`. Metadata chooses the decoder, which requires the matching header; there is no fallback to another algorithm. XChaCha retains its v2 header and AAD unchanged. The same configured key may serve both algorithms; only AES derives a per-archive key.
 
 API encryption is null/omitted or `{algorithm, key_id}`. Both fields are required in a non-null object. Task and listing encryption records additionally contain the server-resolved fingerprint. Status key records remain `{key_id, fingerprint}` and do not select an algorithm.
 
 ## Limits and compatibility
 
-Encryption protects regular-file contents only. Filenames, directory layout, source paths, Unix metadata, original sizes, SHA-256 values, and symbolic link targets remain visible. Metadata is still trusted; this is not full-repository authentication or protection from a malicious API server. The service sees plaintext and keys. Failed or interrupted restores can leave partial output, as with existing checksum failures.
+Encryption protects the complete archive stream. The plaintext SQLite catalog still exposes filenames, directory layout, source paths, Unix metadata, original sizes, SHA-256 values, and symbolic link targets. Metadata is still trusted; this is not full-repository authentication or protection from a malicious API server. The service sees plaintext and keys. Failed or interrupted restores can leave partial output, as with existing checksum failures.
 
-Repository format/schema v5 stores compression, encryption format, key identifier and fingerprint in the same publication transaction as entries and statistics. Job schema v5 prevents older request JSON from being treated as new-format work. Old databases are rejected without migration or deletion. Use the prior binary with prior directories to operate old data.
+Repository format/schema v6 stores compression, encryption format, key identifier and fingerprint in the same publication transaction as entries and statistics. Job schema v5 is unchanged by archive packing. Older repository schemas are rejected without migration or deletion. Use the prior binary with prior directories to operate old data.

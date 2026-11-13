@@ -1,9 +1,9 @@
-# Repository schema v5
+# Repository schema v6
 
-The v5 model and SQL read/write bindings persist root and entry metadata,
+The v6 model and SQL read/write bindings persist root and entry metadata,
 symbolic link targets, and statistics in one transaction. Backup collects these
 attributes before reading contents or descending into directories. Symbolic links
-have no payload in the repository: their original target is stored only in SQLite.
+have no payload in the repository: their original target is stored in SQLite and in the archive header.
 Unsupported entry types are skipped and counted. Filtering uses strict directory pruning; rejected directory descendants are not traversed or counted.
 
 Restore applies saved Unix metadata and recreates symbolic links without opening
@@ -12,8 +12,8 @@ source root attributes on the destination root. Synchronization uses the already
 opened directory handle so restrictive restored permissions do not prevent it.
 Repositories are trusted and source trees must remain unchanged during backup.
 
-Repository databases require `PRAGMA user_version = 5`; no migration is provided.
-Use a new repository for v5 and a new working directory for job schema v5. No migration is provided; old data is not deleted. Job schema v5 adds schedule origins and durable scheduling cursors. Existing repository-v5 data remains usable.
+Repository databases require `PRAGMA user_version = 6`; no migration is provided.
+Use a new repository for v6. Job schema v5 is unchanged, so existing schema-v5 working directories remain usable. Old repositories are rejected without migration or deletion; use the prior binary with the original directories to read them.
 
 ## Storage contract
 
@@ -23,7 +23,7 @@ statistics columns are required, with no fabricated defaults.
 
 | Columns | Representation |
 | --- | --- |
-| `format_version` | Must be 5 |
+| `format_version` | Must be 6 |
 | `compression` | JSON `null`, `{"algorithm":"zstd","level":3}`, or `{"algorithm":"lz77","window_kib":64,"search_depth":32}` |
 | `encryption` | `none`, `xchacha20poly1305-stream-be32-v2` or `aes256gcm-stream-be32-v3` |
 | `encryption_key_id`, `encryption_key_fingerprint` | Both null without encryption; otherwise the stable key identifier and 64-digit SHA-256 fingerprint |
@@ -70,6 +70,6 @@ or upgrade any existing database or backup contents.
 
 ## Content encoding and keys
 
-Each backup chooses no compression, Zstd or LZ77, independently of encryption. Nine modes may coexist in the same repository. Files retain their relative names; only their contents are encrypted. Sizes, checksums, Unix metadata, and link targets remain plaintext. The repository is still trusted metadata, not an encrypted catalog.
+Each backup chooses no compression, Zstd or LZ77, independently of encryption. Nine modes may coexist in the same repository. All entries are packed into one `backups/<backup_id>/archive.bak` stream before compression and encryption. Entry ordinals match archive order. SQLite remains the plaintext catalog, including sizes, checksums, Unix metadata and link targets. See the [archive contract](archive.md); an archive alone is not a published backup and the root metadata remains in SQLite.
 
 The payload format, authenticated framing, and key lifecycle are described in [content encryption](content-encryption.md). Restore automatically selects its decoding pipeline and requires the saved key identifier and fingerprint before creating restored entries. SHA-256 and size checks still cover original plaintext bytes.
