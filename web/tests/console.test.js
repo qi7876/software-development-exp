@@ -986,14 +986,6 @@ test(
         await page
           .locator("#encryption-key")
           .selectOption(index === 3 ? "current" : "previous");
-      assert.equal(
-        await page.locator("#encoding-order").isVisible(),
-        Boolean(compression && encryption),
-      );
-      assert.equal(
-        await page.locator("#encryption-scope").isVisible(),
-        Boolean(encryption),
-      );
       await page.locator('nav a[href="#repository"]').click();
       await page.locator('nav a[href="#backup"]').click();
       assert.equal(

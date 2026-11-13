@@ -607,8 +607,6 @@ function updateEncodingOptions() {
   $("encryption-key").required = encrypted;
   $("encryption-key").disabled = !encrypted;
   $("encryption-help").hidden = hasKeys;
-  $("encryption-scope").hidden = !encrypted;
-  $("encoding-order").hidden = !encrypted || algorithm === "none";
 }
 $("compression-algorithm").addEventListener("change", updateEncodingOptions);
 $("encryption-algorithm").addEventListener("change", updateEncodingOptions);
