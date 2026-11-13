@@ -16,6 +16,8 @@
   --accent: #111;
   --accent-hover: #333;
   --on-accent: #fff;
+  --danger: #c2321f;
+  --on-danger: #fff;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   color: var(--text);
@@ -34,6 +36,8 @@
     --accent: #eee;
     --accent-hover: #ccc;
     --on-accent: #0c0c0c;
+    --danger: #f2796a;
+    --on-danger: #0c0c0c;
   }
 }
 * {
@@ -197,7 +201,12 @@ button.primary:disabled {
   opacity: 0.4;
 }
 button.danger {
-  border-style: dashed;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+button.danger:hover:not(:disabled) {
+  background: var(--danger);
+  color: var(--on-danger);
 }
 button.icon-button {
   width: 28px;
@@ -213,7 +222,7 @@ button.icon-button {
 .sidebar {
   position: fixed;
   inset: 0 auto 0 0;
-  width: 160px;
+  width: 190px;
   padding: 16px 12px;
   display: flex;
   flex-direction: column;
@@ -273,14 +282,15 @@ button.icon-button {
   background: var(--text);
 }
 .connection-status[data-state="error"] .connection-indicator {
-  border-style: dashed;
+  border-color: var(--danger);
+  background: var(--danger);
 }
 #version {
   margin-left: auto;
   color: var(--muted);
 }
 main {
-  margin-left: 160px;
+  margin-left: 190px;
   padding: clamp(16px, 3vw, 32px);
 }
 .view {
@@ -390,8 +400,9 @@ body:has(#connection-status[data-state="connected"]) .connect-notice {
   display: none;
 }
 .message.error {
-  border-color: var(--text);
+  border-color: var(--danger);
   border-left-width: 6px;
+  color: var(--danger);
   font-weight: 600;
 }
 .action-link {
@@ -495,6 +506,7 @@ body:has(#connection-status[data-state="connected"]) .connect-notice {
   font-size: 12px;
 }
 .job-error {
+  color: var(--danger);
   font-weight: 600;
 }
 .job details {
@@ -522,7 +534,7 @@ body:has(#connection-status[data-state="connected"]) .connect-notice {
 .job-title {
   font-weight: 600;
 }
-/* Job state is shown by border and fill, not color. */
+/* Job state is shown by border and fill; only failures use red. */
 .badge {
   padding: 0 8px;
   border: 1px solid var(--text);
@@ -537,8 +549,9 @@ body:has(#connection-status[data-state="connected"]) .connect-notice {
   border-color: var(--border-strong);
 }
 .badge.failed {
-  background: var(--text);
-  color: var(--bg);
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--on-danger);
 }
 .job dl,
 .restore-summary {
