@@ -346,7 +346,7 @@
         "NFR-07"
       ],
       "business_rules": [],
-      "notes": "web_ui 可省略，默认关闭；enabled=true 提供编译时嵌入的控制台。旧 archive_url/directory 字段被忽略；logging 已废弃。作业 schema v4、仓库 schema/format v5，旧数据库拒绝且不迁移。",
+      "notes": "web_ui 可省略，默认关闭；enabled=true 提供编译时嵌入的控制台。旧 archive_url/directory 字段被忽略；logging 已废弃。配置可含 scheduled_backups（时区、Cron、源路径、仓库及备份参数）；作业 schema v5、仓库 schema/format v5，旧数据库拒绝且不迁移。",
       "basic_flow": [
         {
           "id": "B1",

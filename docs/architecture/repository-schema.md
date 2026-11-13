@@ -13,7 +13,7 @@ opened directory handle so restrictive restored permissions do not prevent it.
 Repositories are trusted and source trees must remain unchanged during backup.
 
 Repository databases require `PRAGMA user_version = 5`; no migration is provided.
-Use a new repository for v5 and a new working directory for job schema v4. No migration is provided; old data is not deleted. Job schema v4 distinguishes requests with pinned encryption settings from older request JSON.
+Use a new repository for v5 and a new working directory for job schema v5. No migration is provided; old data is not deleted. Job schema v5 adds schedule origins and durable scheduling cursors. Existing repository-v5 data remains usable.
 
 ## Storage contract
 

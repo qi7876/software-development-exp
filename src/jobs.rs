@@ -3,7 +3,7 @@ mod content;
 pub(crate) mod crypto;
 #[cfg(test)]
 use content::ZstdOptions;
-pub(crate) use content::{BackupOptions, CompressionOptions};
+pub(crate) use content::{BackupOptions, CompressionOptions, EncryptionRequest};
 mod filesystem;
 mod filter;
 mod lz77;
@@ -25,12 +25,14 @@ use tokio::sync::{Notify, watch};
 use uuid::Uuid;
 
 const JOBS_SCHEMA: storage::Schema = storage::Schema {
-    version: 4,
+    version: 5,
     sql: "
 CREATE TABLE jobs (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id TEXT NOT NULL UNIQUE,
     request TEXT NOT NULL,
+    schedule_id TEXT,
+    scheduled_for INTEGER,
     state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'succeeded', 'failed')),
     result TEXT,
     error_code INTEGER,
@@ -38,12 +40,15 @@ CREATE TABLE jobs (
     queued_at INTEGER NOT NULL,
     started_at INTEGER,
     finished_at INTEGER,
+    CHECK ((schedule_id IS NULL AND scheduled_for IS NULL) OR (schedule_id IS NOT NULL AND length(schedule_id) > 0 AND scheduled_for IS NOT NULL)),
     CHECK (
         (state IN ('queued', 'running') AND result IS NULL AND error_code IS NULL AND error_message IS NULL AND finished_at IS NULL) OR
         (state = 'succeeded' AND result IS NOT NULL AND error_code IS NULL AND error_message IS NULL AND finished_at IS NOT NULL) OR
         (state = 'failed' AND result IS NULL AND error_code IS NOT NULL AND error_code BETWEEN 100 AND 999 AND error_message IS NOT NULL AND finished_at IS NOT NULL)
     )
 );
+CREATE TABLE schedule_cursors (schedule_id TEXT PRIMARY KEY NOT NULL, minute INTEGER NOT NULL);
+CREATE UNIQUE INDEX active_schedule ON jobs(schedule_id) WHERE schedule_id IS NOT NULL AND state IN ('queued', 'running');
 CREATE INDEX queued_jobs ON jobs(sequence) WHERE state = 'queued';
 CREATE UNIQUE INDEX one_running_job ON jobs(state) WHERE state = 'running';
 ",
@@ -81,6 +86,8 @@ impl JobManager {
             job_id: Uuid::new_v4().to_string(),
             request,
             state: JobState::Queued,
+            schedule_id: None,
+            scheduled_for: None,
         };
         let request = serde_json::to_string(&job.request).map_err(|error| {
             JobError::internal(format!("cannot serialize job {}: {error}", job.job_id))
@@ -96,6 +103,48 @@ impl JobManager {
         .map_err(|error| JobError::internal(format!("cannot queue job {}: {error}", job.job_id)))?;
         self.wake.notify_one();
         Ok(job)
+    }
+
+    // Initialization skips downtime, including the current partial minute.
+    pub(crate) async fn initialize_schedule(&self, id: &str, minute: i64) -> Result<(), JobError> {
+        sqlx::query("INSERT INTO schedule_cursors (schedule_id, minute) VALUES (?, ?) ON CONFLICT(schedule_id) DO UPDATE SET minute = max(minute, excluded.minute)")
+            .bind(id).bind(minute).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub(crate) async fn schedule_tick(
+        &self,
+        id: &str,
+        minute: i64,
+        request: Option<&JobRequest>,
+    ) -> Result<(), JobError> {
+        let mut tx = self.pool.begin().await?;
+        // The first statement acquires SQLite's writer lock before checking active work.
+        let advanced = sqlx::query(
+            "UPDATE schedule_cursors SET minute = ? WHERE schedule_id = ? AND minute < ?",
+        )
+        .bind(minute)
+        .bind(id)
+        .bind(minute)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+            != 0;
+        let mut queued = None;
+        if advanced && let Some(request) = request {
+            let job_id = Uuid::new_v4().to_string();
+            let inserted = sqlx::query("INSERT INTO jobs (job_id, request, state, queued_at, schedule_id, scheduled_for) SELECT ?, ?, 'queued', ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE schedule_id = ? AND state IN ('queued', 'running'))")
+                .bind(&job_id).bind(serde_json::to_string(request)?).bind(timestamp()?).bind(id).bind(minute * 60_000).bind(id).execute(&mut *tx).await?;
+            if inserted.rows_affected() != 0 {
+                queued = Some(job_id);
+            }
+        }
+        tx.commit().await?;
+        if let Some(job_id) = queued {
+            println!("schedule {id} queued job {job_id}");
+            self.wake.notify_one();
+        }
+        Ok(())
     }
 
     pub(crate) async fn get_job(&self, job_id: &str) -> Result<Option<JobInfo>, JobError> {
@@ -297,6 +346,8 @@ fn timestamp() -> Result<i64, JobError> {
 #[derive(Clone, Debug)]
 pub(crate) struct JobInfo {
     pub(crate) job_id: String,
+    pub(crate) schedule_id: Option<String>,
+    pub(crate) scheduled_for: Option<i64>,
     pub(crate) request: JobRequest,
     pub(crate) state: JobState,
 }
@@ -398,6 +449,8 @@ impl JobInfo {
             };
             Ok(Self {
                 job_id: job_id.clone(),
+                schedule_id: row.try_get("schedule_id")?,
+                scheduled_for: row.try_get("scheduled_for")?,
                 request,
                 state,
             })
@@ -437,7 +490,7 @@ impl JobInfo {
             JobState::Queued | JobState::Running => (Value::Null, Value::Null),
         };
         Ok(
-            json!({"job_id": self.job_id, "kind": self.kind_name(), "state": self.state_name(), "result": result, "error": error}),
+            json!({"job_id": self.job_id, "schedule_id": self.schedule_id, "scheduled_for": self.scheduled_for, "kind": self.kind_name(), "state": self.state_name(), "result": result, "error": error}),
         )
     }
 }
@@ -687,7 +740,7 @@ mod encryption_tests {
         let directory = crate::test_support::TestDirectory::new()?;
         let path = directory.path().join("jobs.sqlite3");
         let schema = storage::Schema {
-            version: 3,
+            version: 4,
             sql: "CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve');",
         };
         let pool = storage::open(&path, schema, true).await?;
@@ -787,6 +840,55 @@ mod encryption_tests {
                 jobs.close().await;
             }
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod schedule_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn schedule_admission_rolls_back_and_running_work_blocks_next_tick()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = crate::test_support::TestDirectory::new()?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
+        let request = JobRequest::Backup {
+            source: "source".into(),
+            repository: "repo".into(),
+            filter: Box::new(Filter::default()),
+            options: BackupOptions::default(),
+        };
+        jobs.initialize_schedule("daily", 100).await?;
+        sqlx::raw_sql("CREATE TRIGGER reject_scheduled BEFORE INSERT ON jobs BEGIN SELECT RAISE(ABORT, 'injected admission failure'); END;").execute(&jobs.pool).await?;
+        assert!(
+            jobs.schedule_tick("daily", 101, Some(&request))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT minute FROM schedule_cursors WHERE schedule_id = 'daily'"
+            )
+            .fetch_one(&jobs.pool)
+            .await?,
+            100
+        );
+        sqlx::query("DROP TRIGGER reject_scheduled")
+            .execute(&jobs.pool)
+            .await?;
+        jobs.schedule_tick("daily", 101, Some(&request)).await?;
+        let job = jobs.claim().await?.ok_or("missing queued job")?;
+        jobs.schedule_tick("daily", 102, Some(&request)).await?;
+        assert!(jobs.claim().await?.is_none());
+        jobs.finish(&job.job_id, Err(JobError::internal("test failure")))
+            .await?;
+        jobs.schedule_tick("daily", 102, Some(&request)).await?;
+        assert!(jobs.claim().await?.is_none());
+        jobs.schedule_tick("daily", 103, Some(&request)).await?;
+        assert!(jobs.claim().await?.is_some());
+        jobs.close().await;
         Ok(())
     }
 }

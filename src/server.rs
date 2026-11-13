@@ -5,6 +5,8 @@ use std::error::Error;
 use tokio::sync::watch;
 
 pub(crate) async fn serve(config: Config, jobs: JobManager) -> Result<(), Box<dyn Error>> {
+    let scheduler = crate::schedule::Scheduler::prepare(config.scheduled_backups, &jobs.keys)?;
+    scheduler.initialize(&jobs, chrono::Utc::now()).await?;
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await
         .map_err(|error| format!("cannot listen on {}: {error}", config.listen))?;
@@ -13,6 +15,10 @@ pub(crate) async fn serve(config: Config, jobs: JobManager) -> Result<(), Box<dy
     let worker_jobs = jobs.clone();
     let worker_stop = stop.subscribe();
     let mut worker = tokio::spawn(async move { worker_jobs.run_worker(worker_stop).await });
+    let scheduler_jobs = jobs.clone();
+    let scheduler_stop = stop.subscribe();
+    let mut scheduler =
+        tokio::spawn(async move { scheduler.run(scheduler_jobs, scheduler_stop).await });
     let server = axum::serve(
         listener,
         api::router(jobs.clone(), config.secret_key, config.web_ui.enabled),
@@ -27,9 +33,18 @@ pub(crate) async fn serve(config: Config, jobs: JobManager) -> Result<(), Box<dy
     })
     .into_future();
     tokio::pin!(server);
+    let mut scheduler_finished = false;
     let mut worker_finished = false;
     let mut server_finished = false;
     let outcome: Result<(), Box<dyn Error>> = tokio::select! {
+        result = &mut scheduler => {
+            scheduler_finished = true;
+            match result {
+                Ok(Ok(())) => Err("backup scheduler stopped unexpectedly".into()),
+                Ok(Err(e)) => Err(e.into()),
+                Err(e) => Err(format!("backup scheduler task failed: {e}").into()),
+            }
+        }
         result = shutdown_signal() => result.map_err(Into::into),
         result = &mut server => {
             server_finished = true;
@@ -69,6 +84,14 @@ pub(crate) async fn serve(config: Config, jobs: JobManager) -> Result<(), Box<dy
             })
         }
     );
+    let scheduler_outcome: Result<(), Box<dyn Error>> = if scheduler_finished {
+        Ok(())
+    } else {
+        match scheduler.await {
+            Ok(result) => result.map_err(Into::into),
+            Err(e) => Err(format!("backup scheduler failed during shutdown: {e}").into()),
+        }
+    };
     jobs.close().await;
     // Report secondary shutdown failures as well as the original cause.
     if outcome.is_err() {
@@ -79,7 +102,11 @@ pub(crate) async fn serve(config: Config, jobs: JobManager) -> Result<(), Box<dy
             eprintln!("{error}");
         }
     }
+    if let Err(e) = &scheduler_outcome {
+        eprintln!("{e}");
+    }
     outcome?;
+    scheduler_outcome?;
     worker_outcome?;
     server_outcome
 }

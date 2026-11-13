@@ -3,6 +3,7 @@ use std::{error::Error, process::ExitCode};
 mod args;
 mod config;
 mod jobs;
+mod schedule;
 mod server;
 #[cfg(test)]
 mod test_support;

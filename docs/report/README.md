@@ -37,10 +37,10 @@ uv run scripts/update_system_design.py
 ## 当前设计边界
 
 - 浏览器静态资源嵌入单一二进制，直接访问选中服务的 API，无独立前端服务或 API 代理。连接中的 API key 明文保存于浏览器 origin 的 localStorage；加密密钥仅由服务端文件加载。
-- 作业数据库 schema v4、仓库 format/schema v5；旧数据库拒绝且不迁移。两库与外部文件没有共同事务，失败可留下未发布载荷或部分恢复输出。
+- 作业数据库 schema v5、仓库 format/schema v5；旧数据库拒绝且不迁移。两库与外部文件没有共同事务，失败可留下未发布载荷或部分恢复输出。
 - 筛选采用严格目录剪枝；拒绝目录后不检查后代。规则在 worker 中编译，因此 HTTP 202 只表示入队。
 - 压缩与加密独立启用，组合固定先压缩后加密。Zstd 等级 1–22、默认 3；LZ77 窗口 4–1024 KiB、默认 64，候选上限 1–256、默认 32，配置作用于本次备份；恢复自动匹配模式及密钥标识/指纹。元数据与文件名未加密。
-- 当前执行支持 Unix；没有源一致性检测、自动失败清理、调度、取消、保留策略或远程存储，增量备份不在当前计划内。
+- 当前执行支持 Unix；没有源一致性检测、自动失败清理、取消、保留策略或远程存储，增量备份不在当前计划内。
 
 ## 历史性能与内存证据
 
@@ -60,3 +60,5 @@ uv run scripts/analyze_backup.py
 ## LZ77 小样本测量
 
 自实现 LZ77 的格式与限制见 [LZ77 设计](../architecture/lz77.md)。运行 `cargo test --profile profiling jobs::lz77::measurements::measure_samples -- --ignored --nocapture` 可重测当前机器上的内存编解码；预热一次后测三次，比较内容正确性，不要求优于 Zstd。该手动测量默认不在普通测试中运行，不能代替应用性能或稳定性测试。
+
+配置式定时备份已实现：IANA 时区、分钟级 Cron、同计划忙碌跳过与停机不补跑；使用方式见根 README，持久化语义见 [调度设计](../architecture/scheduling.md)。

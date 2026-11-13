@@ -5,7 +5,7 @@ use crate::jobs::JobError;
 use chrono::{DateTime, Utc};
 use http::StatusCode;
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Filter {
     relative_path: RegexFilter,
     uid: RegexFilter,
@@ -15,7 +15,7 @@ pub(crate) struct Filter {
     mtime: TimeFilter,
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 struct RegexFilter {
     include: Vec<String>,
     exclude: Vec<String>,
@@ -30,7 +30,7 @@ struct TimeFilter {
 }
 
 impl Filter {
-    pub(super) fn compile(&self) -> Result<CompiledFilter, JobError> {
+    pub(crate) fn compile(&self) -> Result<CompiledFilter, JobError> {
         self.atime.validate()?;
         self.mtime.validate()?;
 
@@ -98,7 +98,7 @@ impl TimeFilter {
     }
 }
 
-pub(super) struct CompiledFilter {
+pub(crate) struct CompiledFilter {
     relative_path: CompiledRegexFilter,
     uid: CompiledRegexFilter,
     gid: CompiledRegexFilter,
