@@ -1,6 +1,6 @@
-# Repository schema v7
+# Repository schema v8
 
-The v7 model and SQL read/write bindings persist root and entry metadata,
+The v8 model and SQL read/write bindings persist root and entry metadata,
 symbolic link targets, and statistics in one transaction. Backup collects these
 attributes before reading contents or descending into directories. Symbolic links
 have no payload in the repository: their original target is stored in SQLite and in the archive header.
@@ -12,8 +12,8 @@ source root attributes on the destination root. Synchronization uses the already
 opened directory handle so restrictive restored permissions do not prevent it.
 Repositories are trusted and source trees must remain unchanged during backup.
 
-Repository databases require `PRAGMA user_version = 7`; no migration is provided.
-Use a new repository for v7. Job schema v5 is unchanged, so existing schema-v5 working directories remain usable. Old repositories are rejected without migration or deletion; use the prior binary with the original directories to read them.
+Repository databases require `PRAGMA user_version = 8`; no migration is provided.
+Use a new repository for v8. Job schema v5 is unchanged, so existing schema-v5 working directories remain usable. Old repositories are rejected without migration or deletion; use the prior binary with the original directories to read them.
 
 ## Storage contract
 
@@ -23,7 +23,7 @@ statistics columns are required, with no fabricated defaults.
 
 | Columns | Representation |
 | --- | --- |
-| `format_version` | Must be 7 |
+| `format_version` | Must be 8 |
 | `archive_checksum` | Lowercase 64-digit SHA-256 of the final `.bak` bytes after compression/encryption; one per backup |
 | `compression` | JSON `null`, `{"algorithm":"zstd","level":3}`, or `{"algorithm":"lz77","window_kib":64,"search_depth":32}` |
 | `encryption` | `none`, `xchacha20poly1305-stream-be32-v2` or `aes256gcm-stream-be32-v3` |
@@ -69,6 +69,6 @@ or upgrade any existing database or backup contents.
 
 ## Content encoding and keys
 
-Each backup chooses no compression, Zstd or LZ77, independently of encryption. Nine modes may coexist in the same repository. All entries are packed into one `backups/<backup_id>.bak` stream before compression and encryption. Entry ordinals match archive order. SQLite remains the plaintext catalog, including sizes, Unix metadata, link targets and the archive checksum. See the [archive contract](archive.md); an archive alone is not a published backup and the root metadata remains in SQLite.
+Each backup chooses no compression, Zstd or LZ77, independently of encryption. Nine modes may coexist in the same repository. All entries are packed into one `<backup_id>.bak` stream before compression and encryption. Entry ordinals match archive order. SQLite remains the plaintext catalog, including sizes, Unix metadata, link targets and the archive checksum. See the [archive contract](archive.md); an archive alone is not a published backup and the root metadata remains in SQLite.
 
 The payload format, authenticated framing, and key lifecycle are described in [content encryption](content-encryption.md). Restore automatically selects its decoding pipeline and requires the saved key identifier and fingerprint before creating restored entries. File sizes describe original plaintext bytes. SHA-256 covers the final archive bytes after compression and encryption, accumulated during disk I/O without an extra read.

@@ -1,6 +1,6 @@
 # Sequential archive format v2
 
-Repository format/schema v7 stores one `backups/<backup_id>.bak` per
+Repository format/schema v8 stores one `<backup_id>.bak` per
 backup. This project-defined format replaces the mirrored source tree; it does
 not implement tar compatibility or invoke an external packer. SQLite remains the
 publication authority and catalog. Restoration requires both the catalog and
@@ -16,7 +16,7 @@ entry headers + file data + end marker
     → optional Zstd or project LZ77
     → optional XChaCha20-Poly1305 or AES-256-GCM STREAM
     → SHA-256 during writing
-    → backups/<backup_id>.bak
+    → <backup_id>.bak
 ```
 
 Packing reads each file once and uses a 128 KiB copy buffer plus bounded header,
@@ -69,10 +69,10 @@ writing, and unknown header fields/types are errors.
 
 ## Publication and restore
 
-The packer creates `backups/<backup_id>.bak` exclusively, without an intermediate
-directory for the backup ID.
+The packer creates `<backup_id>.bak` exclusively at the repository root. No
+archive subdirectory is created.
 It finishes archive framing, compression and encryption in that order, synchronizes
-the archive and its ancestor directories, and only then commits the SQLite header,
+the archive and repository root, and only then commits the SQLite header,
 archive digest, ordered entries and statistics in one transaction. Duplicate IDs do not overwrite
 existing archives. Failed publication can leave an unpublished archive; listing
 continues to read only committed SQLite records. Automatic cleanup is not provided.
@@ -93,6 +93,6 @@ archive covers its headers as well as file data; the separate SQLite catalog
 still exposes paths, metadata, file sizes, the archive checksum and link targets. See
 [content encryption](content-encryption.md).
 
-Repository schemas through v6, including archive format v1, are rejected without migration or deletion. Use
-a new repository for v7 and the prior binary to operate old repositories. The
+Repository schemas through v7, including the previous `backups/` layout, are rejected without migration or deletion. Use
+a new repository for v8 and the prior binary to operate old repositories. The
 HTTP request contract and job schema v5 are unchanged.

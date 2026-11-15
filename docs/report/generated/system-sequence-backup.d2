@@ -23,10 +23,10 @@ diagram: "Accepted Job to Published Full Backup" {
   Jobs -> Backup: "Execute through spawn_blocking"
   Backup -> Backup: "Match pinned key / compile filter /\nprune traversal"
   Backup -> Backup: "Pack entries / compress / encrypt / hash\nencoded archive"
-  Backup -> Repo: "Synchronize archive / backups directory\n/ repository"
+  Backup -> Repo: "Synchronize archive and repository root"
   fragment_9: alt {
     branch_9: "[Payload processing succeeded]" {
-      Backup -> Repo: "Commit v7 header / entries / metadata /\ncounts"
+      Backup -> Repo: "Commit v8 header / entries / metadata /\ncounts"
       Backup -> Jobs: "backup_id" {style.stroke-dash: 5}
       Jobs -> DB: "Commit succeeded result"
     }
