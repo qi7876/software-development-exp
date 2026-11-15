@@ -2,7 +2,7 @@ use crate::jobs::repository::ManifestEntryKind;
 
 use super::{
     JobError, archive,
-    content::{BackupOptions, Content},
+    content::{BackupOptions, Checksum, Content},
     crypto::Keyring,
     filesystem::{get_absolute_directory_path, paths_overlap},
     repository::{Manifest, ManifestEntry},
@@ -35,7 +35,6 @@ fn restore_one_file(
     archive: &mut archive::Reader<impl Read>,
     destination: &Path,
     original_size: u64,
-    checksum: &str,
 ) -> Result<(), JobError> {
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -55,7 +54,7 @@ fn restore_one_file(
             )
         })?;
     archive
-        .read_file(&mut file, original_size, checksum)
+        .read_file(&mut file, original_size)
         .map_err(|error| {
             JobError::internal(format!(
                 "failed to restore archive payload {}: {error}",
@@ -72,6 +71,7 @@ fn restore_all_files(
     absolute_backup_path: &Path,
     absolute_destination_path: &Path,
     content: &Content<'_>,
+    archive_checksum: &str,
 ) -> Result<(), JobError> {
     for manifest_entry in manifest_entries {
         validate_entry_path({
@@ -84,12 +84,22 @@ fn restore_all_files(
         })?;
     }
 
-    let archive_path = absolute_backup_path.join(archive::FILE_NAME);
-    let decoder = std::fs::File::open(&archive_path)
-        .and_then(|file| content.reader(file, Path::new(archive::FILE_NAME)))
+    let archive_path = absolute_backup_path;
+    let file = std::fs::File::open(archive_path).map_err(|error| {
+        JobError::internal(format!(
+            "failed to open archive payload {}: {error}",
+            archive_path.display()
+        ))
+    })?;
+    let mut input = Checksum::new(file);
+    let name = archive_path
+        .file_name()
+        .ok_or_else(|| JobError::internal("archive has no filename"))?;
+    let decoder = content
+        .reader(&mut input, Path::new(name))
         .map_err(|error| {
             JobError::internal(format!(
-                "failed to open archive payload {}: {error}",
+                "failed to decode archive payload {}: {error}",
                 archive_path.display()
             ))
         })?;
@@ -113,16 +123,12 @@ fn restore_all_files(
             ))
         })?;
         match kind {
-            ManifestEntryKind::File {
-                original_size,
-                checksum,
-            } => {
+            ManifestEntryKind::File { original_size } => {
                 let absolute_destination_file_path = absolute_destination_path.join(relative_path);
                 restore_one_file(
                     &mut archive,
                     &absolute_destination_file_path,
                     *original_size,
-                    checksum,
                 )?;
 
                 let file =
@@ -229,6 +235,13 @@ fn restore_all_files(
                 archive_path.display()
             ))
         })?;
+
+    if input.finish().1 != archive_checksum {
+        return Err(JobError::internal(format!(
+            "archive payload checksum mismatch: {}",
+            archive_path.display()
+        )));
+    }
 
     for manifest_entry in manifest_entries.iter().rev() {
         if let ManifestEntry {
@@ -358,13 +371,14 @@ pub(super) fn run_with_keys(
     };
     let content = Content::new(&options, keys, backup_id)?;
 
-    let absolute_backup_path = absolute_repository_path.join(format!("backups/{}", backup_id));
+    let absolute_backup_path = archive::path(&absolute_repository_path, backup_id);
 
     restore_all_files(
         &manifest.entries,
         &absolute_backup_path,
         &absolute_destination_path,
         &content,
+        &manifest.archive_checksum,
     )?;
 
     let directory = std::fs::File::open(&absolute_destination_path).map_err(|error| {
@@ -436,7 +450,6 @@ mod tests {
         prelude::*,
         test_runner::{Config, RngSeed, TestCaseError},
     };
-    use sha2::{Digest, Sha256};
     use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
     use std::{
         collections::{BTreeMap, BTreeSet},
@@ -508,7 +521,7 @@ mod tests {
 
         async fn backup_snapshot(&self) -> Result<BackupSnapshot, Box<dyn Error>> {
             Ok((
-                read_tree(&self.repository.join("backups").join(BACKUP_ID))?,
+                read_tree(&self.repository.join("backups"))?,
                 serde_json::to_value(Manifest::read(&self.repository, BACKUP_ID).await?)?,
             ))
         }
@@ -667,10 +680,11 @@ mod tests {
                 let source_before = read_tree(&fixture.source)?;
                 let mut connection = fixture.open_metadata().await?;
                 if change_checksum {
-                    let mut checksum = hex::encode(Sha256::digest(&contents));
+                    let mut checksum: String = sqlx::query_scalar("SELECT archive_checksum FROM backups WHERE backup_id = ?")
+                        .bind(BACKUP_ID).fetch_one(&mut connection).await?;
                     let replacement = if checksum.starts_with('0') { "1" } else { "0" };
                     checksum.replace_range(..1, replacement);
-                    sqlx::query("UPDATE entries SET checksum = ? WHERE backup_id = ? AND type = 'file'")
+                    sqlx::query("UPDATE backups SET archive_checksum = ? WHERE backup_id = ?")
                         .bind(checksum).bind(BACKUP_ID).execute(&mut connection).await?;
                 } else {
                     sqlx::query("UPDATE entries SET original_size = original_size + ? WHERE backup_id = ? AND type = 'file'")
@@ -772,14 +786,13 @@ mod tests {
                 };
                 let mut connection = fixture.open_metadata().await?;
                 sqlx::query("INSERT INTO entries (
-                        backup_id, ordinal, type, path, original_size, checksum,
+                        backup_id, ordinal, type, path, original_size,
                         uid, gid, mode, atime_seconds, atime_nanoseconds, mtime_seconds, mtime_nanoseconds
-                    ) SELECT backup_id, 1, ?, ?, ?, ?,
+                    ) SELECT backup_id, 1, ?, ?, ?,
                         uid, gid, mode, atime_seconds, atime_nanoseconds, mtime_seconds, mtime_nanoseconds
                       FROM entries WHERE backup_id = ? AND ordinal = 0")
                     .bind(kind).bind(serde_json::to_string(&path)?)
                     .bind((kind == "file").then_some(0i64))
-                    .bind((kind == "file").then(|| hex::encode(Sha256::digest([]))))
                     .bind(BACKUP_ID).execute(&mut connection).await?;
                 sqlx::query("UPDATE backups SET entries_created = 2 WHERE backup_id = ?")
                     .bind(BACKUP_ID)
@@ -812,11 +825,7 @@ mod tests {
             let fixture = Fixture::new()?;
             std::fs::write(fixture.source.join("payload"), b"valid contents")?;
             fixture.backup().await?;
-            let path = fixture
-                .repository
-                .join("backups")
-                .join(BACKUP_ID)
-                .join(archive::FILE_NAME);
+            let path = archive::path(&fixture.repository, BACKUP_ID);
             match damage {
                 "invalid" => std::fs::write(&path, b"invalid Zstd data")?,
                 "truncated" => {
@@ -840,6 +849,49 @@ mod tests {
                 b"valid contents"
             );
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn whole_archive_checksum_rejects_changed_uncompressed_file_data() -> TestResult {
+        let fixture = Fixture::new()?;
+        let original = b"unique-original-payload";
+        std::fs::write(fixture.source.join("payload"), original)?;
+        let source = fixture.source.clone();
+        let repository = fixture.repository.clone();
+        tokio::task::spawn_blocking(move || {
+            backup::run_with_options(
+                &source,
+                &repository,
+                &crate::test_support::unfiltered()?,
+                BACKUP_ID,
+                &BackupOptions {
+                    compression: None,
+                    encryption: None,
+                },
+                &Keyring::default(),
+            )
+        })
+        .await??;
+
+        let path = archive::path(&fixture.repository, BACKUP_ID);
+        let mut bytes = std::fs::read(&path)?;
+        let position = bytes
+            .windows(original.len())
+            .position(|window| window == original)
+            .ok_or("missing raw file data")?;
+        bytes[position] ^= 1;
+        std::fs::write(&path, bytes)?;
+        let error = fixture
+            .restore(BACKUP_ID)
+            .await
+            .err()
+            .ok_or("accepted modified file data")?;
+        assert!(
+            error.message.contains("archive payload checksum mismatch"),
+            "{error}"
+        );
+        assert_eq!(std::fs::read(fixture.source.join("payload"))?, original);
         Ok(())
     }
 

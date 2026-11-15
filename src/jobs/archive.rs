@@ -1,58 +1,28 @@
 //! Sequential archive framing, independent of compression and encryption.
-use super::repository::{ManifestEntry, ManifestEntryKind, UnixMetadata};
-use sha2::{Digest, Sha256};
+use super::repository::{ManifestEntry, ManifestEntryKind};
 use std::{
     io::{self, BufReader, BufWriter, Read, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
-pub(super) const FILE_NAME: &str = "archive.bak";
-const MAGIC: &[u8; 8] = b"BAKARC\0\x01";
+pub(super) fn file_name(backup_id: &str) -> String {
+    format!("{backup_id}.bak")
+}
+
+pub(super) fn path(repository: &Path, backup_id: &str) -> PathBuf {
+    repository.join("backups").join(file_name(backup_id))
+}
+const MAGIC: &[u8; 8] = b"BAKARC\0\x02";
 const MAX_HEADER_SIZE: usize = 1024 * 1024;
-
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Header {
-    relative_path: PathBuf,
-    metadata: UnixMetadata,
-    kind: EntryKind,
-}
-
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", deny_unknown_fields)]
-enum EntryKind {
-    File { original_size: u64 },
-    Directory,
-    Symlink { target: PathBuf },
-}
-
-impl Header {
-    fn from_entry(entry: &ManifestEntry) -> Self {
-        Self {
-            relative_path: entry.relative_path.clone(),
-            metadata: entry.metadata.clone(),
-            kind: match &entry.kind {
-                ManifestEntryKind::File { original_size, .. } => EntryKind::File {
-                    original_size: *original_size,
-                },
-                ManifestEntryKind::Directory => EntryKind::Directory,
-                ManifestEntryKind::Symlink { target } => EntryKind::Symlink {
-                    target: target.clone(),
-                },
-            },
-        }
-    }
-}
 
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
 /// Copy exactly one file, leaving the next record unread. Memory is bounded.
-fn copy_file(reader: &mut impl Read, writer: &mut impl Write, size: u64) -> io::Result<[u8; 32]> {
+fn copy_file(reader: &mut impl Read, writer: &mut impl Write, size: u64) -> io::Result<()> {
     let mut remaining = size;
     let mut buffer = [0; 128 * 1024];
-    let mut hasher = Sha256::new();
     while remaining > 0 {
         let length = remaining.min(buffer.len() as u64) as usize;
         let count = match reader.read(&mut buffer[..length]) {
@@ -66,10 +36,9 @@ fn copy_file(reader: &mut impl Read, writer: &mut impl Write, size: u64) -> io::
             ));
         }
         writer.write_all(&buffer[..count])?;
-        hasher.update(&buffer[..count]);
         remaining -= count as u64;
     }
-    Ok(hasher.finalize().into())
+    Ok(())
 }
 
 pub(super) struct Writer<W: Write> {
@@ -83,29 +52,23 @@ impl<W: Write> Writer<W> {
         Ok(Self { inner })
     }
 
-    /// File checksums are written after the data, so packing needs only one pass.
+    /// Copy a bounded file payload without seeking or buffering the complete file.
     pub(super) fn append(
         &mut self,
-        entry: &mut ManifestEntry,
+        entry: &ManifestEntry,
         source: &mut impl Read,
     ) -> io::Result<()> {
-        let header = serde_json::to_vec(&Header::from_entry(entry))?;
+        let header = serde_json::to_vec(entry)?;
         if header.len() > MAX_HEADER_SIZE {
             return Err(invalid("archive entry header exceeds 1 MiB"));
         }
         self.inner.write_all(&(header.len() as u32).to_le_bytes())?;
         self.inner.write_all(&header)?;
-        if let ManifestEntryKind::File {
-            original_size,
-            checksum,
-        } = &mut entry.kind
-        {
-            let digest = copy_file(source, &mut self.inner, *original_size)?;
+        if let ManifestEntryKind::File { original_size } = &entry.kind {
+            copy_file(source, &mut self.inner, *original_size)?;
             if source.read(&mut [0])? != 0 {
                 return Err(invalid("source file grew while packing archive"));
             }
-            self.inner.write_all(&digest)?;
-            *checksum = hex::encode(digest);
         }
         Ok(())
     }
@@ -149,26 +112,15 @@ impl<R: Read> Reader<R> {
         }
         let mut bytes = vec![0; length];
         self.inner.read_exact(&mut bytes)?;
-        let header: Header = serde_json::from_slice(&bytes)?;
-        if header != Header::from_entry(entry) {
+        let header: ManifestEntry = serde_json::from_slice(&bytes)?;
+        if &header != entry {
             return Err(invalid("archive entry differs from repository metadata"));
         }
         Ok(())
     }
 
-    pub(super) fn read_file(
-        &mut self,
-        destination: &mut impl Write,
-        size: u64,
-        checksum: &str,
-    ) -> io::Result<()> {
-        let digest = copy_file(&mut self.inner, destination, size)?;
-        let mut stored = [0; 32];
-        self.inner.read_exact(&mut stored)?;
-        if stored != digest || hex::encode(digest) != checksum {
-            return Err(invalid("archive file checksum mismatch"));
-        }
-        Ok(())
+    pub(super) fn read_file(&mut self, destination: &mut impl Write, size: u64) -> io::Result<()> {
+        copy_file(&mut self.inner, destination, size)
     }
 
     /// Require an explicit end marker and fully consume the outer codec/AEAD.
@@ -185,7 +137,7 @@ impl<R: Read> Reader<R> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::repository::FileTimestamp;
+    use super::super::repository::{FileTimestamp, UnixMetadata};
     use super::*;
     use proptest::{
         prelude::*,
@@ -215,39 +167,34 @@ mod tests {
     }
 
     fn pack(data: &[u8]) -> io::Result<(Vec<u8>, ManifestEntry)> {
-        let mut file = entry(
+        let file = entry(
             "目录/file.bin",
             ManifestEntryKind::File {
                 original_size: data.len() as u64,
-                checksum: String::new(),
             },
         );
         let mut writer = Writer::new(Vec::new())?;
-        writer.append(&mut file, &mut &data[..])?;
+        writer.append(&file, &mut &data[..])?;
         Ok((writer.finish()?, file))
     }
 
     fn unpack(bytes: &[u8], file: &ManifestEntry) -> io::Result<Vec<u8>> {
         let mut reader = Reader::new(bytes)?;
         reader.expect_entry(file)?;
-        let ManifestEntryKind::File {
-            original_size,
-            checksum,
-        } = &file.kind
-        else {
+        let ManifestEntryKind::File { original_size } = &file.kind else {
             return Err(invalid("expected file"));
         };
         let mut output = Vec::new();
-        reader.read_file(&mut output, *original_size, checksum)?;
+        reader.read_file(&mut output, *original_size)?;
         reader.finish()?;
         Ok(output)
     }
 
     #[test]
     fn golden_empty_archive_and_mixed_entries() -> TestResult {
-        assert_eq!(Writer::new(Vec::new())?.finish()?, b"BAKARC\0\x01\0\0\0\0");
-        Reader::new(&b"BAKARC\0\x01\0\0\0\0"[..])?.finish()?;
-        let mut entries = [
+        assert_eq!(Writer::new(Vec::new())?.finish()?, b"BAKARC\0\x02\0\0\0\0");
+        Reader::new(&b"BAKARC\0\x02\0\0\0\0"[..])?.finish()?;
+        let entries = [
             entry("empty", ManifestEntryKind::Directory),
             entry(
                 "link",
@@ -255,24 +202,17 @@ mod tests {
                     target: "../missing".into(),
                 },
             ),
-            entry(
-                "zero",
-                ManifestEntryKind::File {
-                    original_size: 0,
-                    checksum: String::new(),
-                },
-            ),
+            entry("zero", ManifestEntryKind::File { original_size: 0 }),
             entry(
                 "binary",
                 ManifestEntryKind::File {
                     original_size: 300_001,
-                    checksum: String::new(),
                 },
             ),
         ];
         let binary: Vec<u8> = (0..=255).cycle().take(300_001).collect();
         let mut writer = Writer::new(Vec::new())?;
-        for file in &mut entries {
+        for file in &entries {
             writer.append(
                 file,
                 &mut if file.relative_path == std::path::Path::new("binary") {
@@ -286,13 +226,9 @@ mod tests {
         let mut reader = Reader::new(bytes.as_slice())?;
         for file in &entries {
             reader.expect_entry(file)?;
-            if let ManifestEntryKind::File {
-                original_size,
-                checksum,
-            } = &file.kind
-            {
+            if let ManifestEntryKind::File { original_size } = &file.kind {
                 let mut output = Vec::new();
-                reader.read_file(&mut output, *original_size, checksum)?;
+                reader.read_file(&mut output, *original_size)?;
                 assert_eq!(
                     output.as_slice(),
                     if *original_size == 0 {
@@ -316,7 +252,7 @@ mod tests {
                 "accepted truncation at {end}"
             );
         }
-        for position in [0, 8, 12, bytes.len() - 4 - 32 - 1, bytes.len() - 5] {
+        for position in [0, 8, 12, bytes.len() - 1] {
             let mut damaged = bytes.clone();
             damaged[position] ^= 1;
             assert!(
@@ -345,20 +281,19 @@ mod tests {
         file.metadata.mode ^= 1;
         assert!(unpack(&bytes, &file).is_err());
         for size in [6, 8] {
-            let mut file = entry(
+            let file = entry(
                 "file",
                 ManifestEntryKind::File {
                     original_size: size,
-                    checksum: String::new(),
                 },
             );
             let mut writer = Writer::new(Vec::new())?;
-            assert!(writer.append(&mut file, &mut &b"payload"[..]).is_err());
+            assert!(writer.append(&file, &mut &b"payload"[..]).is_err());
         }
-        let mut huge = entry(&"x".repeat(MAX_HEADER_SIZE), ManifestEntryKind::Directory);
+        let huge = entry(&"x".repeat(MAX_HEADER_SIZE), ManifestEntryKind::Directory);
         assert!(
             Writer::new(Vec::new())?
-                .append(&mut huge, &mut io::empty())
+                .append(&huge, &mut io::empty())
                 .is_err()
         );
         Ok(())
@@ -382,34 +317,29 @@ mod tests {
             }
         }
         let data = vec![42; 131_073];
-        let mut file = entry(
+        let file = entry(
             "file",
             ManifestEntryKind::File {
                 original_size: data.len() as u64,
-                checksum: String::new(),
             },
         );
         let mut writer = Writer::new(ShortIo(Vec::new()))?;
-        writer.append(&mut file, &mut ShortIo(data.as_slice()))?;
+        writer.append(&file, &mut ShortIo(data.as_slice()))?;
         let bytes = writer.finish()?.0;
         let mut reader = Reader::new(ShortIo(bytes.as_slice()))?;
         reader.expect_entry(&file)?;
-        let ManifestEntryKind::File {
-            original_size,
-            checksum,
-        } = &file.kind
-        else {
+        let ManifestEntryKind::File { original_size } = &file.kind else {
             return Err("expected file".into());
         };
         let mut output = ShortIo(Vec::new());
-        reader.read_file(&mut output, *original_size, checksum)?;
+        reader.read_file(&mut output, *original_size)?;
         reader.finish()?;
         assert_eq!(output.0, data);
 
         // A zero-capacity output reports WriteZero, including errors delayed by buffering.
         let mut writer = Writer::new(&mut [][..])?;
         writer.append(
-            &mut entry("directory", ManifestEntryKind::Directory),
+            &entry("directory", ManifestEntryKind::Directory),
             &mut io::empty(),
         )?;
         assert_eq!(
@@ -424,7 +354,7 @@ mod tests {
         reader.expect_entry(&file)?;
         assert_eq!(
             reader
-                .read_file(&mut &mut [][..], *original_size, checksum)
+                .read_file(&mut &mut [][..], *original_size)
                 .err()
                 .ok_or("lost restore write error")?
                 .kind(),

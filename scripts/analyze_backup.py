@@ -245,7 +245,7 @@ def cycle(
         },
     )
     backup_id = backup["result"]["backup_id"]
-    payloads = repository / "backups" / backup_id
+    payloads = repository / "backups"
     immutable = tree(payloads)
     listed = server.get("/api/backups?" + urllib.parse.urlencode({"repository": str(repository)}))
     if [row["backup_id"] for row in listed["backups"]] != [backup_id]:
@@ -263,7 +263,7 @@ def cycle(
     result = {
         "backup_seconds": backup_seconds,
         "restore_seconds": restore_seconds,
-        "payload_bytes": sum(path.stat().st_size for path in payloads.rglob("*") if path.is_file()),
+        "payload_bytes": (payloads / f"{backup_id}.bak").stat().st_size,
         "backup_job": backup,
         "restore_job": restore,
     }

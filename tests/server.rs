@@ -352,9 +352,14 @@ async fn round_trip(files: BTreeMap<String, Vec<u8>>) -> TestResult {
     let backup_id = backup_job["result"]["backup_id"]
         .as_str()
         .ok_or("missing backup ID")?;
-    let payloads = server.path("repo with space/backups").join(backup_id);
-    let compressed = read_tree(&payloads)?;
-    std::fs::create_dir_all(server.path("repo with space/backups/unpublished"))?;
+    let payloads = server
+        .path("repo with space/backups")
+        .join(format!("{backup_id}.bak"));
+    let compressed = std::fs::read(&payloads)?;
+    std::fs::write(
+        server.path("repo with space/backups/unpublished.bak"),
+        b"unpublished archive",
+    )?;
     let listed = server.get(LIST_PATH).await?;
     let summaries = listed["backups"].as_array().ok_or("missing summaries")?;
     assert_eq!(summaries.len(), 1);
@@ -394,7 +399,7 @@ async fn round_trip(files: BTreeMap<String, Vec<u8>>) -> TestResult {
     assert!(restore_job["error"].is_null());
     assert_eq!(read_tree(&server.path("restored"))?, original);
     assert_eq!(read_tree(&server.path("source"))?, original);
-    assert_eq!(read_tree(&payloads)?, compressed);
+    assert_eq!(std::fs::read(&payloads)?, compressed);
     assert_eq!(server.get(LIST_PATH).await?, listed);
     let response = server
         .client
@@ -696,8 +701,10 @@ async fn abrupt_exit_fails_the_active_job_and_resumes_queued_work() -> TestResul
     let backup_id = completed["result"]["backup_id"]
         .as_str()
         .ok_or("missing backup ID")?;
-    let payloads = server.path("repo with space/backups").join(backup_id);
-    let compressed = read_tree(&payloads)?;
+    let payloads = server
+        .path("repo with space/backups")
+        .join(format!("{backup_id}.bak"));
+    let compressed = std::fs::read(&payloads)?;
 
     let mut connection = SqliteConnection::connect_with(
         &SqliteConnectOptions::new()
@@ -765,7 +772,7 @@ async fn abrupt_exit_fails_the_active_job_and_resumes_queued_work() -> TestResul
         assert!(summaries.iter().any(|summary| summary["backup_id"] == id));
     }
     assert_eq!(read_tree(&server.path("source"))?, original);
-    assert_eq!(read_tree(&payloads)?, compressed);
+    assert_eq!(std::fs::read(&payloads)?, compressed);
     server.stop().await
 }
 
@@ -968,14 +975,30 @@ async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> 
         }
         let payload = server
             .path("repo with space/backups")
-            .join(id)
-            .join("archive.bak");
+            .join(format!("{id}.bak"));
         let encoded = std::fs::read(&payload)?;
+        // The stored digest covers the exact bytes on disk in every storage mode.
+        {
+            use sha2::{Digest, Sha256};
+            let mut connection = SqliteConnection::connect_with(
+                &SqliteConnectOptions::new()
+                    .filename(server.path("repo with space/repository.sqlite3")),
+            )
+            .await?;
+            let checksum: String =
+                sqlx::query_scalar("SELECT archive_checksum FROM backups WHERE backup_id = ?")
+                    .bind(id)
+                    .fetch_one(&mut connection)
+                    .await?;
+            assert_eq!(checksum, hex::encode(Sha256::digest(&encoded)));
+            connection.close().await?;
+        }
+        assert!(!server.path("repo with space/backups").join(id).exists());
         if key_id.is_none() {
             if compression["algorithm"] == "zstd" {
-                assert!(zstd::decode_all(encoded.as_slice())?.starts_with(b"BAKARC\0\x01"));
+                assert!(zstd::decode_all(encoded.as_slice())?.starts_with(b"BAKARC\0\x02"));
             } else if compression.is_null() {
-                assert!(encoded.starts_with(b"BAKARC\0\x01"));
+                assert!(encoded.starts_with(b"BAKARC\0\x02"));
             } else {
                 assert!(encoded.starts_with(b"BAKLZ77\x01"));
             }
@@ -1114,7 +1137,7 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
             .create_if_missing(true),
     )
     .await?;
-    sqlx::raw_sql("CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve'); PRAGMA user_version = 5;").execute(&mut connection).await?;
+    sqlx::raw_sql("CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve'); PRAGMA user_version = 6;").execute(&mut connection).await?;
     connection.close().await?;
     let id = server.backup().await?;
     let failed = server.wait_job(&id, false).await?;
@@ -1123,7 +1146,7 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
         failed["error"]["message"]
             .as_str()
             .ok_or("missing error")?
-            .contains("schema version 5")
+            .contains("schema version 6")
     );
     assert!(!server.path("repo with space/backups").exists());
     let mut connection =
@@ -1138,7 +1161,7 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
         sqlx::query_scalar::<_, i64>("PRAGMA user_version")
             .fetch_one(&mut connection)
             .await?,
-        5
+        6
     );
     connection.close().await?;
     server.stop().await

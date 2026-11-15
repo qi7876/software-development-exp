@@ -1,6 +1,6 @@
 use super::{
     JobError, archive,
-    content::{BackupOptions, Content},
+    content::{BackupOptions, Checksum, Content},
     crypto::Keyring,
     filesystem::{get_absolute_directory_path, paths_overlap, sync_directory},
     filter::{CompiledFilter, Filter},
@@ -149,13 +149,30 @@ fn backup_all_files(
     absolute_source_path: &Path,
     archive_path: &Path,
     content: &Content<'_>,
-) -> Result<Vec<ManifestEntry>, JobError> {
-    let pack = || -> Result<Vec<ManifestEntry>, io::Error> {
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(archive_path)?;
-        let encoder = content.writer(file, Path::new(archive::FILE_NAME))?;
+) -> Result<(Vec<ManifestEntry>, String), JobError> {
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(archive_path)
+        .map_err(|error| {
+            JobError::new(
+                if error.kind() == io::ErrorKind::AlreadyExists {
+                    StatusCode::CONFLICT
+                } else {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                },
+                format!(
+                    "failed to create archive {}: {error}",
+                    archive_path.display()
+                ),
+            )
+        })?;
+    let pack = || -> io::Result<(Vec<ManifestEntry>, String)> {
+        let mut output = Checksum::new(file);
+        let name = archive_path
+            .file_name()
+            .ok_or_else(|| io::Error::other("archive has no filename"))?;
+        let encoder = content.writer(&mut output, Path::new(name))?;
         let mut archive = archive::Writer::new(encoder)?;
         let mut entries = Vec::with_capacity(backup_entries.len());
         for backup_entry in backup_entries {
@@ -185,7 +202,6 @@ fn backup_all_files(
                     (
                         ManifestEntryKind::File {
                             original_size: stat.len(),
-                            checksum: String::new(),
                         },
                         Some(file),
                     )
@@ -203,22 +219,24 @@ fn backup_all_files(
                     None,
                 ),
             };
-            let mut entry = ManifestEntry {
+            let entry = ManifestEntry {
                 relative_path,
                 metadata,
                 kind,
             };
             let result = match source.as_mut() {
-                Some(file) => archive.append(&mut entry, file),
-                None => archive.append(&mut entry, &mut io::empty()),
+                Some(file) => archive.append(&entry, file),
+                None => archive.append(&entry, &mut io::empty()),
             };
             result.map_err(|error| {
                 io::Error::other(format!("cannot pack {}: {error}", source_path.display()))
             })?;
             entries.push(entry);
         }
-        archive.finish()?.finish()?.sync_all()?;
-        Ok(entries)
+        archive.finish()?.finish()?;
+        let (file, checksum) = output.finish();
+        file.sync_all()?;
+        Ok((entries, checksum))
     };
     pack().map_err(|error| {
         JobError::internal(format!(
@@ -264,45 +282,28 @@ pub(super) fn run_with_options(
         ))
     })?;
 
-    let absolute_backup_root_directory_path =
-        absolute_repository_path.join(format!("backups/{}", backup_id));
-
-    std::fs::create_dir(&absolute_backup_root_directory_path).map_err(|error| {
-        match error.kind() {
-            io::ErrorKind::AlreadyExists => JobError::new(
-                StatusCode::CONFLICT,
-                format!("backup id {backup_id} already exists: {error}"),
-            ),
-            _ => JobError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!(
-                    "failed to create backup id directory {}: {error}",
-                    absolute_backup_root_directory_path.display(),
-                ),
-            ),
-        }
-    })?;
+    let archive_path = archive::path(&absolute_repository_path, backup_id);
 
     let created_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-    let manifest_entries = backup_all_files(
+    let (manifest_entries, archive_checksum) = backup_all_files(
         backup_entries,
         &absolute_source_path,
-        &absolute_backup_root_directory_path.join(archive::FILE_NAME),
+        &archive_path,
         &content,
     )?;
 
-    sync_directory(&absolute_backup_root_directory_path)?;
     sync_directory(&absolute_repository_path.join("backups"))?;
     sync_directory(&absolute_repository_path)?;
 
     let manifest = Manifest {
-        format_version: 6,
+        format_version: 7,
         backup_id: backup_id.to_owned(),
         created_at,
         source: absolute_source_path,
         compression: options.compression.clone(),
         encryption: options.encryption.clone(),
         checksum_algorithm: "sha256".to_string(),
+        archive_checksum,
         entries: manifest_entries,
         root_metadata,
         backup_stats,
@@ -343,12 +344,8 @@ mod tests {
         let mut archive = archive::Reader::new(decoder)?;
         for entry in entries {
             archive.expect_entry(entry)?;
-            if let ManifestEntryKind::File {
-                original_size,
-                checksum,
-            } = &entry.kind
-            {
-                archive.read_file(&mut io::sink(), *original_size, checksum)?;
+            if let ManifestEntryKind::File { original_size } = &entry.kind {
+                archive.read_file(&mut io::sink(), *original_size)?;
             }
         }
         archive.finish()?;
@@ -557,7 +554,7 @@ mod tests {
         let manifest = Manifest::read(&repository, "backup-001").await?;
         assert_eq!(manifest.backup_id, "backup-001");
         assert_eq!(manifest.source, std::fs::canonicalize(&source)?);
-        assert_eq!(manifest.format_version, 6);
+        assert_eq!(manifest.format_version, 7);
         assert!(matches!(
             manifest.compression,
             Some(super::super::content::CompressionOptions::Zstd(_))
@@ -581,28 +578,21 @@ mod tests {
             );
         }
 
-        let backup_root = repository.join("backups/backup-001");
+        let backup_root = repository.join("backups");
         for (relative_path, content) in files {
-            let (original_size, checksum) = manifest
+            let original_size = manifest
                 .entries
                 .iter()
                 .find_map(|entry| match entry {
                     ManifestEntry {
                         relative_path: path,
-                        kind:
-                            ManifestEntryKind::File {
-                                original_size,
-                                checksum,
-                            },
+                        kind: ManifestEntryKind::File { original_size },
                         ..
-                    } if path.as_path() == Path::new(relative_path) => {
-                        Some((*original_size, checksum))
-                    }
+                    } if path.as_path() == Path::new(relative_path) => Some(*original_size),
                     _ => None,
                 })
                 .ok_or_else(|| format!("missing file entry {relative_path}"))?;
             assert_eq!(original_size, content.len() as u64);
-            assert_eq!(checksum, &hex::encode(Sha256::digest(content)));
             assert_eq!(std::fs::read(source.join(relative_path))?, content);
         }
         for relative_path in ["dir1", "empty"] {
@@ -615,8 +605,15 @@ mod tests {
             assert!(source.join(relative_path).is_dir());
         }
         assert_eq!(std::fs::read_dir(&backup_root)?.count(), 1);
-        assert!(backup_root.join(archive::FILE_NAME).is_file());
-        verify_archive(&backup_root.join(archive::FILE_NAME), &manifest.entries)?;
+        assert!(archive::path(&repository, "backup-001").is_file());
+        assert_eq!(
+            manifest.archive_checksum,
+            hex::encode(Sha256::digest(std::fs::read(archive::path(
+                &repository,
+                "backup-001"
+            ))?))
+        );
+        verify_archive(&archive::path(&repository, "backup-001"), &manifest.entries)?;
         assert!(
             std::fs::read_dir(source.join("empty"))?
                 .next()
@@ -675,7 +672,7 @@ mod tests {
         assert_eq!(manifest.backup_stats.entries_created, 7);
         assert_eq!(manifest.backup_stats.skipped_unsupported, 1);
         assert_eq!(manifest.backup_stats.skipped_filtered, 0);
-        let backup_root = repository.join("backups/links");
+        let backup_root = repository.join("backups");
         for (relative, target) in &targets {
             let entry = manifest
                 .entries
@@ -706,7 +703,7 @@ mod tests {
         }
         assert!(!backup_root.join("sock").exists());
         assert_eq!(std::fs::read_dir(&backup_root)?.count(), 1);
-        verify_archive(&backup_root.join(archive::FILE_NAME), &manifest.entries)?;
+        verify_archive(&archive::path(&repository, "links"), &manifest.entries)?;
         assert_eq!(
             serde_json::to_value(UnixMetadata::read(&outside)?)?,
             outside_before
@@ -758,12 +755,12 @@ mod tests {
         assert_eq!(manifest.backup_stats.entries_created, 3);
         assert_eq!(manifest.backup_stats.skipped_filtered, 3);
         assert_eq!(manifest.backup_stats.skipped_unsupported, 1);
-        let payloads = repository.join("backups/filtered");
+        let payloads = repository.join("backups");
         assert!(!payloads.join("blocked").exists());
         assert!(!payloads.join("keep/drop.tmp").exists());
         assert!(std::fs::symlink_metadata(payloads.join("keep/link")).is_err());
         assert_eq!(std::fs::read_dir(&payloads)?.count(), 1);
-        verify_archive(&payloads.join(archive::FILE_NAME), &manifest.entries)?;
+        verify_archive(&archive::path(&repository, "filtered"), &manifest.entries)?;
         Ok(())
     }
 
@@ -837,7 +834,7 @@ mod tests {
         .await??;
         let expected_manifest =
             serde_json::to_value(Manifest::read(&repository, "backup-001").await?)?;
-        let backup_file = repository.join("backups/backup-001/archive.bak");
+        let backup_file = repository.join("backups/backup-001.bak");
         let expected_compressed = std::fs::read(&backup_file)?;
         std::fs::write(&source_file, b"changed")?;
 
@@ -891,7 +888,7 @@ mod tests {
         .await??;
         let expected_manifest =
             serde_json::to_value(Manifest::read(&repository, "backup-001").await?)?;
-        let existing_backup_file = repository.join("backups/backup-001/archive.bak");
+        let existing_backup_file = repository.join("backups/backup-001.bak");
         let expected_compressed = std::fs::read(&existing_backup_file)?;
 
         let database_path = repository.join("repository.sqlite3");
@@ -929,7 +926,7 @@ mod tests {
 
         // The contents were written before publication was attempted. Their
         // presence alone must not make the backup visible in repository metadata.
-        assert!(repository.join("backups/backup-002/archive.bak").is_file());
+        assert!(repository.join("backups/backup-002.bak").is_file());
         let missing = Manifest::read(&repository, "backup-002")
             .await
             .err()
