@@ -19,11 +19,11 @@ pub(crate) struct RepoBackupInfo {
 }
 
 pub(super) const REPO_SCHEMA: storage::Schema = storage::Schema {
-    version: 7,
+    version: 8,
     sql: "
 CREATE TABLE backups (
     backup_id TEXT PRIMARY KEY NOT NULL,
-    format_version INTEGER NOT NULL CHECK (format_version = 7),
+    format_version INTEGER NOT NULL CHECK (format_version = 8),
     created_at TEXT NOT NULL,
     source TEXT NOT NULL,
     compression TEXT NOT NULL CHECK (json_valid(compression)),
@@ -380,7 +380,7 @@ impl Manifest {
         if self.archive_checksum.len() != 64 || hex::decode(&self.archive_checksum).is_err() {
             return Err(JobError::internal("invalid archive checksum"));
         }
-        if self.format_version != 7 || self.checksum_algorithm != "sha256" {
+        if self.format_version != 8 || self.checksum_algorithm != "sha256" {
             return Err(JobError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "unsupported manifest format, compression or checksum algorithm",
@@ -468,7 +468,7 @@ mod tests {
     type TestResult = Result<(), Box<dyn Error>>;
 
     #[tokio::test]
-    async fn v7_schema_enforces_metadata_and_entry_types() -> TestResult {
+    async fn v8_schema_enforces_metadata_and_entry_types() -> TestResult {
         let directory = TestDirectory::new()?;
         let pool = storage::open(
             &directory.path().join("repository.sqlite3"),
@@ -480,7 +480,7 @@ mod tests {
             sqlx::query_scalar::<_, i64>("PRAGMA user_version")
                 .fetch_one(&pool)
                 .await?,
-            7
+            8
         );
         sqlx::query(
             "INSERT INTO backups (
@@ -488,7 +488,7 @@ mod tests {
             root_uid, root_gid, root_mode, root_atime_seconds, root_atime_nanoseconds,
             root_mtime_seconds, root_mtime_nanoseconds,
             entries_created, skipped_unsupported, skipped_filtered, encryption
-        ) VALUES ('backup', 7, '2026-10-23T00:00:00Z', '\"/source\"', '{\"algorithm\":\"zstd\",\"level\":3}', 'sha256', '0000000000000000000000000000000000000000000000000000000000000000',
+        ) VALUES ('backup', 8, '2026-10-23T00:00:00Z', '\"/source\"', '{\"algorithm\":\"zstd\",\"level\":3}', 'sha256', '0000000000000000000000000000000000000000000000000000000000000000',
             4294967295, 0, 4095, -1, 999999999, 0, 0, 3, 2, 1, 'none')",
         )
         .execute(&pool)
@@ -555,7 +555,7 @@ mod tests {
 
     fn header(repository: &Path, backup_id: &str, second: u8) -> Manifest {
         Manifest {
-            format_version: 7,
+            format_version: 8,
             backup_id: backup_id.to_owned(),
             created_at: format!("2026-10-13T00:00:{second:02}.000Z"),
             source: repository.to_owned(),
@@ -646,13 +646,12 @@ mod tests {
         let directory = TestDirectory::new()?;
         let repository = directory.path();
         assert!(list_at(repository).await??.is_empty());
-        std::fs::create_dir_all(repository.join("backups"))?;
-        std::fs::write(repository.join("backups/unpublished.bak"), b"keep contents")?;
+        std::fs::write(repository.join("unpublished.bak"), b"keep contents")?;
         assert!(list_at(repository).await??.is_empty());
         assert!(!repository.join("repository.sqlite3").exists());
         assert_eq!(std::fs::read_dir(repository)?.count(), 1);
         assert_eq!(
-            std::fs::read(repository.join("backups/unpublished.bak"))?,
+            std::fs::read(repository.join("unpublished.bak"))?,
             b"keep contents"
         );
         Ok(())
@@ -663,11 +662,7 @@ mod tests {
         let directory = TestDirectory::new()?;
         let repository = directory.path();
         header(repository, "published", 0).write(repository).await?;
-        std::fs::create_dir_all(repository.join("backups"))?;
-        std::fs::write(
-            repository.join("backups/unpublished.bak"),
-            b"unpublished archive",
-        )?;
+        std::fs::write(repository.join("unpublished.bak"), b"unpublished archive")?;
         let mut failed = header(repository, "unpublished", 3);
         failed.entries.push(ManifestEntry {
             relative_path: "out-of-range".into(),
@@ -681,7 +676,7 @@ mod tests {
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].backup_id, "published");
         assert_eq!(summaries[0].created_at, "2026-10-13T00:00:00.000Z");
-        assert!(repository.join("backups/unpublished.bak").is_file());
+        assert!(repository.join("unpublished.bak").is_file());
         Ok(())
     }
 
@@ -754,7 +749,7 @@ mod tests {
 
     fn manifest() -> Manifest {
         Manifest {
-            format_version: 7,
+            format_version: 8,
             backup_id: "backup-001".into(),
             created_at: "2026-10-09T00:00:00Z".into(),
             source: "/source".into(),

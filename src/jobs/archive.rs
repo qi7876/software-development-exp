@@ -10,7 +10,7 @@ pub(super) fn file_name(backup_id: &str) -> String {
 }
 
 pub(super) fn path(repository: &Path, backup_id: &str) -> PathBuf {
-    repository.join("backups").join(file_name(backup_id))
+    repository.join(file_name(backup_id))
 }
 const MAGIC: &[u8; 8] = b"BAKARC\0\x02";
 const MAX_HEADER_SIZE: usize = 1024 * 1024;

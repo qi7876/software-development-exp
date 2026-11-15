@@ -353,11 +353,11 @@ async fn round_trip(files: BTreeMap<String, Vec<u8>>) -> TestResult {
         .as_str()
         .ok_or("missing backup ID")?;
     let payloads = server
-        .path("repo with space/backups")
+        .path("repo with space")
         .join(format!("{backup_id}.bak"));
     let compressed = std::fs::read(&payloads)?;
     std::fs::write(
-        server.path("repo with space/backups/unpublished.bak"),
+        server.path("repo with space/unpublished.bak"),
         b"unpublished archive",
     )?;
     let listed = server.get(LIST_PATH).await?;
@@ -536,7 +536,12 @@ async fn invalid_filter_jobs_fail_before_creating_repository_contents() -> TestR
         assert_eq!(failed["state"], "failed");
         assert_eq!(failed["error"]["code"], 400);
         assert_eq!(server.get(LIST_PATH).await?, json!({"backups": []}));
-        assert!(!server.path("repo with space/backups").exists());
+        assert!(
+            std::fs::read_dir(server.path("repo with space"))?
+                .next()
+                .transpose()?
+                .is_none()
+        );
         assert!(!server.path("repo with space/repository.sqlite3").exists());
     }
     server.stop().await
@@ -702,7 +707,7 @@ async fn abrupt_exit_fails_the_active_job_and_resumes_queued_work() -> TestResul
         .as_str()
         .ok_or("missing backup ID")?;
     let payloads = server
-        .path("repo with space/backups")
+        .path("repo with space")
         .join(format!("{backup_id}.bak"));
     let compressed = std::fs::read(&payloads)?;
 
@@ -973,9 +978,7 @@ async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> 
         if key_id.is_some() {
             assert_eq!(summary["encryption"]["algorithm"], algorithm);
         }
-        let payload = server
-            .path("repo with space/backups")
-            .join(format!("{id}.bak"));
+        let payload = server.path("repo with space").join(format!("{id}.bak"));
         let encoded = std::fs::read(&payload)?;
         // The stored digest covers the exact bytes on disk in every storage mode.
         {
@@ -993,7 +996,8 @@ async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> 
             assert_eq!(checksum, hex::encode(Sha256::digest(&encoded)));
             connection.close().await?;
         }
-        assert!(!server.path("repo with space/backups").join(id).exists());
+        assert!(!server.path("repo with space").join(id).exists());
+        assert!(!server.path("repo with space/backups").exists());
         if key_id.is_none() {
             if compression["algorithm"] == "zstd" {
                 assert!(zstd::decode_all(encoded.as_slice())?.starts_with(b"BAKARC\0\x02"));
@@ -1137,7 +1141,7 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
             .create_if_missing(true),
     )
     .await?;
-    sqlx::raw_sql("CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve'); PRAGMA user_version = 6;").execute(&mut connection).await?;
+    sqlx::raw_sql("CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve'); PRAGMA user_version = 7;").execute(&mut connection).await?;
     connection.close().await?;
     let id = server.backup().await?;
     let failed = server.wait_job(&id, false).await?;
@@ -1146,9 +1150,12 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
         failed["error"]["message"]
             .as_str()
             .ok_or("missing error")?
-            .contains("schema version 6")
+            .contains("schema version 7")
     );
     assert!(!server.path("repo with space/backups").exists());
+    for entry in std::fs::read_dir(server.path("repo with space"))? {
+        assert_ne!(entry?.path().extension(), Some(std::ffi::OsStr::new("bak")));
+    }
     let mut connection =
         SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(database)).await?;
     assert_eq!(
@@ -1161,7 +1168,7 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
         sqlx::query_scalar::<_, i64>("PRAGMA user_version")
             .fetch_one(&mut connection)
             .await?,
-        6
+        7
     );
     connection.close().await?;
     server.stop().await

@@ -275,13 +275,6 @@ pub(super) fn run_with_options(
     #[cfg(not(unix))]
     sync_directory(&absolute_repository_path)?;
 
-    std::fs::create_dir_all(absolute_repository_path.join("backups")).map_err(|error| {
-        JobError::internal(format!(
-            "failed to create backups directory {}: {error}",
-            absolute_repository_path.join("backups").display(),
-        ))
-    })?;
-
     let archive_path = archive::path(&absolute_repository_path, backup_id);
 
     let created_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
@@ -292,11 +285,10 @@ pub(super) fn run_with_options(
         &content,
     )?;
 
-    sync_directory(&absolute_repository_path.join("backups"))?;
     sync_directory(&absolute_repository_path)?;
 
     let manifest = Manifest {
-        format_version: 7,
+        format_version: 8,
         backup_id: backup_id.to_owned(),
         created_at,
         source: absolute_source_path,
@@ -554,7 +546,7 @@ mod tests {
         let manifest = Manifest::read(&repository, "backup-001").await?;
         assert_eq!(manifest.backup_id, "backup-001");
         assert_eq!(manifest.source, std::fs::canonicalize(&source)?);
-        assert_eq!(manifest.format_version, 7);
+        assert_eq!(manifest.format_version, 8);
         assert!(matches!(
             manifest.compression,
             Some(super::super::content::CompressionOptions::Zstd(_))
@@ -578,7 +570,7 @@ mod tests {
             );
         }
 
-        let backup_root = repository.join("backups");
+        let backup_root = repository.clone();
         for (relative_path, content) in files {
             let original_size = manifest
                 .entries
@@ -604,7 +596,7 @@ mod tests {
             assert!(!backup_root.join(relative_path).exists());
             assert!(source.join(relative_path).is_dir());
         }
-        assert_eq!(std::fs::read_dir(&backup_root)?.count(), 1);
+        assert!(!backup_root.join("backups").exists());
         assert!(archive::path(&repository, "backup-001").is_file());
         assert_eq!(
             manifest.archive_checksum,
@@ -672,7 +664,7 @@ mod tests {
         assert_eq!(manifest.backup_stats.entries_created, 7);
         assert_eq!(manifest.backup_stats.skipped_unsupported, 1);
         assert_eq!(manifest.backup_stats.skipped_filtered, 0);
-        let backup_root = repository.join("backups");
+        let backup_root = repository.clone();
         for (relative, target) in &targets {
             let entry = manifest
                 .entries
@@ -702,7 +694,7 @@ mod tests {
             );
         }
         assert!(!backup_root.join("sock").exists());
-        assert_eq!(std::fs::read_dir(&backup_root)?.count(), 1);
+        assert!(!backup_root.join("backups").exists());
         verify_archive(&archive::path(&repository, "links"), &manifest.entries)?;
         assert_eq!(
             serde_json::to_value(UnixMetadata::read(&outside)?)?,
@@ -755,11 +747,11 @@ mod tests {
         assert_eq!(manifest.backup_stats.entries_created, 3);
         assert_eq!(manifest.backup_stats.skipped_filtered, 3);
         assert_eq!(manifest.backup_stats.skipped_unsupported, 1);
-        let payloads = repository.join("backups");
+        let payloads = repository.clone();
         assert!(!payloads.join("blocked").exists());
         assert!(!payloads.join("keep/drop.tmp").exists());
         assert!(std::fs::symlink_metadata(payloads.join("keep/link")).is_err());
-        assert_eq!(std::fs::read_dir(&payloads)?.count(), 1);
+        assert!(!payloads.join("backups").exists());
         verify_archive(&archive::path(&repository, "filtered"), &manifest.entries)?;
         Ok(())
     }
@@ -834,7 +826,7 @@ mod tests {
         .await??;
         let expected_manifest =
             serde_json::to_value(Manifest::read(&repository, "backup-001").await?)?;
-        let backup_file = repository.join("backups/backup-001.bak");
+        let backup_file = repository.join("backup-001.bak");
         let expected_compressed = std::fs::read(&backup_file)?;
         std::fs::write(&source_file, b"changed")?;
 
@@ -888,7 +880,7 @@ mod tests {
         .await??;
         let expected_manifest =
             serde_json::to_value(Manifest::read(&repository, "backup-001").await?)?;
-        let existing_backup_file = repository.join("backups/backup-001.bak");
+        let existing_backup_file = repository.join("backup-001.bak");
         let expected_compressed = std::fs::read(&existing_backup_file)?;
 
         let database_path = repository.join("repository.sqlite3");
@@ -926,7 +918,7 @@ mod tests {
 
         // The contents were written before publication was attempted. Their
         // presence alone must not make the backup visible in repository metadata.
-        assert!(repository.join("backups/backup-002.bak").is_file());
+        assert!(repository.join("backup-002.bak").is_file());
         let missing = Manifest::read(&repository, "backup-002")
             .await
             .err()

@@ -469,7 +469,7 @@ mod tests {
     }
 
     type Tree = BTreeMap<PathBuf, TreeEntry>;
-    type BackupSnapshot = (Tree, serde_json::Value);
+    type BackupSnapshot = (Option<Vec<u8>>, serde_json::Value);
 
     struct Fixture {
         directory: TestDirectory,
@@ -520,8 +520,13 @@ mod tests {
         }
 
         async fn backup_snapshot(&self) -> Result<BackupSnapshot, Box<dyn Error>> {
+            let archive = match std::fs::read(archive::path(&self.repository, BACKUP_ID)) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error.into()),
+            };
             Ok((
-                read_tree(&self.repository.join("backups"))?,
+                archive,
                 serde_json::to_value(Manifest::read(&self.repository, BACKUP_ID).await?)?,
             ))
         }
