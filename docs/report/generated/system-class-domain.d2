@@ -65,6 +65,7 @@ diagram: "Job and Repository Data Types" {
     Manifest: "<<struct>>\nManifest" {
       shape: class
       "+ format_version": "u32"
+      "+ archive_checksum": "String"
       "+ compression": "Option<CompressionOptions>"
       "+ encryption": "Option<Encryption>"
       "+ root_metadata": "UnixMetadata"
@@ -79,7 +80,7 @@ diagram: "Job and Repository Data Types" {
     }
     Kind: "<<enum>>\nManifestEntryKind" {
       shape: class
-      "+ File { original_size, checksum }"
+      "+ File { original_size }"
       "+ Directory"
       "+ Symlink { target }"
     }

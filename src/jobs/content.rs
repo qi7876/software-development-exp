@@ -2,8 +2,8 @@ use super::{
     JobError,
     crypto::{DecryptReader, EncryptWriter, Encryption, EncryptionAlgorithm, Keyring},
 };
+use sha2::{Digest, Sha256};
 use std::{
-    fs::File,
     io::{self, BufReader, Read, Write},
     path::Path,
 };
@@ -127,7 +127,7 @@ impl<'a> Content<'a> {
         .map_err(io::Error::other)
     }
 
-    pub(super) fn writer(&self, file: File, path: &Path) -> io::Result<ContentWriter> {
+    pub(super) fn writer<W: Write>(&self, file: W, path: &Path) -> io::Result<ContentWriter<W>> {
         let writer = match self.key {
             Some(key) => Sink::Encrypted(EncryptWriter::new(
                 file,
@@ -152,8 +152,12 @@ impl<'a> Content<'a> {
         }
     }
 
-    pub(super) fn reader(&self, file: File, path: &Path) -> io::Result<ContentReader> {
-        let reader: Box<dyn Read> = match self.key {
+    pub(super) fn reader<'r>(
+        &self,
+        file: impl Read + 'r,
+        path: &Path,
+    ) -> io::Result<ContentReader<'r>> {
+        let reader: Box<dyn Read + 'r> = match self.key {
             Some(key) => Box::new(DecryptReader::new(
                 file,
                 key,
@@ -178,11 +182,11 @@ impl<'a> Content<'a> {
     }
 }
 
-pub(super) enum Sink {
-    Plain(File),
-    Encrypted(EncryptWriter<File>),
+pub(super) enum Sink<W: Write> {
+    Plain(W),
+    Encrypted(EncryptWriter<W>),
 }
-impl Write for Sink {
+impl<W: Write> Write for Sink<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self {
             Self::Plain(w) => w.write(buf),
@@ -197,13 +201,13 @@ impl Write for Sink {
     }
 }
 
-pub(super) enum ContentWriter {
-    Direct(Sink),
-    Zstd(zstd::stream::write::Encoder<'static, Sink>),
-    Lz77(lz77::Encoder<Sink>),
+pub(super) enum ContentWriter<W: Write> {
+    Direct(Sink<W>),
+    Zstd(zstd::stream::write::Encoder<'static, Sink<W>>),
+    Lz77(lz77::Encoder<Sink<W>>),
 }
-impl ContentWriter {
-    pub(super) fn finish(self) -> io::Result<File> {
+impl<W: Write> ContentWriter<W> {
+    pub(super) fn finish(self) -> io::Result<W> {
         let sink = match self {
             Self::Direct(sink) => sink,
             Self::Zstd(encoder) => encoder.finish()?,
@@ -215,7 +219,7 @@ impl ContentWriter {
         }
     }
 }
-impl Write for ContentWriter {
+impl<W: Write> Write for ContentWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self {
             Self::Direct(w) => w.write(buf),
@@ -232,12 +236,12 @@ impl Write for ContentWriter {
     }
 }
 
-pub(super) enum ContentReader {
-    Direct(Box<dyn Read>),
-    Zstd(zstd::stream::read::Decoder<'static, BufReader<Box<dyn Read>>>),
-    Lz77(lz77::Decoder<Box<dyn Read>>),
+pub(super) enum ContentReader<'r> {
+    Direct(Box<dyn Read + 'r>),
+    Zstd(zstd::stream::read::Decoder<'static, BufReader<Box<dyn Read + 'r>>>),
+    Lz77(lz77::Decoder<Box<dyn Read + 'r>>),
 }
-impl Read for ContentReader {
+impl Read for ContentReader<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self {
             Self::Direct(r) => r.read(buf),
@@ -246,9 +250,9 @@ impl Read for ContentReader {
         }
     }
 }
-impl ContentReader {
+impl ContentReader<'_> {
     pub(super) fn finish(self) -> io::Result<()> {
-        let mut inner: Box<dyn Read> = match self {
+        let mut inner: Box<dyn Read + '_> = match self {
             Self::Direct(r) => r,
             Self::Zstd(decoder) => Box::new(decoder.finish()),
             Self::Lz77(decoder) => decoder.finish()?,
@@ -264,11 +268,77 @@ impl ContentReader {
     }
 }
 
+/// Hash exactly the bytes successfully transferred at the disk side of the codec.
+pub(super) struct Checksum<T> {
+    inner: T,
+    hasher: Sha256,
+}
+
+impl<T> Checksum<T> {
+    pub(super) fn new(inner: T) -> Self {
+        Self {
+            inner,
+            hasher: Sha256::new(),
+        }
+    }
+
+    pub(super) fn finish(self) -> (T, String) {
+        (self.inner, hex::encode(self.hasher.finalize()))
+    }
+}
+
+impl<T: Write> Write for Checksum<T> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let count = self.inner.write(bytes)?;
+        self.hasher.update(&bytes[..count]);
+        Ok(count)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl<T: Read> Read for Checksum<T> {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        let count = self.inner.read(bytes)?;
+        self.hasher.update(&bytes[..count]);
+        Ok(count)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs::File;
     type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+    #[test]
+    fn checksum_tracks_transferred_bytes_across_short_io_and_failures() -> TestResult {
+        let mut storage = [0; 3];
+        let mut writer = Checksum::new(&mut storage[..]);
+        assert_eq!(writer.write(b"abcde")?, 3);
+        assert_eq!(
+            writer
+                .write_all(b"de")
+                .err()
+                .ok_or("accepted full output")?
+                .kind(),
+            io::ErrorKind::WriteZero
+        );
+        assert_eq!(writer.finish().1, hex::encode(Sha256::digest(b"abc")));
+        assert_eq!(&storage, b"abc");
+
+        let mut reader = Checksum::new(&b"abcdef"[..]);
+        let mut prefix = [0; 2];
+        reader.read_exact(&mut prefix)?;
+        let mut remainder = Vec::new();
+        reader.read_to_end(&mut remainder)?;
+        assert_eq!(&prefix, b"ab");
+        assert_eq!(remainder, b"cdef");
+        assert_eq!(reader.finish().1, hex::encode(Sha256::digest(b"abcdef")));
+        Ok(())
+    }
 
     #[test]
     fn enabled_compression_levels_are_validated() -> TestResult {

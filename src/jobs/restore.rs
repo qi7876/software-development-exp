@@ -1,25 +1,19 @@
 use crate::jobs::repository::ManifestEntryKind;
 
 use super::{
-    JobError,
-    content::{BackupOptions, Content},
+    JobError, archive,
+    content::{BackupOptions, Checksum, Content},
     crypto::Keyring,
     filesystem::{get_absolute_directory_path, paths_overlap},
     repository::{Manifest, ManifestEntry},
 };
 use filetime::FileTime;
 use http::StatusCode;
-use sha2::{Digest, Sha256};
 use std::{
-    io::{self, Read, Write},
+    io::{self, Read},
     os::unix::fs::{PermissionsExt, lchown},
     path::{Component, Path},
 };
-
-struct FileBackupResult {
-    original_size: u64,
-    checksum: String,
-}
 
 fn validate_entry_path(path: &Path) -> Result<(), JobError> {
     if path.as_os_str().is_empty()
@@ -36,108 +30,48 @@ fn validate_entry_path(path: &Path) -> Result<(), JobError> {
     Ok(())
 }
 
-/// restore one file
+/// Restore one bounded payload from the shared archive stream.
 fn restore_one_file(
-    absolute_backup_file_path: &Path,
-    absolute_destination_file_path: &Path,
-    relative_path: &Path,
-    content: &Content<'_>,
-) -> Result<FileBackupResult, JobError> {
-    let backup_file = std::fs::OpenOptions::new()
-        .read(true)
-        .open(absolute_backup_file_path)
-        .map_err(|error| {
-            JobError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!(
-                    "failed to open backup file {}: {error}",
-                    absolute_backup_file_path.display(),
-                ),
-            )
-        })?;
-    let mut destination_file = std::fs::OpenOptions::new()
+    archive: &mut archive::Reader<impl Read>,
+    destination: &Path,
+    original_size: u64,
+) -> Result<(), JobError> {
+    let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(absolute_destination_file_path)
-        .map_err(|error| match error.kind() {
-            io::ErrorKind::AlreadyExists => JobError::new(
-                StatusCode::CONFLICT,
-                format!(
-                    "destination file {} already exists: {error}",
-                    absolute_destination_file_path.display(),
-                ),
-            ),
-            _ => JobError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!(
-                    "failed to create destination file {}: {error}",
-                    absolute_destination_file_path.display(),
-                ),
-            ),
-        })?;
-
-    let mut buffer = [0u8; 128 * 1024];
-    let mut backup_file_decoder = content
-        .reader(backup_file, relative_path)
+        .open(destination)
         .map_err(|error| {
             JobError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
+                if error.kind() == io::ErrorKind::AlreadyExists {
+                    StatusCode::CONFLICT
+                } else {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                },
                 format!(
-                    "failed to create content decoder on backup file {}: {error}",
-                    absolute_backup_file_path.display(),
+                    "failed to create destination file {}: {error}",
+                    destination.display()
                 ),
             )
         })?;
-    let mut hasher = Sha256::new();
-    let mut original_size: u64 = 0;
-
-    loop {
-        let n = backup_file_decoder.read(&mut buffer).map_err(|error| {
+    archive
+        .read_file(&mut file, original_size)
+        .map_err(|error| {
             JobError::internal(format!(
-                "failed to decode and forward data from backup file {} to buffer: {error}",
-                absolute_backup_file_path.display(),
+                "failed to restore archive payload {}: {error}",
+                destination.display()
             ))
         })?;
-
-        if n == 0 {
-            break;
-        }
-
-        let chunk = &buffer[..n];
-        destination_file.write_all(chunk).map_err(|error| {
-            JobError::internal(format!(
-                "failed to restore data to destination file {}: {error}",
-                absolute_destination_file_path.display(),
-            ))
-        })?;
-        hasher.update(chunk);
-        original_size += n as u64;
-    }
-    backup_file_decoder.finish().map_err(|error| {
-        JobError::internal(format!(
-            "failed to finish reading {}: {error}",
-            absolute_backup_file_path.display()
-        ))
-    })?;
-    destination_file.sync_all().map_err(|error| {
-        JobError::internal(format!(
-            "failed to sync destination file {}: {error}",
-            absolute_destination_file_path.display(),
-        ))
-    })?;
-
-    Ok(FileBackupResult {
-        original_size,
-        checksum: hex::encode(hasher.finalize()),
-    })
+    // The caller applies metadata and synchronizes this file before success.
+    Ok(())
 }
 
 /// restore all
 fn restore_all_files(
-    manifest_entries: &Vec<ManifestEntry>,
+    manifest_entries: &[ManifestEntry],
     absolute_backup_path: &Path,
     absolute_destination_path: &Path,
     content: &Content<'_>,
+    archive_checksum: &str,
 ) -> Result<(), JobError> {
     for manifest_entry in manifest_entries {
         validate_entry_path({
@@ -150,33 +84,52 @@ fn restore_all_files(
         })?;
     }
 
+    let archive_path = absolute_backup_path;
+    let file = std::fs::File::open(archive_path).map_err(|error| {
+        JobError::internal(format!(
+            "failed to open archive payload {}: {error}",
+            archive_path.display()
+        ))
+    })?;
+    let mut input = Checksum::new(file);
+    let name = archive_path
+        .file_name()
+        .ok_or_else(|| JobError::internal("archive has no filename"))?;
+    let decoder = content
+        .reader(&mut input, Path::new(name))
+        .map_err(|error| {
+            JobError::internal(format!(
+                "failed to decode archive payload {}: {error}",
+                archive_path.display()
+            ))
+        })?;
+    let mut archive = archive::Reader::new(decoder).map_err(|error| {
+        JobError::internal(format!(
+            "failed to read archive payload {}: {error}",
+            archive_path.display()
+        ))
+    })?;
+
     for manifest_entry in manifest_entries {
         let ManifestEntry {
             relative_path,
             metadata,
             kind,
         } = manifest_entry;
+        archive.expect_entry(manifest_entry).map_err(|error| {
+            JobError::internal(format!(
+                "invalid archive entry {}: {error}",
+                relative_path.display()
+            ))
+        })?;
         match kind {
-            ManifestEntryKind::File {
-                original_size,
-                checksum,
-            } => {
-                let absolute_backup_file_path = absolute_backup_path.join(relative_path);
+            ManifestEntryKind::File { original_size } => {
                 let absolute_destination_file_path = absolute_destination_path.join(relative_path);
-                let file_restore_result = restore_one_file(
-                    &absolute_backup_file_path,
+                restore_one_file(
+                    &mut archive,
                     &absolute_destination_file_path,
-                    relative_path,
-                    content,
+                    *original_size,
                 )?;
-                if &file_restore_result.checksum != checksum
-                    || &file_restore_result.original_size != original_size
-                {
-                    return Err(JobError::internal(format!(
-                        "the content of backup file {} is changed after the backup",
-                        absolute_backup_file_path.display()
-                    )));
-                }
 
                 let file =
                     std::fs::File::open(&absolute_destination_file_path).map_err(|error| {
@@ -271,6 +224,23 @@ fn restore_all_files(
                     })?;
             }
         }
+    }
+
+    archive
+        .finish()
+        .and_then(|decoder| decoder.finish())
+        .map_err(|error| {
+            JobError::internal(format!(
+                "failed to finish archive payload {}: {error}",
+                archive_path.display()
+            ))
+        })?;
+
+    if input.finish().1 != archive_checksum {
+        return Err(JobError::internal(format!(
+            "archive payload checksum mismatch: {}",
+            archive_path.display()
+        )));
     }
 
     for manifest_entry in manifest_entries.iter().rev() {
@@ -401,13 +371,14 @@ pub(super) fn run_with_keys(
     };
     let content = Content::new(&options, keys, backup_id)?;
 
-    let absolute_backup_path = absolute_repository_path.join(format!("backups/{}", backup_id));
+    let absolute_backup_path = archive::path(&absolute_repository_path, backup_id);
 
     restore_all_files(
         &manifest.entries,
         &absolute_backup_path,
         &absolute_destination_path,
         &content,
+        &manifest.archive_checksum,
     )?;
 
     let directory = std::fs::File::open(&absolute_destination_path).map_err(|error| {
@@ -498,7 +469,7 @@ mod tests {
     }
 
     type Tree = BTreeMap<PathBuf, TreeEntry>;
-    type BackupSnapshot = (Tree, serde_json::Value);
+    type BackupSnapshot = (Option<Vec<u8>>, serde_json::Value);
 
     struct Fixture {
         directory: TestDirectory,
@@ -549,8 +520,13 @@ mod tests {
         }
 
         async fn backup_snapshot(&self) -> Result<BackupSnapshot, Box<dyn Error>> {
+            let archive = match std::fs::read(archive::path(&self.repository, BACKUP_ID)) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error.into()),
+            };
             Ok((
-                read_tree(&self.repository.join("backups").join(BACKUP_ID))?,
+                archive,
                 serde_json::to_value(Manifest::read(&self.repository, BACKUP_ID).await?)?,
             ))
         }
@@ -709,10 +685,11 @@ mod tests {
                 let source_before = read_tree(&fixture.source)?;
                 let mut connection = fixture.open_metadata().await?;
                 if change_checksum {
-                    let mut checksum = hex::encode(Sha256::digest(&contents));
+                    let mut checksum: String = sqlx::query_scalar("SELECT archive_checksum FROM backups WHERE backup_id = ?")
+                        .bind(BACKUP_ID).fetch_one(&mut connection).await?;
                     let replacement = if checksum.starts_with('0') { "1" } else { "0" };
                     checksum.replace_range(..1, replacement);
-                    sqlx::query("UPDATE entries SET checksum = ? WHERE backup_id = ? AND type = 'file'")
+                    sqlx::query("UPDATE backups SET archive_checksum = ? WHERE backup_id = ?")
                         .bind(checksum).bind(BACKUP_ID).execute(&mut connection).await?;
                 } else {
                     sqlx::query("UPDATE entries SET original_size = original_size + ? WHERE backup_id = ? AND type = 'file'")
@@ -755,6 +732,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn archive_round_trip_preserves_unix_metadata_and_link_targets() -> TestResult {
+        let fixture = Fixture::new()?;
+        std::fs::create_dir(fixture.source.join("nested"))?;
+        std::fs::write(fixture.source.join("nested/file"), b"contents")?;
+        for (name, target) in [
+            ("link", "nested/file"),
+            ("dangling", "missing"),
+            ("cycle", "cycle"),
+        ] {
+            std::os::unix::fs::symlink(target, fixture.source.join(name))?;
+        }
+        let timestamp = FileTime::from_unix_time(1_600_000_000, 123_456_789);
+        for (name, mode) in [("", 0o750), ("nested", 0o750), ("nested/file", 0o400)] {
+            let path = fixture.source.join(name);
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))?;
+            filetime::set_file_times(path, timestamp, timestamp)?;
+        }
+        fixture.backup().await?;
+        let manifest = Manifest::read(&fixture.repository, BACKUP_ID).await?;
+        fixture.restore(BACKUP_ID).await?;
+        assert_eq!(
+            super::super::repository::UnixMetadata::read(&fixture.destination)?,
+            manifest.root_metadata
+        );
+        for entry in &manifest.entries {
+            let path = fixture.destination.join(&entry.relative_path);
+            assert_eq!(
+                super::super::repository::UnixMetadata::read(&path)?,
+                entry.metadata
+            );
+            if let ManifestEntryKind::Symlink { target } = &entry.kind {
+                assert_eq!(&std::fs::read_link(path)?, target);
+            }
+        }
+        assert_eq!(
+            std::fs::read(fixture.destination.join("nested/file"))?,
+            b"contents"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn invalid_metadata_paths_are_rejected_before_writes() -> TestResult {
         // Put each invalid entry after a valid file to detect validation during writing.
         // Absolute and parent paths target only our temporary directory.
@@ -772,14 +791,13 @@ mod tests {
                 };
                 let mut connection = fixture.open_metadata().await?;
                 sqlx::query("INSERT INTO entries (
-                        backup_id, ordinal, type, path, original_size, checksum,
+                        backup_id, ordinal, type, path, original_size,
                         uid, gid, mode, atime_seconds, atime_nanoseconds, mtime_seconds, mtime_nanoseconds
-                    ) SELECT backup_id, 1, ?, ?, ?, ?,
+                    ) SELECT backup_id, 1, ?, ?, ?,
                         uid, gid, mode, atime_seconds, atime_nanoseconds, mtime_seconds, mtime_nanoseconds
                       FROM entries WHERE backup_id = ? AND ordinal = 0")
                     .bind(kind).bind(serde_json::to_string(&path)?)
                     .bind((kind == "file").then_some(0i64))
-                    .bind((kind == "file").then(|| hex::encode(Sha256::digest([]))))
                     .bind(BACKUP_ID).execute(&mut connection).await?;
                 sqlx::query("UPDATE backups SET entries_created = 2 WHERE backup_id = ?")
                     .bind(BACKUP_ID)
@@ -812,11 +830,7 @@ mod tests {
             let fixture = Fixture::new()?;
             std::fs::write(fixture.source.join("payload"), b"valid contents")?;
             fixture.backup().await?;
-            let path = fixture
-                .repository
-                .join("backups")
-                .join(BACKUP_ID)
-                .join("payload");
+            let path = archive::path(&fixture.repository, BACKUP_ID);
             match damage {
                 "invalid" => std::fs::write(&path, b"invalid Zstd data")?,
                 "truncated" => {
@@ -840,6 +854,49 @@ mod tests {
                 b"valid contents"
             );
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn whole_archive_checksum_rejects_changed_uncompressed_file_data() -> TestResult {
+        let fixture = Fixture::new()?;
+        let original = b"unique-original-payload";
+        std::fs::write(fixture.source.join("payload"), original)?;
+        let source = fixture.source.clone();
+        let repository = fixture.repository.clone();
+        tokio::task::spawn_blocking(move || {
+            backup::run_with_options(
+                &source,
+                &repository,
+                &crate::test_support::unfiltered()?,
+                BACKUP_ID,
+                &BackupOptions {
+                    compression: None,
+                    encryption: None,
+                },
+                &Keyring::default(),
+            )
+        })
+        .await??;
+
+        let path = archive::path(&fixture.repository, BACKUP_ID);
+        let mut bytes = std::fs::read(&path)?;
+        let position = bytes
+            .windows(original.len())
+            .position(|window| window == original)
+            .ok_or("missing raw file data")?;
+        bytes[position] ^= 1;
+        std::fs::write(&path, bytes)?;
+        let error = fixture
+            .restore(BACKUP_ID)
+            .await
+            .err()
+            .ok_or("accepted modified file data")?;
+        assert!(
+            error.message.contains("archive payload checksum mismatch"),
+            "{error}"
+        );
+        assert_eq!(std::fs::read(fixture.source.join("payload"))?, original);
         Ok(())
     }
 

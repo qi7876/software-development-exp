@@ -19,11 +19,11 @@ pub(crate) struct RepoBackupInfo {
 }
 
 pub(super) const REPO_SCHEMA: storage::Schema = storage::Schema {
-    version: 5,
+    version: 8,
     sql: "
 CREATE TABLE backups (
     backup_id TEXT PRIMARY KEY NOT NULL,
-    format_version INTEGER NOT NULL CHECK (format_version = 5),
+    format_version INTEGER NOT NULL CHECK (format_version = 8),
     created_at TEXT NOT NULL,
     source TEXT NOT NULL,
     compression TEXT NOT NULL CHECK (json_valid(compression)),
@@ -31,7 +31,8 @@ CREATE TABLE backups (
     encryption_key_id TEXT,
     encryption_key_fingerprint TEXT,
 
-    checksum_algorithm TEXT NOT NULL,
+    checksum_algorithm TEXT NOT NULL CHECK (checksum_algorithm = 'sha256'),
+    archive_checksum TEXT NOT NULL CHECK (length(archive_checksum) = 64 AND archive_checksum NOT GLOB '*[^0-9a-f]*'),
     root_uid INTEGER NOT NULL CHECK (root_uid BETWEEN 0 AND 4294967295),
     root_gid INTEGER NOT NULL CHECK (root_gid BETWEEN 0 AND 4294967295),
     root_mode INTEGER NOT NULL CHECK (root_mode BETWEEN 0 AND 4095),
@@ -60,14 +61,13 @@ CREATE TABLE entries (
     mtime_seconds INTEGER NOT NULL,
     mtime_nanoseconds INTEGER NOT NULL CHECK (mtime_nanoseconds BETWEEN 0 AND 999999999),
     original_size INTEGER,
-    checksum TEXT,
     link_target TEXT,
     PRIMARY KEY (backup_id, ordinal),
     UNIQUE (backup_id, path),
     CHECK (
-        (type = 'file' AND original_size IS NOT NULL AND original_size >= 0 AND checksum IS NOT NULL AND link_target IS NULL) OR
-        (type = 'directory' AND original_size IS NULL AND checksum IS NULL AND link_target IS NULL) OR
-        (type = 'symlink' AND original_size IS NULL AND checksum IS NULL AND link_target IS NOT NULL)
+        (type = 'file' AND original_size IS NOT NULL AND original_size >= 0 AND link_target IS NULL) OR
+        (type = 'directory' AND original_size IS NULL AND link_target IS NULL) OR
+        (type = 'symlink' AND original_size IS NULL AND link_target IS NOT NULL)
     )
 );
 ",
@@ -83,19 +83,21 @@ pub(super) struct Manifest {
     pub(super) compression: Option<CompressionOptions>,
     pub(super) encryption: Option<Encryption>,
     pub(super) checksum_algorithm: String,
+    pub(super) archive_checksum: String,
     pub(super) root_metadata: UnixMetadata,
     pub(super) backup_stats: BackupStats,
     pub(super) entries: Vec<ManifestEntry>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct ManifestEntry {
     pub(super) relative_path: PathBuf,
     pub(super) metadata: UnixMetadata,
     pub(super) kind: ManifestEntryKind,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) struct UnixMetadata {
     pub(super) uid: u32,
     pub(super) gid: u32,
@@ -104,23 +106,18 @@ pub(super) struct UnixMetadata {
     pub(super) mtime: FileTimestamp,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) struct FileTimestamp {
     pub(super) seconds: i64,
     pub(super) nanoseconds: u32,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type")]
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", deny_unknown_fields)]
 pub(super) enum ManifestEntryKind {
-    File {
-        original_size: u64,
-        checksum: String,
-    },
+    File { original_size: u64 },
     Directory,
-    Symlink {
-        target: PathBuf,
-    },
+    Symlink { target: PathBuf },
 }
 
 impl UnixMetadata {
@@ -249,6 +246,7 @@ impl Manifest {
                 compression: compression_from_row(&row)?,
                 encryption: encryption_from_row(&row)?,
                 checksum_algorithm: row.try_get("checksum_algorithm")?,
+                archive_checksum: row.try_get("archive_checksum")?,
                 root_metadata: UnixMetadata::from_row(&row, "root_")?,
                 backup_stats: BackupStats {
                     entries_created: row.try_get("entries_created")?,
@@ -271,7 +269,6 @@ impl Manifest {
                             .map_err(|error| {
                                 JobError::internal(format!("invalid original size: {error}"))
                             })?,
-                        checksum: row.try_get("checksum")?,
                     },
                     "symlink" => ManifestEntryKind::Symlink {
                         target: serde_json::from_str(&row.try_get::<String, _>("link_target")?)?,
@@ -310,13 +307,13 @@ impl Manifest {
             let mut transaction = pool.begin().await?;
             let root = &self.root_metadata;
             sqlx::query("INSERT INTO backups (
-                backup_id, format_version, created_at, source, compression, checksum_algorithm,
+                backup_id, format_version, created_at, source, compression, checksum_algorithm, archive_checksum,
                 root_uid, root_gid, root_mode, root_atime_seconds, root_atime_nanoseconds,
                 root_mtime_seconds, root_mtime_nanoseconds,
                 entries_created, skipped_unsupported, skipped_filtered, encryption, encryption_key_id, encryption_key_fingerprint
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                 .bind(&self.backup_id).bind(i64::from(self.format_version)).bind(&self.created_at)
-                .bind(serde_json::to_string(&self.source)?).bind(serde_json::to_string(&self.compression)?).bind(&self.checksum_algorithm)
+                .bind(serde_json::to_string(&self.source)?).bind(serde_json::to_string(&self.compression)?).bind(&self.checksum_algorithm).bind(&self.archive_checksum)
                 .bind(i64::from(root.uid)).bind(i64::from(root.gid)).bind(i64::from(root.mode))
                 .bind(root.atime.seconds).bind(i64::from(root.atime.nanoseconds))
                 .bind(root.mtime.seconds).bind(i64::from(root.mtime.nanoseconds))
@@ -325,25 +322,25 @@ impl Manifest {
                 .bind(self.encryption.as_ref().map(|e| &e.key_id)).bind(self.encryption.as_ref().map(|e| &e.fingerprint))
                 .execute(&mut *transaction).await?;
             for (ordinal, entry) in self.entries.iter().enumerate() {
-                let (kind, size, checksum, target) = match &entry.kind {
-                    ManifestEntryKind::Directory => ("directory", None, None, None),
-                    ManifestEntryKind::File { original_size, checksum } => (
+                let (kind, size, target) = match &entry.kind {
+                    ManifestEntryKind::Directory => ("directory", None, None),
+                    ManifestEntryKind::File { original_size } => (
                         "file",
                         Some(i64::try_from(*original_size).map_err(|error| JobError::internal(format!("file size for {} is out of range: {error}", entry.relative_path.display())))?),
-                        Some(checksum), None,
+                        None,
                     ),
                     ManifestEntryKind::Symlink { target } => (
-                        "symlink", None, None, Some(serde_json::to_string(target)?),
+                        "symlink", None, Some(serde_json::to_string(target)?),
                     ),
                 };
                 let metadata = &entry.metadata;
                 let ordinal = i64::try_from(ordinal).map_err(|error| JobError::internal(format!("entry ordinal is out of range: {error}")))?;
                 sqlx::query("INSERT INTO entries (
-                    backup_id, ordinal, type, path, original_size, checksum, link_target,
+                    backup_id, ordinal, type, path, original_size, link_target,
                     uid, gid, mode, atime_seconds, atime_nanoseconds, mtime_seconds, mtime_nanoseconds
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                     .bind(&self.backup_id).bind(ordinal).bind(kind).bind(serde_json::to_string(&entry.relative_path)?)
-                    .bind(size).bind(checksum).bind(target)
+                    .bind(size).bind(target)
                     .bind(i64::from(metadata.uid)).bind(i64::from(metadata.gid)).bind(i64::from(metadata.mode))
                     .bind(metadata.atime.seconds).bind(i64::from(metadata.atime.nanoseconds))
                     .bind(metadata.mtime.seconds).bind(i64::from(metadata.mtime.nanoseconds))
@@ -380,7 +377,10 @@ impl Manifest {
                 JobError::internal(format!("invalid compression metadata: {}", error.message))
             })?;
         }
-        if self.format_version != 5 || self.checksum_algorithm != "sha256" {
+        if self.archive_checksum.len() != 64 || hex::decode(&self.archive_checksum).is_err() {
+            return Err(JobError::internal("invalid archive checksum"));
+        }
+        if self.format_version != 8 || self.checksum_algorithm != "sha256" {
             return Err(JobError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "unsupported manifest format, compression or checksum algorithm",
@@ -468,7 +468,7 @@ mod tests {
     type TestResult = Result<(), Box<dyn Error>>;
 
     #[tokio::test]
-    async fn v5_schema_enforces_metadata_and_entry_types() -> TestResult {
+    async fn v8_schema_enforces_metadata_and_entry_types() -> TestResult {
         let directory = TestDirectory::new()?;
         let pool = storage::open(
             &directory.path().join("repository.sqlite3"),
@@ -480,36 +480,35 @@ mod tests {
             sqlx::query_scalar::<_, i64>("PRAGMA user_version")
                 .fetch_one(&pool)
                 .await?,
-            5
+            8
         );
         sqlx::query(
             "INSERT INTO backups (
-            backup_id, format_version, created_at, source, compression, checksum_algorithm,
+            backup_id, format_version, created_at, source, compression, checksum_algorithm, archive_checksum,
             root_uid, root_gid, root_mode, root_atime_seconds, root_atime_nanoseconds,
             root_mtime_seconds, root_mtime_nanoseconds,
             entries_created, skipped_unsupported, skipped_filtered, encryption
-        ) VALUES ('backup', 5, '2026-10-23T00:00:00Z', '\"/source\"', '{\"algorithm\":\"zstd\",\"level\":3}', 'sha256',
+        ) VALUES ('backup', 8, '2026-10-23T00:00:00Z', '\"/source\"', '{\"algorithm\":\"zstd\",\"level\":3}', 'sha256', '0000000000000000000000000000000000000000000000000000000000000000',
             4294967295, 0, 4095, -1, 999999999, 0, 0, 3, 2, 1, 'none')",
         )
         .execute(&pool)
         .await?;
-        for (ordinal, kind, size, checksum, target) in [
-            (0i64, "file", Some(0i64), Some("hash"), None),
-            (1, "directory", None, None, None),
-            (2, "symlink", None, None, Some("\"../missing\"")),
+        for (ordinal, kind, size, target) in [
+            (0i64, "file", Some(0i64), None),
+            (1, "directory", None, None),
+            (2, "symlink", None, Some("\"../missing\"")),
         ] {
             sqlx::query(
                 "INSERT INTO entries (
                 backup_id, ordinal, type, path, uid, gid, mode,
                 atime_seconds, atime_nanoseconds, mtime_seconds, mtime_nanoseconds,
-                original_size, checksum, link_target
-            ) VALUES ('backup', ?, ?, ?, 1000, 1000, 420, 0, 0, 0, 0, ?, ?, ?)",
+                original_size, link_target
+            ) VALUES ('backup', ?, ?, ?, 1000, 1000, 420, 0, 0, 0, 0, ?, ?)",
             )
             .bind(ordinal)
             .bind(kind)
             .bind(format!("\"{kind}\""))
             .bind(size)
-            .bind(checksum)
             .bind(target)
             .execute(&pool)
             .await?;
@@ -523,7 +522,9 @@ mod tests {
             "UPDATE entries SET type = 'socket'",
             "UPDATE entries SET original_size = NULL WHERE type = 'file'",
             "UPDATE entries SET original_size = -1 WHERE type = 'file'",
-            "UPDATE entries SET checksum = NULL WHERE type = 'file'",
+            "UPDATE backups SET archive_checksum = NULL",
+            "UPDATE backups SET archive_checksum = 'bad'",
+            "UPDATE backups SET archive_checksum = 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz'",
             "UPDATE entries SET link_target = NULL WHERE type = 'symlink'",
             "UPDATE entries SET link_target = 'target' WHERE type = 'directory'",
             "UPDATE entries SET original_size = 0 WHERE type = 'symlink'",
@@ -554,7 +555,7 @@ mod tests {
 
     fn header(repository: &Path, backup_id: &str, second: u8) -> Manifest {
         Manifest {
-            format_version: 5,
+            format_version: 8,
             backup_id: backup_id.to_owned(),
             created_at: format!("2026-10-13T00:00:{second:02}.000Z"),
             source: repository.to_owned(),
@@ -563,6 +564,7 @@ mod tests {
             )),
             encryption: None,
             checksum_algorithm: "sha256".into(),
+            archive_checksum: "0".repeat(64),
             root_metadata: metadata(100),
             backup_stats: BackupStats {
                 entries_created: 0,
@@ -640,20 +642,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unpublished_directories_do_not_initialize_metadata() -> TestResult {
+    async fn unpublished_archives_do_not_initialize_metadata() -> TestResult {
         let directory = TestDirectory::new()?;
         let repository = directory.path();
         assert!(list_at(repository).await??.is_empty());
-        std::fs::create_dir_all(repository.join("backups/unpublished"))?;
-        std::fs::write(
-            repository.join("backups/unpublished/payload"),
-            b"keep contents",
-        )?;
+        std::fs::write(repository.join("unpublished.bak"), b"keep contents")?;
         assert!(list_at(repository).await??.is_empty());
         assert!(!repository.join("repository.sqlite3").exists());
         assert_eq!(std::fs::read_dir(repository)?.count(), 1);
         assert_eq!(
-            std::fs::read(repository.join("backups/unpublished/payload"))?,
+            std::fs::read(repository.join("unpublished.bak"))?,
             b"keep contents"
         );
         Ok(())
@@ -664,14 +662,13 @@ mod tests {
         let directory = TestDirectory::new()?;
         let repository = directory.path();
         header(repository, "published", 0).write(repository).await?;
-        std::fs::create_dir_all(repository.join("backups/unpublished"))?;
+        std::fs::write(repository.join("unpublished.bak"), b"unpublished archive")?;
         let mut failed = header(repository, "unpublished", 3);
         failed.entries.push(ManifestEntry {
             relative_path: "out-of-range".into(),
             metadata: metadata(1),
             kind: ManifestEntryKind::File {
                 original_size: u64::MAX,
-                checksum: "hash".into(),
             },
         });
         assert!(failed.write(repository).await.is_err());
@@ -679,7 +676,7 @@ mod tests {
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].backup_id, "published");
         assert_eq!(summaries[0].created_at, "2026-10-13T00:00:00.000Z");
-        assert!(repository.join("backups/unpublished").is_dir());
+        assert!(repository.join("unpublished.bak").is_file());
         Ok(())
     }
 
@@ -752,7 +749,7 @@ mod tests {
 
     fn manifest() -> Manifest {
         Manifest {
-            format_version: 5,
+            format_version: 8,
             backup_id: "backup-001".into(),
             created_at: "2026-10-09T00:00:00Z".into(),
             source: "/source".into(),
@@ -761,6 +758,7 @@ mod tests {
             )),
             encryption: None,
             checksum_algorithm: "sha256".into(),
+            archive_checksum: "0".repeat(64),
             root_metadata: metadata(100),
             backup_stats: BackupStats {
                 entries_created: 4,
@@ -776,10 +774,7 @@ mod tests {
                 ManifestEntry {
                     relative_path: "file.txt".into(),
                     metadata: metadata(2),
-                    kind: ManifestEntryKind::File {
-                        original_size: 0,
-                        checksum: "empty-file-sha256".into(),
-                    },
+                    kind: ManifestEntryKind::File { original_size: 0 },
                 },
                 ManifestEntry {
                     relative_path: "relative link".into(),
@@ -836,7 +831,6 @@ mod tests {
             metadata: metadata(5),
             kind: ManifestEntryKind::File {
                 original_size: u64::MAX,
-                checksum: "hash".into(),
             },
         });
         let error = manifest

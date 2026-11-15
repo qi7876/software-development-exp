@@ -245,8 +245,9 @@ def cycle(
         },
     )
     backup_id = backup["result"]["backup_id"]
-    payloads = repository / "backups" / backup_id
-    immutable = tree(payloads)
+    archive = repository / f"{backup_id}.bak"
+    with archive.open("rb") as contents:
+        immutable = hashlib.file_digest(contents, "sha256").hexdigest()
     listed = server.get("/api/backups?" + urllib.parse.urlencode({"repository": str(repository)}))
     if [row["backup_id"] for row in listed["backups"]] != [backup_id]:
         raise RuntimeError(f"unexpected listing: {listed}")
@@ -258,12 +259,14 @@ def cycle(
             "destination": str(destination),
         },
     )
-    if tree(destination) != expected or tree(source) != expected or tree(payloads) != immutable:
+    with archive.open("rb") as contents:
+        unchanged = hashlib.file_digest(contents, "sha256").hexdigest() == immutable
+    if tree(destination) != expected or tree(source) != expected or not unchanged:
         raise RuntimeError("round trip changed source, restored contents, or backup payloads")
     result = {
         "backup_seconds": backup_seconds,
         "restore_seconds": restore_seconds,
-        "payload_bytes": sum(path.stat().st_size for path in payloads.rglob("*") if path.is_file()),
+        "payload_bytes": archive.stat().st_size,
         "backup_job": backup,
         "restore_job": restore,
     }
