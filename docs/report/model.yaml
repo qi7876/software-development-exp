@@ -1,6 +1,6 @@
 {
   "version": "5.0",
-  "updated": "2026-11-13",
+  "updated": "2026-11-15",
   "title": "bak 当前实现系统设计",
   "diagrams": [
     {
@@ -17,7 +17,7 @@
       ],
       "details": [
         "浏览器可连接同一或另一台 bak API；地址和明文 API key 保存在浏览器 origin 的 localStorage。",
-        "工作目录作业库 schema v5，仓库 schema/format v6；保留命名密钥文件以恢复旧备份。",
+        "工作目录作业库 schema v5，仓库 schema/format v7；保留命名密钥文件以恢复旧备份。",
         "自实现顺序归档后选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 或 AES-256-GCM 加密，形成九种模式；元数据和文件名仍为明文。",
         "配置式定时备份使用 IANA 时区与分钟级 Cron，复用 FIFO；停机不补跑，同一计划有未完成任务时跳过。"
       ],
@@ -133,11 +133,11 @@
           "name": "repository.sqlite3",
           "package": "Local repository",
           "type": "database",
-          "stereotype": "metadata v6"
+          "stereotype": "metadata v7"
         },
         {
           "id": "Files",
-          "name": "backups/<backup_id>/archive.bak",
+          "name": "backups/<backup_id>.bak",
           "package": "Local repository",
           "type": "folder",
           "stereotype": "one encoded archive"
@@ -636,7 +636,7 @@
       ],
       "constraints": [
         "仓库保存完整算法配置，XChaCha 载荷 v2 或 AES 载荷 v3 对配置进行认证；恢复自动使用记录的解码器。",
-        "SHA-256 与 original_size 始终针对原文，跳过统计只计已遇到的条目。"
+        "SHA-256 针对压缩加密后的整包字节，original_size 针对文件原文，跳过统计只计已遇到的条目。"
       ],
       "trace": {
         "use_cases": [
@@ -739,6 +739,7 @@
           "stereotype": "struct",
           "attributes": [
             "+ format_version: u32",
+            "+ archive_checksum: String",
             "+ compression: Option<CompressionOptions>",
             "+ encryption: Option<Encryption>",
             "+ root_metadata: UnixMetadata",
@@ -765,7 +766,7 @@
           "package": "Repository data",
           "stereotype": "enum",
           "attributes": [
-            "+ File { original_size, checksum }",
+            "+ File { original_size }",
             "+ Directory",
             "+ Symlink { target }"
           ],
@@ -1540,13 +1541,13 @@
           "type": "message",
           "source": "Backup",
           "target": "Backup",
-          "text": "Pack headers / data / SHA-256; compress then encrypt archive"
+          "text": "Pack entries / compress / encrypt / hash encoded archive"
         },
         {
           "type": "message",
           "source": "Backup",
           "target": "Repo",
-          "text": "Synchronize archive and ancestor directories"
+          "text": "Synchronize archive / backups directory / repository"
         },
         {
           "type": "alt",
@@ -1556,7 +1557,7 @@
           "type": "message",
           "source": "Backup",
           "target": "Repo",
-          "text": "Commit v6 header / entries / metadata / counts"
+          "text": "Commit v7 header / entries / metadata / counts"
         },
         {
           "type": "return",
@@ -1625,7 +1626,7 @@
       "details": [
         "备份列表返回编码模式与密钥信息；界面做匹配提示，worker 仍独立校验。",
         "读取仓库头后匹配密钥，验证全部相对路径，再创建文件、目录和符号链接。",
-        "顺序解包、核对条目头并验证结束标记、最终认证块、原文大小与哈希；子项完成后应用目录与根元数据。"
+        "顺序解包、核对条目头并验证结束标记、最终认证块、文件大小与整包哈希；子项完成后应用目录与根元数据。"
       ],
       "constraints": [
         "恢复不接受编码参数，由备份记录自动决定。",
@@ -1745,7 +1746,7 @@
           "type": "message",
           "source": "Restore",
           "target": "Repo",
-          "text": "Read v6 metadata / match key and fingerprint"
+          "text": "Read v7 metadata / match key and fingerprint"
         },
         {
           "type": "message",
@@ -1761,7 +1762,7 @@
           "type": "message",
           "source": "Restore",
           "target": "Dest",
-          "text": "Decode archive / match headers / verify size and SHA-256"
+          "text": "Decode entries / match headers and sizes / verify archive SHA-256"
         },
         {
           "type": "message",

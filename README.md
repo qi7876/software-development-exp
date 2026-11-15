@@ -85,7 +85,7 @@ Keep source files unchanged while a backup runs, because bak does not detect con
 | Compression | None, Zstd, LZ77 | Zstd level 1–22 (default 3). LZ77 is the project's own codec with a 4–1024 KiB window and a search depth of 1–256. |
 | Encryption | None, XChaCha20-Poly1305, AES-256-GCM | Needs a key configured on the server. |
 
-When both are used, the complete archive is compressed first and then encrypted. The plaintext SQLite catalog still exposes file names, directory structure, Unix metadata, sizes, checksums and symbolic link targets. The console defaults to Zstd level 3 with no encryption. API clients must choose explicitly, and omitted or null `compression` means uncompressed.
+When both are used, the complete archive is compressed first and then encrypted. The plaintext SQLite catalog still exposes file names, directory structure, Unix metadata, sizes and symbolic link targets, plus the archive checksum. The console defaults to Zstd level 3 with no encryption. API clients must choose explicitly, and omitted or null `compression` means uncompressed.
 
 Restore reads the codec and key from the backup, so you never enter these settings again.
 
@@ -115,7 +115,7 @@ Invalid patterns are not rejected when you submit. The task fails with a 400 err
 3. Enter a destination that is an existing, empty directory outside the repository (for example `restored`), then select **Start restore**.
 4. Check the result in Task records and inspect the destination.
 
-Restore verifies every file's size and SHA-256 checksum, and authenticates encrypted data. If a restore fails or is interrupted, partial files can remain in the destination and are not cleaned up. Use a fresh empty directory for the next attempt. Restoring an encrypted backup requires the same key (same ID and contents) in the server configuration. Without it, **Restore** is disabled and the dialog explains why.
+Restore verifies each file's size and the complete archive's SHA-256 checksum, and authenticates encrypted data. If a restore fails or is interrupted, partial files can remain in the destination and are not cleaned up. Use a fresh empty directory for the next attempt. Restoring an encrypted backup requires the same key (same ID and contents) in the server configuration. Without it, **Restore** is disabled and the dialog explains why.
 
 ### Check task history
 
@@ -170,7 +170,7 @@ Backup storage displays separate **Compression** and **Encryption** sections wit
 
 Zstd levels range from 1 to 22 (default 3), using a synchronized slider and number field. LZ77 instead exposes a history window of 4–1024 KiB (default 64) and a candidate search limit of 1–256 (default 32). These creation settings apply to this backup; restore reads its saved format automatically. Switching algorithms retains each algorithm's inputs and disables hidden controls; turning compression off retains the inputs. A successful service switch or deletion of the active connection resets the settings. Task details, backup summaries and the restore dialog show the actual codec and parameters. See the [LZ77 format and design](docs/architecture/lz77.md).
 
-Encryption protects the complete archive stream. The plaintext SQLite catalog still exposes filenames, directory structure, Unix metadata, original sizes, SHA-256 checksums, and symbolic link targets. The API service reads plaintext and holds configured keys in memory; this is repository encryption, not end-to-end browser encryption. Failed restores can leave partial output.
+Encryption protects the complete archive stream. The plaintext SQLite catalog still exposes filenames, directory structure, Unix metadata, original sizes, the archive SHA-256 checksum, and symbolic link targets. The API service reads plaintext and holds configured keys in memory; this is repository encryption, not end-to-end browser encryption. Failed restores can leave partial output.
 
 All paths refer to the device running bak, including when the browser is on another device. Source, repository, and restore destination directories must exist. No OS directory picker or automatic directory creation is provided. Source and repository must not overlap; restore destination must be empty and outside the repository. Symbolic links are preserved; special files are skipped. Keep source files unchanged during a backup. Failed or interrupted restores can leave partial output.
 
@@ -216,7 +216,7 @@ Optional `filter` uses the manual backup API's complete filter object and defaul
 
 The service must be running. Scheduling begins with the next minute; downtime and skipped minutes are not replayed. A plan with queued/running work skips that occurrence; other plans and manual tasks share the FIFO worker. Failed backups wait for the next occurrence without automatic retry. Clock jumps and daylight-saving behavior are specified in [scheduling](docs/architecture/scheduling.md).
 
-Tasks expose nullable `schedule_id` and `scheduled_for` (UTC Unix milliseconds for the matching minute); both are null for manual tasks. The console displays these in task details. This feature requires job schema v5 without migration, while the current repository format is v6. Old job histories require the prior binary and original working directory.
+Tasks expose nullable `schedule_id` and `scheduled_for` (UTC Unix milliseconds for the matching minute); both are null for manual tasks. The console displays these in task details. This feature requires job schema v5 without migration, while the current repository format is v7. Old job histories require the prior binary and original working directory.
 
 ## Encryption keys
 
@@ -242,7 +242,7 @@ Add to `config.json`:
 
 The `encryption` section is optional. Key paths may be absolute or relative to the service working directory. All configured keys load at startup; unreadable or invalid files prevent startup. Changes require a service restart and browser reconnection. Keep old keys under stable identifiers while their backups remain in use, and add a new identifier when rotating keys. Backups and queued jobs pin both the identifier and a SHA-256 fingerprint. Removing a key or replacing its contents makes operations requiring the original key fail; it never silently selects another key. Keep independent copies of the required key files: losing a key makes its encrypted backups unrecoverable. Keys are never stored in task history, repository metadata, API responses, or browser storage.
 
-This version uses repository schema/format v6 and task schema v5. The archive change requires a new repository; an existing schema-v5 service working directory remains usable. Previous databases are rejected, not migrated or deleted; use the previous application version and original directories to access older backups.
+This version uses repository schema/format v7 and task schema v5. The archive change requires a new repository; an existing schema-v5 service working directory remains usable. Previous databases are rejected, not migrated or deleted; use the previous application version and original directories to access older backups.
 
 ## HTTP API
 
@@ -272,7 +272,7 @@ Accepted responses include `Location: /api/jobs/{job_id}` and a job with fields 
 
 Request errors use `{"error":{"code":400,"message":"..."}}` with the corresponding HTTP status. JSON bodies are limited to 2 MiB; `application/json` and `application/*+json` are accepted. Invalid or missing fields return 400, oversized bodies 413, unsupported media types 415, and missing or invalid authentication 401 with `WWW-Authenticate: Bearer`. There is no cancellation endpoint.
 
-`compression` is null or omitted for uncompressed backups. Select `{"algorithm":"zstd","level":3}` or `{"algorithm":"lz77","window_kib":64,"search_depth":32}` to enable a codec. Parameters omitted inside a selected algorithm use its defaults. Unknown algorithms, unknown fields, invalid types and out-of-range values return HTTP 400 before admission. The old boolean `compression` and separate `compression_level` are no longer accepted. The UI still defaults to Zstd; API clients choose explicitly. Complete settings persist in jobs and backup metadata, and restore takes no codec parameters. Current schema versions are jobs v5 / repository v6, with XChaCha encrypted payload v2 and AES encrypted payload v3. Earlier repository formats require the prior binary; no migration is provided.
+`compression` is null or omitted for uncompressed backups. Select `{"algorithm":"zstd","level":3}` or `{"algorithm":"lz77","window_kib":64,"search_depth":32}` to enable a codec. Parameters omitted inside a selected algorithm use its defaults. Unknown algorithms, unknown fields, invalid types and out-of-range values return HTTP 400 before admission. The old boolean `compression` and separate `compression_level` are no longer accepted. The UI still defaults to Zstd; API clients choose explicitly. Complete settings persist in jobs and backup metadata, and restore takes no codec parameters. Current schema versions are jobs v5 / repository v7, with XChaCha encrypted payload v2 and AES encrypted payload v3. Earlier repository formats require the prior binary; no migration is provided.
 
 An omitted or null `encryption` disables encryption. Select `{"algorithm":"aes-256-gcm","key_id":"current"}` or `{"algorithm":"xchacha20-poly1305","key_id":"current"}`. Both fields are required. Unknown algorithms, fields, keys, invalid types, and the removed `encryption_key_id` request field return HTTP 400 before admission. Both algorithms use the existing 32-byte key files. Accepted encrypted jobs persist the selected algorithm, identifier and fingerprint, allowing restart without persisting the secret. Restore resolves its key from backup metadata.
 
@@ -290,17 +290,17 @@ At startup, jobs left `running` by an earlier service exit become failed with co
 
 Run only one service instance per working directory. Both the working directory database and repository databases require local filesystems. SQLite uses WAL, `synchronous=FULL`, foreign keys, and a five-second busy timeout; pools allow at most four connections. Schema installation and versioning are transactional; unsupported versions prevent use.
 
-> Development status: repository format v6 stores one sequential archive per backup and backs up Unix metadata and symbolic link targets, with per-backup entry and skip counts. Restore applies Unix metadata and recreates symbolic links; backup filtering is implemented with strict directory pruning. See [the schema contract and remaining work](docs/architecture/repository-schema.md).
+> Development status: repository format v7 stores one sequential archive per backup and backs up Unix metadata and symbolic link targets, with per-backup entry and skip counts. Restore applies Unix metadata and recreates symbolic links; backup filtering is implemented with strict directory pruning. See [the schema contract and remaining work](docs/architecture/repository-schema.md).
 
-Full backups store headers and ordered entries in `repository.sqlite3` at each repository root. A complete metadata record is committed atomically and an existing backup ID cannot be overwritten. Format version 6 stores one `backups/<backup_id>/archive.bak` file instead of recreating the source tree in the repository. The project-defined archive packs file/directory/symlink headers, file data and SHA-256 trailers sequentially, using bounded buffers. Empty directories and link targets need no file data. It uses no tar library or subprocess and is not a tar-compatible format. See the [archive contract](docs/architecture/archive.md).
+Full backups store headers and ordered entries in `repository.sqlite3` at each repository root. A complete metadata record is committed atomically and an existing backup ID cannot be overwritten. Format version 7 stores one `backups/<backup_id>.bak` file instead of recreating the source tree in the repository. The project-defined archive packs file/directory/symlink headers, and file data sequentially, using bounded buffers. Empty directories and link targets need no file data. It uses no tar library or subprocess and is not a tar-compatible format. See the [archive contract](docs/architecture/archive.md).
 
-The pipeline is source entries → archive → optional Zstd/LZ77 → optional encryption → disk. Compression and encryption apply to the entire archive, allowing compression history to span files and requiring only one output file and one final payload-file synchronization per backup. SQLite retains each file's original size and SHA-256, Unix metadata, link targets, entry ordering, and a UTC RFC 3339 creation timestamp. These catalog values remain visible even when the archive is encrypted.
+The pipeline is source entries → archive → optional Zstd/LZ77 → optional encryption → disk. Compression and encryption apply to the entire archive, allowing compression history to span files and requiring only one output file and one final payload-file synchronization per backup. SQLite retains each file's original size, Unix metadata, link targets and entry ordering, plus the archive's SHA-256 and a UTC RFC 3339 creation timestamp. The hash covers the exact final bytes after compression and encryption, and is accumulated during writing without rereading the archive. No per-file hashes or digest trailers are stored. These catalog values remain visible even when the archive is encrypted.
 
 Backup finishes and synchronizes the archive and its repository ancestors, then commits metadata before reporting success. SQLite defines which backups are published; an archive alone does not establish a completed backup. Failed or interrupted backups may leave unpublished archives. Old repositories and JSON manifests are left untouched and are not migrated or read by this version.
 
-Restore requires an existing empty destination directory whose canonical path does not overlap the repository. It validates all catalog paths before writing, sequentially decodes the archive, compares each header with its catalog entry, verifies exact file sizes and both archive/catalog SHA-256 values, and requires the end marker and complete codec/authentication stream. Files are created without overwriting existing paths; Unix attributes and symbolic links are restored as before. Files and directories are synchronized before success. Missing backups return error code 404; invalid metadata, damaged archives, and integrity mismatches fail the job. A failed or interrupted restore may leave partial output; automatic cleanup is not implemented.
+Restore requires an existing empty destination directory whose canonical path does not overlap the repository. It validates all catalog paths before writing, sequentially decodes the archive, compares each header with its catalog entry, verifies exact file sizes and the complete encoded archive against its stored SHA-256, and requires the end marker and complete codec/authentication stream. Files are created without overwriting existing paths; Unix attributes and symbolic links are restored as before. Files and directories are synchronized before success. Missing backups return error code 404; invalid metadata, damaged archives, and integrity mismatches fail the job. A failed or interrupted restore may leave partial output; automatic cleanup is not implemented.
 
-Listing reads committed metadata headers and returns each backup's `backup_id` and `created_at`, newest first with backup IDs ascending for equal timestamps. It does not inspect or verify payload contents. An existing repository directory without a metadata database returns an empty list without creating the database; directories from unpublished backups are ignored. Invalid paths, corrupt databases, and unsupported schemas return errors rather than an empty list.
+Listing reads committed metadata headers and returns each backup's `backup_id` and `created_at`, newest first with backup IDs ascending for equal timestamps. It does not inspect or verify payload contents. An existing repository directory without a metadata database returns an empty list without creating the database; archives from unpublished backups are ignored. Invalid paths, corrupt databases, and unsupported schemas return errors rather than an empty list.
 
 ACID guarantees cover individual database transactions. Job history and repository metadata use separate databases; they do not share a transaction. File contents remain outside SQLite. Failed or interrupted operations may leave backup directories without metadata; automatic cleanup is not implemented. Keep source files unchanged while backing up: size changes during file copying are detected, but there is no consistent filesystem snapshot. WAL databases may have `-wal` and `-shm` sidecars; do not copy a live database file alone as a database backup.
 
@@ -319,7 +319,7 @@ src/
   jobs/
     archive.rs     Sequential archive framing and streaming file verification
     backup.rs      Full backup traversal, packing and synchronization
-    content.rs     Optional compression/encryption pipelines
+    content.rs     Optional compression/encryption pipelines and archive hashing
     crypto.rs      Named keys and authenticated streaming encryption
     lz77.rs        Project LZ77 matching, framing, streaming IO and codec tests
     restore.rs     Restore path validation, decoding, and integrity verification
@@ -351,7 +351,7 @@ There is no byte-level progress reporting or cancellation.
 
 The current milestone is a minimal end-to-end workflow for local full backups and restores, with these acceptance criteria:
 
-- Preserve regular file contents, directory structure, and empty directories; optionally compress with Zstd or project LZ77 and/or encrypt with XChaCha20-Poly1305 or AES-256-GCM, and verify plaintext SHA-256 integrity.
+- Preserve regular file contents, directory structure, and empty directories; optionally compress with Zstd or project LZ77 and/or encrypt with XChaCha20-Poly1305 or AES-256-GCM, and verify the SHA-256 integrity of the complete encoded archive.
 - Return a durable job ID immediately, execute one operation at a time, and retain queryable outcomes across restart.
 - Publish complete repository metadata transactionally after the referenced file contents are durable.
 - Restore into a separate empty directory and compare relative paths, entry types, and contents. Report clear failures and interruptions while preserving source files and existing successful backups.
