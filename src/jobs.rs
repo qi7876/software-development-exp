@@ -2,17 +2,16 @@ mod archive;
 mod backup;
 mod content;
 mod filesystem;
-mod filter;
 mod repository;
 mod restore;
 mod storage;
 
+pub(crate) use backup::Filter;
 pub(crate) use content::{
     BackupOptions, CompressionOptions, EncryptionRequest, Keyring, generate_key,
 };
 #[cfg(test)]
 use content::{EncryptionAlgorithm, ZstdOptions};
-pub(crate) use filter::Filter;
 use http::StatusCode;
 use serde_json::{Value, json};
 use sqlx::{Row, SqlitePool, sqlite::SqliteRow};

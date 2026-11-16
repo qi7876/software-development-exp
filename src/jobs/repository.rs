@@ -1,6 +1,5 @@
 use super::{
     JobError,
-    backup::BackupStats,
     content::{CompressionOptions, Encryption, EncryptionAlgorithm},
     filesystem::get_absolute_directory_path,
     storage,
@@ -8,6 +7,13 @@ use super::{
 use http::StatusCode;
 use sqlx::Row;
 use std::path::{Path, PathBuf};
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(super) struct BackupStats {
+    pub(super) entries_created: i64,
+    pub(super) skipped_unsupported: i64,
+    pub(super) skipped_filtered: i64,
+}
 
 #[derive(serde::Serialize)]
 pub(crate) struct RepoBackupInfo {

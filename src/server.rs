@@ -1,6 +1,8 @@
 mod api;
+mod schedule;
 mod ui;
 use crate::{config::Config, jobs::JobManager};
+pub(crate) use schedule::ScheduleConfig;
 use std::error::Error;
 use tokio::sync::watch;
 
@@ -9,7 +11,7 @@ pub(crate) async fn serve(
     jobs: JobManager,
     controller: Option<crate::daemon::Controller>,
 ) -> Result<(), Box<dyn Error>> {
-    let scheduler = crate::schedule::Scheduler::prepare(config.scheduled_backups, &jobs.keys)?;
+    let scheduler = schedule::Scheduler::prepare(config.scheduled_backups, &jobs.keys)?;
     scheduler.initialize(&jobs, chrono::Utc::now()).await?;
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await

@@ -4,7 +4,6 @@ mod args;
 mod config;
 mod daemon;
 mod jobs;
-mod schedule;
 mod server;
 #[cfg(test)]
 mod test_support;

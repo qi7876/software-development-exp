@@ -341,11 +341,14 @@ src/
   server.rs        HTTP listener, worker supervision, and graceful shutdown
   server/
     api.rs         Private HTTP routing, authentication, validation, and JSON responses
+    schedule.rs    Cron plan validation and scheduled job admission
     ui.rs          Optional external console assets and browser security headers
   jobs.rs          Job manager facade, durable FIFO lifecycle, and the background worker
   jobs/
     archive.rs     Sequential archive framing and streaming file verification
     backup.rs      Full backup traversal, packing and synchronization
+    backup/
+      filter.rs    Backup path, Unix metadata, and timestamp filtering
     content.rs     Optional compression/encryption pipelines and archive hashing
     content/
       crypto.rs    Named keys and authenticated streaming encryption
