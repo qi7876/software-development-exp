@@ -1,7 +1,8 @@
+use super::schedule::Scheduler;
 use crate::jobs::{BackupOptions, CompressionOptions, Filter, JobError, JobManager, JobRequest};
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, FromRequest, Request, State, rejection::JsonRejection},
+    extract::{DefaultBodyLimit, FromRequest, Path, Request, State, rejection::JsonRejection},
     http::{Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -9,17 +10,27 @@ use axum::{
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::json;
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Clone)]
 struct AppState {
     jobs: JobManager,
     secret_key: String,
+    schedules: Arc<Scheduler>,
 }
 
-pub fn router(jobs: JobManager, secret_key: String, web_ui: crate::config::WebUIConfig) -> Router {
-    let state = AppState { jobs, secret_key };
+pub fn router(
+    jobs: JobManager,
+    secret_key: String,
+    web_ui: crate::config::WebUIConfig,
+    schedules: Arc<Scheduler>,
+) -> Router {
+    let state = AppState {
+        jobs,
+        secret_key,
+        schedules,
+    };
     Router::new()
         .merge(super::ui::router(web_ui))
         .route(
@@ -30,6 +41,8 @@ pub fn router(jobs: JobManager, secret_key: String, web_ui: crate::config::WebUI
         .route("/api/restores", post(start_restore))
         .route("/api/jobs/{job_id}", get(get_job))
         .route("/api/jobs", get(list_jobs))
+        .route("/api/schedules", get(|State(state): State<AppState>| async move { Json(state.schedules.describe()) }))
+        .route("/api/schedules/{id}/run", post(run_schedule))
         .fallback(|| async { JobError::new(StatusCode::NOT_FOUND, "route not found") })
         .method_not_allowed_fallback(|| async {
             JobError::new(StatusCode::METHOD_NOT_ALLOWED, "method not allowed")
@@ -135,6 +148,21 @@ fn validate_backup_id(id: &str) -> Result<(), JobError> {
 
 async fn accepted_job(jobs: &JobManager, request: JobRequest) -> Result<Response, JobError> {
     let job = jobs.submit(request).await?;
+    let location = format!("/api/jobs/{}", job.job_id);
+    Ok((
+        StatusCode::ACCEPTED,
+        [(header::LOCATION, location)],
+        Json(job.to_json()?),
+    )
+        .into_response())
+}
+
+async fn run_schedule(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, JobError> {
+    let request = state.schedules.request(&id, &state.jobs.keys)?;
+    let job = state.jobs.run_schedule_now(&id, request).await?;
     let location = format!("/api/jobs/{}", job.job_id);
     Ok((
         StatusCode::ACCEPTED,
@@ -291,6 +319,11 @@ mod tests {
     use std::error::Error;
     use tower::ServiceExt;
 
+    fn router(jobs: JobManager, secret_key: String, web_ui: crate::config::WebUIConfig) -> Router {
+        let schedules = Arc::new(Scheduler::default());
+        super::router(jobs, secret_key, web_ui, schedules)
+    }
+
     fn request(
         method: &str,
         path: &str,
@@ -310,6 +343,165 @@ mod tests {
         Ok(serde_json::from_slice(
             &to_bytes(response.into_body(), usize::MAX).await?,
         )?)
+    }
+
+    #[tokio::test]
+    async fn schedules_list_saved_settings_and_admit_manual_runs_atomically()
+    -> Result<(), Box<dyn Error>> {
+        let directory = TestDirectory::new()?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crate::jobs::Keyring::default()).await?;
+        let id = "daily /<script>";
+        let schedules = Arc::new(Scheduler::prepare(
+            Some(serde_json::from_value(json!({
+                "timezone": "Asia/Shanghai", "plans": [
+                    {"id": id, "enabled": false, "cron": "0 2 * * *", "source": "saved-source", "repository": "saved-repo", "compression": {"algorithm": "lz77", "window_kib": 8, "search_depth": 4}},
+                    {"id": "automatic", "cron": "* * * * *", "source": "source", "repository": "repo"},
+                    {"id": "missing-key", "enabled": false, "cron": "0 2 * * *", "source": "source", "repository": "repo", "encryption": {"algorithm": "aes-256-gcm", "key_id": "unavailable"}}
+                ]
+            }))?),
+            &jobs.keys,
+        )?);
+        let now = chrono::Utc::now();
+        schedules.initialize(&jobs, now).await?;
+        let app = super::router(
+            jobs.clone(),
+            "test-key".into(),
+            crate::config::WebUIConfig::default(),
+            schedules.clone(),
+        );
+        for (method, path) in [
+            ("GET", "/api/schedules"),
+            ("POST", "/api/schedules/automatic/run"),
+        ] {
+            assert_eq!(
+                app.clone()
+                    .oneshot(request(method, path, "", "", vec![])?)
+                    .await?
+                    .status(),
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        let list = json_body(
+            app.clone()
+                .oneshot(request(
+                    "GET",
+                    "/api/schedules",
+                    "Bearer test-key",
+                    "",
+                    vec![],
+                )?)
+                .await?,
+        )
+        .await?;
+        assert_eq!(list["timezone"], "Asia/Shanghai");
+        assert_eq!(list["plans"].as_array().ok_or("missing plans")?.len(), 3);
+        assert_eq!(list["plans"][0]["enabled"], false);
+        assert_eq!(list["plans"][0]["source"], "saved-source");
+        assert_eq!(list["plans"][1]["compression"]["level"], 3);
+        for (path, expected) in [
+            ("/api/schedules/unknown/run", StatusCode::NOT_FOUND),
+            ("/api/schedules/missing-key/run", StatusCode::BAD_REQUEST),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(request("POST", path, "Bearer test-key", "", vec![])?)
+                .await?;
+            assert_eq!(response.status(), expected);
+            assert_eq!(
+                json_body(response).await?["error"]["code"],
+                expected.as_u16()
+            );
+        }
+        let path = "/api/schedules/daily%20%2F%3Cscript%3E/run";
+        let (first, second) = tokio::join!(
+            app.clone()
+                .oneshot(request("POST", path, "Bearer test-key", "", vec![])?),
+            app.clone().oneshot(request(
+                "POST",
+                path,
+                "Bearer test-key",
+                "application/json",
+                br#"{"source":"client-override"}"#.to_vec()
+            )?),
+        );
+        let first = first?;
+        let second = second?;
+        let (accepted, conflict) = if first.status() == StatusCode::ACCEPTED {
+            (first, second)
+        } else {
+            (second, first)
+        };
+        assert_eq!(accepted.status(), StatusCode::ACCEPTED);
+        assert_eq!(conflict.status(), StatusCode::CONFLICT);
+        let location = accepted.headers()[header::LOCATION].to_str()?.to_owned();
+        let accepted = json_body(accepted).await?;
+        assert_eq!(accepted["schedule_id"], id);
+        assert!(accepted["scheduled_for"].is_i64());
+        assert!(location.ends_with(accepted["job_id"].as_str().ok_or("missing job ID")?));
+        let history = jobs.list_jobs(20, None).await?;
+        assert_eq!(history["jobs"].as_array().ok_or("missing jobs")?.len(), 1);
+        assert_eq!(history["jobs"][0]["request"]["source"], "saved-source");
+        assert_eq!(
+            history["jobs"][0]["request"]["compression"]["window_kib"],
+            8
+        );
+
+        let database = sqlx::SqlitePool::connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(directory.path().join("jobs.sqlite3")),
+        )
+        .await?;
+        let absent: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM schedule_cursors WHERE schedule_id = ?")
+                .bind(id)
+                .fetch_one(&database)
+                .await?;
+        assert_eq!(
+            absent, 0,
+            "manual execution must not initialize an automatic cursor"
+        );
+        jobs.initialize_schedule(id, 100).await?;
+        jobs.schedule_tick(id, 101, Some(&schedules.request(id, &jobs.keys)?))
+            .await?;
+        assert_eq!(
+            jobs.list_jobs(20, None).await?["jobs"]
+                .as_array()
+                .ok_or("missing jobs")?
+                .len(),
+            1,
+            "automatic tick must skip a manual active task"
+        );
+        jobs.schedule_tick(
+            "automatic",
+            now.timestamp().div_euclid(60) + 1,
+            Some(&schedules.request("automatic", &jobs.keys)?),
+        )
+        .await?;
+        let response = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/api/schedules/automatic/run",
+                "Bearer test-key",
+                "",
+                vec![],
+            )?)
+            .await?;
+        assert_eq!(
+            response.status(),
+            StatusCode::CONFLICT,
+            "manual run must skip an automatic active task"
+        );
+        let cursor: i64 = sqlx::query_scalar(
+            "SELECT minute FROM schedule_cursors WHERE schedule_id = 'automatic'",
+        )
+        .fetch_one(&database)
+        .await?;
+        assert_eq!(cursor, now.timestamp().div_euclid(60) + 1);
+        database.close().await;
+        jobs.close().await;
+        Ok(())
     }
 
     #[tokio::test]

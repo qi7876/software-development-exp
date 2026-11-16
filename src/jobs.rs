@@ -102,6 +102,32 @@ impl JobManager {
         Ok(job)
     }
 
+    pub(crate) async fn run_schedule_now(
+        &self,
+        id: &str,
+        request: JobRequest,
+    ) -> Result<JobInfo, JobError> {
+        let now = timestamp()?;
+        let job = JobInfo {
+            job_id: Uuid::new_v4().to_string(),
+            request,
+            state: JobState::Queued,
+            schedule_id: Some(id.to_owned()),
+            scheduled_for: Some(now),
+        };
+        let inserted = sqlx::query("INSERT INTO jobs (job_id, request, state, queued_at, schedule_id, scheduled_for) SELECT ?, ?, 'queued', ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE schedule_id = ? AND state IN ('queued', 'running'))")
+            .bind(&job.job_id).bind(serde_json::to_string(&job.request)?).bind(now)
+            .bind(id).bind(now).bind(id).execute(&self.pool).await?;
+        if inserted.rows_affected() == 0 {
+            return Err(JobError::new(
+                StatusCode::CONFLICT,
+                "this schedule already has a queued or running task",
+            ));
+        }
+        self.wake.notify_one();
+        Ok(job)
+    }
+
     // Initialization skips downtime, including the current partial minute.
     pub(crate) async fn initialize_schedule(&self, id: &str, minute: i64) -> Result<(), JobError> {
         sqlx::query("INSERT INTO schedule_cursors (schedule_id, minute) VALUES (?, ?) ON CONFLICT(schedule_id) DO UPDATE SET minute = max(minute, excluded.minute)")

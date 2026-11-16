@@ -11,7 +11,10 @@ pub(crate) async fn serve(
     jobs: JobManager,
     controller: Option<crate::daemon::Controller>,
 ) -> Result<(), Box<dyn Error>> {
-    let scheduler = schedule::Scheduler::prepare(config.scheduled_backups, &jobs.keys)?;
+    let scheduler = std::sync::Arc::new(schedule::Scheduler::prepare(
+        config.scheduled_backups,
+        &jobs.keys,
+    )?);
     scheduler.initialize(&jobs, chrono::Utc::now()).await?;
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await
@@ -28,11 +31,12 @@ pub(crate) async fn serve(
     let mut worker = tokio::spawn(async move { worker_jobs.run_worker(worker_stop).await });
     let scheduler_jobs = jobs.clone();
     let scheduler_stop = stop.subscribe();
-    let mut scheduler =
-        tokio::spawn(async move { scheduler.run(scheduler_jobs, scheduler_stop).await });
+    let worker_scheduler = scheduler.clone();
+    let mut scheduler_task =
+        tokio::spawn(async move { worker_scheduler.run(scheduler_jobs, scheduler_stop).await });
     let server = axum::serve(
         listener,
-        api::router(jobs.clone(), config.secret_key, config.web_ui),
+        api::router(jobs.clone(), config.secret_key, config.web_ui, scheduler),
     )
     .with_graceful_shutdown(async move {
         // Sender closure also means the owner has stopped the service.
@@ -48,7 +52,7 @@ pub(crate) async fn serve(
     let mut worker_finished = false;
     let mut server_finished = false;
     let outcome: Result<(), Box<dyn Error>> = tokio::select! {
-        result = &mut scheduler => {
+        result = &mut scheduler_task => {
             scheduler_finished = true;
             match result {
                 Ok(Ok(())) => Err("backup scheduler stopped unexpectedly".into()),
@@ -108,7 +112,7 @@ pub(crate) async fn serve(
     let scheduler_outcome: Result<(), Box<dyn Error>> = if scheduler_finished {
         Ok(())
     } else {
-        match scheduler.await {
+        match scheduler_task.await {
             Ok(result) => result.map_err(Into::into),
             Err(e) => Err(format!("backup scheduler failed during shutdown: {e}").into()),
         }
