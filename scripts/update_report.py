@@ -550,7 +550,8 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
             ("secret_key", "必需且非空；用于 API 认证，与备份加密无关。"),
             (
                 "web_ui",
-                "可省略，默认关闭；enabled=true 时必须通过 path 指定静态资源目录，路径相对工作目录或为绝对路径。"
+                "可省略，默认关闭；enabled=true 时必须通过 path 指定静态资源目录，"
+                "路径相对工作目录或为绝对路径。"
                 "旧 archive_url/directory 被忽略。",
             ),
             (
