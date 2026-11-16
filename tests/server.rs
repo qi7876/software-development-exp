@@ -115,7 +115,7 @@ impl TestServer {
             .open(self.path("server.log"))?;
         let mut stdout_log = log.try_clone()?;
         let child = Command::new(env!("CARGO_BIN_EXE_bak"))
-            .arg("-d")
+            .args(["server", "start", "--foreground", "-d"])
             .arg(&self.directory.0)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

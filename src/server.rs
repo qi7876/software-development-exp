@@ -4,14 +4,23 @@ use crate::{config::Config, jobs::JobManager};
 use std::error::Error;
 use tokio::sync::watch;
 
-pub(crate) async fn serve(config: Config, jobs: JobManager) -> Result<(), Box<dyn Error>> {
+pub(crate) async fn serve(
+    config: Config,
+    jobs: JobManager,
+    controller: Option<crate::daemon::Controller>,
+) -> Result<(), Box<dyn Error>> {
     let scheduler = crate::schedule::Scheduler::prepare(config.scheduled_backups, &jobs.keys)?;
     scheduler.initialize(&jobs, chrono::Utc::now()).await?;
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await
         .map_err(|error| format!("cannot listen on {}: {error}", config.listen))?;
-    println!("Listening on {}", listener.local_addr()?);
     let (stop, mut server_stop) = watch::channel(false);
+    let mut control_stop = stop.subscribe();
+    let mut control_task = controller
+        .as_ref()
+        .map(|control| control.listen(listener.local_addr()?, stop.clone()))
+        .transpose()?;
+    println!("Listening on {}", listener.local_addr()?);
     let worker_jobs = jobs.clone();
     let worker_stop = stop.subscribe();
     let mut worker = tokio::spawn(async move { worker_jobs.run_worker(worker_stop).await });
@@ -45,6 +54,16 @@ pub(crate) async fn serve(config: Config, jobs: JobManager) -> Result<(), Box<dy
                 Err(e) => Err(format!("backup scheduler task failed: {e}").into()),
             }
         }
+        result = async {
+            match control_task.as_mut() {
+                Some(task) => task.await.map_err(std::io::Error::other)?,
+                None => std::future::pending().await,
+            }
+        } => match result {
+            Ok(()) => Err("server control listener stopped unexpectedly".into()),
+            Err(error) => Err(format!("server control listener failed: {error}").into()),
+        },
+        _ = control_stop.changed() => Ok(()),
         result = shutdown_signal() => result.map_err(Into::into),
         result = &mut server => {
             server_finished = true;
@@ -93,6 +112,10 @@ pub(crate) async fn serve(config: Config, jobs: JobManager) -> Result<(), Box<dy
         }
     };
     jobs.close().await;
+    if let Some(task) = control_task {
+        task.abort();
+    }
+    drop(controller);
     // Report secondary shutdown failures as well as the original cause.
     if outcome.is_err() {
         if let Err(error) = &worker_outcome {

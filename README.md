@@ -14,13 +14,13 @@ mkdir -p working-directory-example/source working-directory-example/repository w
 cargo run -- keygen --output working-directory-example/backup.key
 
 # 3. Start the service
-cargo run -- -d working-directory-example
+cargo run -- server start -d working-directory-example
 
 # 4. Check that it answers
 curl -H 'Authorization: Bearer example-local-test-key' http://127.0.0.1:8080/api/status
 ```
 
-Open <http://127.0.0.1:8080/> for the browser console. The service prints `Listening on ...` when it is ready and stops cleanly on Ctrl-C or SIGTERM. For a release build, run `cargo build --release` and use `target/release/bak` in place of `cargo run --`.
+Open <http://127.0.0.1:8080/> for the browser console. The command returns after the background service is ready and prints its PID, listening address, working directory, and log path. Run `cargo run -- server status` to inspect it and `cargo run -- server stop` to stop it. For a release build, run `cargo build --release` and use `target/release/bak` in place of `cargo run --`.
 
 Step 2 is needed because `backup.key` is not stored in git. If you do not want encryption, remove the `encryption` section from `working-directory-example/config.json` instead.
 
@@ -149,7 +149,23 @@ Install the Rust toolchain specified in `rust-toolchain.toml`. Install uv to run
 uv run scripts/check.py
 ```
 
-Supported command-line options are `--help` / `-h`, `--version` / `-v`, and `--working-directory` / `-d`. The `keygen` subcommand is described in [Encryption keys](#encryption-keys). Specify an existing working directory containing `config.json`. SQLite job history replaces optional JSONL logs.
+The root command accepts subcommands only, with no root options:
+
+```shell
+bak help
+bak help server start
+bak version
+bak keygen --output /secure/backup.key
+bak server start -d /path/to/workdir
+bak server status
+bak server stop
+```
+
+`server start` requires an existing working directory containing `config.json`. It starts one managed background server for the current user, independent of the invoking terminal; a second start is rejected until that instance stops. `status` and `stop` use the same user's local control socket, so they work from any directory without reading `config.json` or supplying an API key. Status reports Running, Stopping, or stopped, with PID, working directory, and listening address when available. Stopping an already stopped server succeeds. `stop` waits for the active job and database shutdown to finish; queued jobs remain for the next start.
+
+Background stdout and stderr append to `server.log` in the working directory. Startup errors return a failure status and point to that log. Control files live under `$XDG_STATE_HOME/bak`, or `$HOME/.local/state/bak` when unset; use the same environment for start/status/stop. A file lock prevents two foreground or background services from opening the same working directory. Stale control sockets after an abrupt exit are replaced on the next start.
+
+For terminal debugging or a process supervisor, use `bak server start --foreground -d /path/to/workdir`; stop it with Ctrl-C or SIGTERM. Foreground processes are managed by their caller and do not appear in `server status`. Background management currently requires Unix. Child commands accept `--help` / `-h`; root `--help`, `--version`, and `-d` have been replaced by `help`, `version`, and `server start -d`.
 
 ## Browser console
 
@@ -321,6 +337,7 @@ src/
   main.rs          Startup and exit reporting
   args.rs          Command-line arguments
   config.rs        Configuration loading and validation
+  daemon.rs        Background process startup, local control socket, and instance locks
   server.rs        HTTP listener, worker supervision, and graceful shutdown
   server/
     api.rs         Private HTTP routing, authentication, validation, and JSON responses
@@ -338,6 +355,7 @@ src/
     storage.rs     SQLite connection settings and schema initialization
   test_support.rs  Temporary directories for tests
 tests/
+  cli.rs           CLI and background lifecycle integration tests
   server.rs        Application integration tests through the compiled binary and HTTP
 web/               Separately deployed HTML, CSS, and JavaScript; optional Playwright browser checks
 ```
@@ -351,7 +369,7 @@ Backup jobs require existing source and repository directories. Equal or nested 
 Recursive source discovery is implemented, including empty directories. Symbolic links are preserved; unsupported entry types are skipped and counted.
 Archive checks cover framing, truncation, corruption, header limits, source size changes, and streaming round trips. Backup checks cover stored metadata, packed contents, empty directories, source preservation, duplicate IDs, and failed metadata publication. Restore component checks cover round trips, buffer boundaries, invalid paths, damaged payloads, missing backups, and overlapping paths. Listing checks cover stable ordering, empty repositories, failed publication, invalid metadata, and HTTP responses. Component tests stay inline with their implementation modules. Run `cargo test jobs::backup::tests` or `cargo test jobs::restore::tests` for the operation suites, `cargo test jobs::repository::tests` for metadata and listing, and `cargo test jobs::filesystem::tests` for shared path logic.
 
-Cross-component tests live in `tests/server.rs` and launch the compiled binary on an OS-assigned loopback port. They check authentication, failed job reporting, backup/list/restore round trips, occupied destination preservation, persisted history across restart, HTTP responsiveness during an active backup, and SIGTERM shutdown that finishes the active job while retaining queued work. Abrupt termination with SIGKILL verifies that restart fails the interrupted job, resumes queued work, and preserves completed results. A real repository SQLite write lock holds metadata publication pending during the shutdown and interruption tests. Fixtures terminate and reap child processes and remove temporary directories. Run `cargo test --test server` for these Unix integration tests; `uv run scripts/check.py` includes them.
+CLI tests in `tests/cli.rs` cover command help, detached startup, live status, duplicate rejection, startup failures, stale sockets after SIGKILL, and graceful stop with active/queued jobs. Cross-component tests live in `tests/server.rs` and launch the compiled binary on an OS-assigned loopback port. They check authentication, failed job reporting, backup/list/restore round trips, occupied destination preservation, persisted history across restart, HTTP responsiveness during an active backup, and SIGTERM shutdown that finishes the active job while retaining queued work. Abrupt termination with SIGKILL verifies that restart fails the interrupted job, resumes queued work, and preserves completed results. A real repository SQLite write lock holds metadata publication pending during the shutdown and interruption tests. Fixtures terminate and reap child processes and remove temporary directories. Run `cargo test --test server` for these Unix integration tests; `uv run scripts/check.py` includes them.
 
 Proptest generates directory trees, occupied destinations, integrity mismatches, and listing headers with 32 cases per component property. Process-level HTTP round trips and occupied destination checks each use eight generated cases. Fixed seeds keep checks reproducible; failed property cases shrink and are persisted for replay. Retain generated regression seed files in version control. These tests do not simulate power loss.
 

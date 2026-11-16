@@ -544,8 +544,9 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         anchor,
         ("参数或字段", "说明"),
         (
-            ("--help / -h；--version / -v", "打印帮助或版本后退出。"),
-            ("--working-directory / -d <PATH>", "指定已有工作目录；相对请求路径以该目录解析。"),
+            ("bak help；bak version", "通过子命令打印帮助或版本；根命令不接受选项。"),
+            ("bak server start -d <PATH>", "指定已有工作目录并后台启动；--foreground 可前台运行。"),
+            ("bak server status / stop", "查看当前用户的后台实例；停止时等待活动作业完成。"),
             ("listen", "IP:port，例如 127.0.0.1:8080；配置仅在启动时读取。"),
             ("secret_key", "必需且非空；用于 API 认证，与备份加密无关。"),
             (
@@ -578,7 +579,8 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "示例：mkdir -p working-directory-ex"
         "ample/source working-directory-e"
         "xample/repository；"
-        "cargo run -- -d working-directory-example。示例配置含公开测试 key，实际使用应更换。"
+        "cargo run -- server start -d working-directory-example。"
+        "示例配置含公开测试 key，实际使用应更换。"
         "启动错误输出诊断并非零退出；当前 config 允许其他未知字段，不应声称拒绝所有未知字段。",
     )
     _heading(document, anchor, "3.3 持久化与操作生命周期", 2)
