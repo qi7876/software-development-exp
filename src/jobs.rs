@@ -427,6 +427,11 @@ impl fmt::Display for JobError {
     }
 }
 impl std::error::Error for JobError {}
+impl From<std::io::Error> for JobError {
+    fn from(error: std::io::Error) -> Self {
+        Self::internal(error.to_string())
+    }
+}
 impl From<sqlx::Error> for JobError {
     fn from(error: sqlx::Error) -> Self {
         Self::internal(format!("database operation failed: {error}"))

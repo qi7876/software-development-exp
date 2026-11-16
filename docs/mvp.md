@@ -2,15 +2,15 @@
 
 The MVP is a single-user backup service: connect from the browser console, back up an existing source directory to an existing independent repository, browse completed backups, restore into an existing empty directory, and inspect persisted task results. The console can select local or remote HTTP/HTTPS APIs and persists connection profiles and keys in browser storage. Switching verifies the target and clears old service data. Backup and restore execution currently require Unix. The console supports wide desktop windows of at least 1200 CSS pixels; paths always refer to the selected service device. Frontend assets are deployed separately and served from `web_ui.path`; there is no runtime asset download.
 
-The current format is version 4 with individually encoded files and repository metadata in SQLite. Zstd/LZ77 compression and XChaCha20-Poly1305 content encryption are independent per-backup choices; encrypted backups require named server keys. Hybrid small-file packs remain future work. Incremental backup is not planned.
+The current format is self-contained v9: one encoded archive with its codec settings and metadata, without a repository database. Zstd/LZ77 compression and XChaCha20-Poly1305 content encryption are independent per-backup choices; encrypted backups require named server keys. Hybrid small-file packs remain future work. Incremental backup is not planned.
 
 ## Reliability before broader use
 
 | Priority | Gap and consequence | Next deliverable |
 | --- | --- | --- |
 | 1 | Source files can change while being read; success does not establish a consistent snapshot. | Detect common file changes and fail visibly; document that metadata checks alone do not provide a multi-file snapshot. |
-| 1 | Failed or interrupted backups can leave unpublished content; failed restores can leave partial output. | Define ownership of temporary output, reconcile interrupted work, and safely clean only operation-owned contents. |
-| 1 | Repository SQLite metadata is required to locate and verify backups; payloads alone are not self-describing. | Choose redundant metadata or per-backup manifests, and prove recovery from a missing/corrupt index. |
+| 1 | Interrupted backups can leave ignored temporary files; failed restores can leave partial output. | Define ownership of temporary output, reconcile interrupted work, and safely clean only operation-owned contents. |
+| 1 | Listing scans per-file metadata instead of an index, so cost grows with repository size. | Measure representative large repositories before introducing any optional, rebuildable index. |
 | 2 | Integrity is checked during restore only. | Add a read-only repository verification operation that identifies damaged/missing files without a restore destination. |
 
 ## Usability after the core loop

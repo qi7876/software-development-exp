@@ -77,7 +77,7 @@ mod tests {
             version: 2,
             sql: "CREATE TABLE test (id INTEGER PRIMARY KEY);",
         };
-        let path = directory.path().join("repository.sqlite3");
+        let path = directory.path().join("other.sqlite3");
         let pool = open(&path, schema, true).await?;
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA user_version")

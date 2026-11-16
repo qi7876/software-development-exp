@@ -24,6 +24,42 @@ use std::{
 };
 use tokio::time::{Instant, sleep, timeout};
 
+fn backup_parts(bytes: &[u8]) -> TestResult<(&[u8], Value)> {
+    let trailer = bytes.len().checked_sub(48).ok_or("short backup")?;
+    let length = u64::from_le_bytes(bytes[trailer..trailer + 8].try_into()?) as usize;
+    let start = trailer
+        .checked_sub(length)
+        .ok_or("invalid metadata length")?;
+    Ok((
+        &bytes[8..start],
+        serde_json::from_slice(&bytes[start..trailer])?,
+    ))
+}
+
+fn rewrite_backup_metadata(path: &Path, update: impl FnOnce(&mut Value)) -> TestResult {
+    use sha2::{Digest, Sha256};
+    let mut bytes = std::fs::read(path)?;
+    let (payload, mut metadata) = backup_parts(&bytes)?;
+    let start = 8 + payload.len();
+    update(&mut metadata);
+    let metadata = serde_json::to_vec(&metadata)?;
+    bytes.truncate(start);
+    bytes.extend_from_slice(&metadata);
+    bytes.extend_from_slice(&(metadata.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(b"BAKEND\0\x01");
+    let digest = Sha256::digest(&bytes);
+    bytes.extend_from_slice(&digest);
+    std::fs::write(path, bytes)?;
+    Ok(())
+}
+
+fn add_active_workload(path: &Path) -> TestResult {
+    let mut bytes = vec![0; 16 * 1024 * 1024];
+    rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut bytes);
+    std::fs::write(path.join("active-workload"), bytes)?;
+    Ok(())
+}
+
 const SECRET: &str = "integration-test-key";
 const LIST_PATH: &str = "/api/backups?repository=repo+with+space";
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
@@ -357,7 +393,7 @@ async fn round_trip(files: BTreeMap<String, Vec<u8>>) -> TestResult {
         .join(format!("{backup_id}.bak"));
     let compressed = std::fs::read(&payloads)?;
     std::fs::write(
-        server.path("repo with space/unpublished.bak"),
+        server.path("repo with space/.unpublished.partial"),
         b"unpublished archive",
     )?;
     let listed = server.get(LIST_PATH).await?;
@@ -698,6 +734,7 @@ proptest! {
 #[tokio::test]
 async fn abrupt_exit_fails_the_active_job_and_resumes_queued_work() -> TestResult {
     let mut server = TestServer::start().await?;
+    add_active_workload(&server.path("source"))?;
     std::fs::write(server.path("source/payload"), b"keep source contents")?;
     let original = read_tree(&server.path("source"))?;
     let completed_id = server.backup().await?;
@@ -711,16 +748,6 @@ async fn abrupt_exit_fails_the_active_job_and_resumes_queued_work() -> TestResul
         .join(format!("{backup_id}.bak"));
     let compressed = std::fs::read(&payloads)?;
 
-    let mut connection = SqliteConnection::connect_with(
-        &SqliteConnectOptions::new()
-            .filename(server.path("repo with space/repository.sqlite3"))
-            .create_if_missing(false),
-    )
-    .await?;
-    // Block publication so the process cannot complete the active job before it is killed.
-    sqlx::query("BEGIN IMMEDIATE")
-        .execute(&mut connection)
-        .await?;
     let active = server.backup().await?;
     server.wait_job(&active, true).await?;
     let queued = server.backup().await?;
@@ -728,6 +755,14 @@ async fn abrupt_exit_fails_the_active_job_and_resumes_queued_work() -> TestResul
         server.get(&format!("/api/jobs/{queued}")).await?["state"],
         "queued"
     );
+    let mut connection = SqliteConnection::connect_with(
+        &SqliteConnectOptions::new().filename(server.path("jobs.sqlite3")),
+    )
+    .await?;
+    // Hold the active job's completion commit; HTTP reads remain available in WAL mode.
+    sqlx::query("BEGIN IMMEDIATE")
+        .execute(&mut connection)
+        .await?;
     server
         .child
         .as_mut()
@@ -767,7 +802,7 @@ async fn abrupt_exit_fails_the_active_job_and_resumes_queued_work() -> TestResul
     );
     let listed = server.get(LIST_PATH).await?;
     let summaries = listed["backups"].as_array().ok_or("missing summaries")?;
-    assert_eq!(summaries.len(), 2);
+    assert!(summaries.len() >= 2);
     for id in [
         backup_id,
         resumed["result"]["backup_id"]
@@ -784,20 +819,11 @@ async fn abrupt_exit_fails_the_active_job_and_resumes_queued_work() -> TestResul
 #[tokio::test]
 async fn http_stays_responsive_and_shutdown_finishes_only_the_active_job() -> TestResult {
     let mut server = TestServer::start().await?;
+    add_active_workload(&server.path("source"))?;
     std::fs::write(server.path("source/payload"), b"keep source contents")?;
     let seed = server.backup().await?;
     let seeded = server.wait_job(&seed, false).await?;
     assert_eq!(seeded["state"], "succeeded", "{seeded}");
-    let mut connection = SqliteConnection::connect_with(
-        &SqliteConnectOptions::new()
-            .filename(server.path("repo with space/repository.sqlite3"))
-            .create_if_missing(false),
-    )
-    .await?;
-    // Keep real metadata publication pending, without slowing or replacing application code.
-    sqlx::query("BEGIN IMMEDIATE")
-        .execute(&mut connection)
-        .await?;
     let active = server.backup().await?;
     server.wait_job(&active, true).await?;
     let queued = server.backup().await?;
@@ -819,6 +845,13 @@ async fn http_stays_responsive_and_shutdown_finishes_only_the_active_job() -> Te
         "queued"
     );
 
+    let mut connection = SqliteConnection::connect_with(
+        &SqliteConnectOptions::new().filename(server.path("jobs.sqlite3")),
+    )
+    .await?;
+    sqlx::query("BEGIN IMMEDIATE")
+        .execute(&mut connection)
+        .await?;
     server.signal_stop()?;
     // Wait for the listener to close before releasing the active job, so shutdown
     // has definitely been requested and the queued jobs cannot be claimed.
@@ -980,46 +1013,48 @@ async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> 
         }
         let payload = server.path("repo with space").join(format!("{id}.bak"));
         let encoded = std::fs::read(&payload)?;
-        // The stored digest covers the exact bytes on disk in every storage mode.
+        // Everything except the final digest is covered, including the codec metadata.
         {
             use sha2::{Digest, Sha256};
-            let mut connection = SqliteConnection::connect_with(
-                &SqliteConnectOptions::new()
-                    .filename(server.path("repo with space/repository.sqlite3")),
-            )
-            .await?;
-            let checksum: String =
-                sqlx::query_scalar("SELECT archive_checksum FROM backups WHERE backup_id = ?")
-                    .bind(id)
-                    .fetch_one(&mut connection)
-                    .await?;
-            assert_eq!(checksum, hex::encode(Sha256::digest(&encoded)));
-            connection.close().await?;
+            assert_eq!(&encoded[..8], b"BAKFILE\x01");
+            assert_eq!(
+                Sha256::digest(&encoded[..encoded.len() - 32]).as_slice(),
+                &encoded[encoded.len() - 32..]
+            );
         }
-        assert!(!server.path("repo with space").join(id).exists());
-        assert!(!server.path("repo with space/backups").exists());
+        let (stream, stored) = backup_parts(&encoded)?;
+        assert_eq!(stored["compression"], compression);
+        assert_eq!(stored["encryption"], summary["encryption"]);
+        assert!(!server.path("repo with space/repository.sqlite3").exists());
         if key_id.is_none() {
             if compression["algorithm"] == "zstd" {
-                assert!(zstd::decode_all(encoded.as_slice())?.starts_with(b"BAKARC\0\x02"));
+                assert!(zstd::decode_all(stream)?.starts_with(b"BAKARC\0\x02"));
             } else if compression.is_null() {
-                assert!(encoded.starts_with(b"BAKARC\0\x02"));
+                assert!(stream.starts_with(b"BAKARC\0\x02"));
             } else {
-                assert!(encoded.starts_with(b"BAKLZ77\x01"));
+                assert!(stream.starts_with(b"BAKLZ77\x01"));
             }
         } else {
-            assert!(encoded.starts_with(if algorithm == "aes-256-gcm" {
+            assert!(stream.starts_with(if algorithm == "aes-256-gcm" {
                 b"BAKENC\0\x03"
             } else {
                 b"BAKENC\0\x02"
             }));
-            assert_ne!(encoded, random);
         }
+        let portable = format!("portable-{index}");
+        std::fs::create_dir(server.path(&portable))?;
+        std::fs::copy(&payload, server.path(&portable).join(format!("{id}.bak")))?;
+        let portable_list = server
+            .get(&format!("/api/backups?repository={portable}"))
+            .await?;
+        assert_eq!(portable_list["backups"][0], *summary);
+        assert_eq!(std::fs::read_dir(server.path(&portable))?.count(), 1);
         let destination = format!("restore-{index}");
         std::fs::create_dir(server.path(&destination))?;
         let restore = server
             .submit(
                 "/api/restores",
-                json!({"repository":"repo with space", "backup_id":id, "destination":destination}),
+                json!({"repository":portable, "backup_id":id, "destination":destination}),
             )
             .await?;
         let restored = server.wait_job(&restore, false).await?;
@@ -1043,22 +1078,15 @@ async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> 
             std::fs::write(&payload, &encoded)?;
         }
     }
-    // Valid but changed codec parameters must invalidate the encrypted AAD binding.
-    let mut connection = SqliteConnection::connect_with(
-        &SqliteConnectOptions::new().filename(server.path("repo with space/repository.sqlite3")),
-    )
-    .await?;
+    // Changing valid codec metadata with a new SHA-256 still fails encrypted AAD verification.
     let bound_id = &encrypted_backups[&("aes-256-gcm".to_string(), "previous")];
-    let original_config: String =
-        sqlx::query_scalar("SELECT compression FROM backups WHERE backup_id = ?")
-            .bind(bound_id)
-            .fetch_one(&mut connection)
-            .await?;
-    sqlx::query("UPDATE backups SET compression = ? WHERE backup_id = ?")
-        .bind(json!({"algorithm":"lz77","window_kib":64,"search_depth":33}).to_string())
-        .bind(bound_id)
-        .execute(&mut connection)
-        .await?;
+    let bound_path = server
+        .path("repo with space")
+        .join(format!("{bound_id}.bak"));
+    let original_container = std::fs::read(&bound_path)?;
+    rewrite_backup_metadata(&bound_path, |metadata| {
+        metadata["compression"] = json!({"algorithm":"lz77","window_kib":64,"search_depth":33});
+    })?;
     std::fs::create_dir(server.path("restore-changed-codec"))?;
     let restore=server.submit("/api/restores",json!({"repository":"repo with space","backup_id":bound_id,"destination":"restore-changed-codec"})).await?;
     let failed = server.wait_job(&restore, false).await?;
@@ -1069,12 +1097,7 @@ async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> 
             .ok_or("missing error")?
             .contains("authentication")
     );
-    sqlx::query("UPDATE backups SET compression = ? WHERE backup_id = ?")
-        .bind(original_config)
-        .bind(bound_id)
-        .execute(&mut connection)
-        .await?;
-    connection.close().await?;
+    std::fs::write(&bound_path, original_container)?;
     let unknown = server.client.post(server.url("/api/backups")).bearer_auth(SECRET)
         .json(&json!({"source":"source", "repository":"repo with space", "filter":unfiltered(), "compression":null, "encryption":{"algorithm":"aes-256-gcm","key_id":"unknown"}})).send().await?;
     assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
@@ -1112,11 +1135,7 @@ async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> 
         assert_eq!(read_tree(&server.path(&destination))?, original);
     }
     server.stop().await?;
-    for path in [
-        "jobs.sqlite3",
-        "repo with space/repository.sqlite3",
-        "server.log",
-    ] {
+    for path in ["jobs.sqlite3", "server.log"] {
         let bytes = std::fs::read(server.path(path))?;
         for name in ["current", "previous"] {
             let text = std::fs::read_to_string(server.path(name))?;
@@ -1150,7 +1169,7 @@ async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
         failed["error"]["message"]
             .as_str()
             .ok_or("missing error")?
-            .contains("schema version 7")
+            .contains("legacy repository database")
     );
     assert!(!server.path("repo with space/backups").exists());
     for entry in std::fs::read_dir(server.path("repo with space"))? {

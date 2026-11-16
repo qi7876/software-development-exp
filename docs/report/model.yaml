@@ -17,13 +17,13 @@
       ],
       "details": [
         "浏览器可连接同一或另一台 bak API；地址和明文 API key 保存在浏览器 origin 的 localStorage。",
-        "工作目录作业库 schema v5，仓库 schema/format v8；保留命名密钥文件以恢复旧备份。",
+        "工作目录作业库 schema v5，自包含备份格式 v9；仓库不再使用数据库，加密密钥仍由外部配置提供。",
         "自实现顺序归档后选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 或 AES-256-GCM 加密，形成九种模式；元数据和文件名仍为明文。",
         "配置式定时备份使用 IANA 时区与分钟级 Cron，复用 FIFO；停机不补跑，同一计划有未完成任务时跳过。"
       ],
       "constraints": [
         "一个工作目录只运行一个服务实例，SQLite 使用本地文件系统。",
-        "作业库、仓库库和载荷文件不共享事务；旧数据库拒绝且不迁移。",
+        "备份文件发布与作业终态提交不共享事务；旧仓库保留并用旧版读取，新格式使用新仓库。",
         "静态 UI 公开，API 需 Bearer；服务无内置 TLS，加密不保护元数据。"
       ],
       "trace": {
@@ -130,17 +130,17 @@
         },
         {
           "id": "Repo",
-          "name": "repository.sqlite3",
+          "name": "Repository directory",
           "package": "Local repository",
-          "type": "database",
-          "stereotype": "metadata v8"
+          "type": "folder",
+          "stereotype": "self-contained backups v9"
         },
         {
           "id": "Files",
           "name": "<backup_id>.bak",
           "package": "Local repository",
           "type": "folder",
-          "stereotype": "one encoded archive"
+          "stereotype": "payload + metadata + digest"
         },
         {
           "id": "Dest",
@@ -361,7 +361,7 @@
           "name": "jobs::storage",
           "type": "component",
           "package": "Job subsystem",
-          "stereotype": "private SQLite setup"
+          "stereotype": "task SQLite setup"
         },
         {
           "id": "UI",
@@ -473,7 +473,7 @@
         {
           "source": "Backup",
           "target": "Repo",
-          "label": "Commit metadata",
+          "label": "Publish complete archive",
           "direction": "auto",
           "style": "solid"
         },
@@ -502,13 +502,6 @@
           "source": "Jobs",
           "target": "Storage",
           "label": "Initialize job DB",
-          "direction": "auto",
-          "style": "solid"
-        },
-        {
-          "source": "Repo",
-          "target": "Storage",
-          "label": "Open repository DB",
           "direction": "auto",
           "style": "solid"
         },
@@ -1074,8 +1067,8 @@
           "stereotype": "module",
           "attributes": [],
           "operations": [
-            "+ Manifest::read(path, id): Manifest",
-            "+ Manifest::write(path): Result",
+            "+ ArchiveFile::read(path, id): ArchiveFile",
+            "+ PendingArchive::publish(manifest): Result",
             "+ list(path): Vec<RepoBackupInfo>"
           ]
         },
@@ -1438,7 +1431,7 @@
       ],
       "constraints": [
         "备份源保持不变；无源一致性检测和失败自动清理。",
-        "任务 JSON 不含加密密钥；两库和外部文件不共享事务。"
+        "任务 JSON 不含加密密钥；备份文件与作业库不共享事务。"
       ],
       "trace": {
         "use_cases": [
@@ -1491,7 +1484,7 @@
         {
           "id": "Repo",
           "name": "Repository",
-          "type": "database"
+          "type": "entity"
         }
       ],
       "steps": [
@@ -1547,7 +1540,7 @@
           "type": "message",
           "source": "Backup",
           "target": "Repo",
-          "text": "Synchronize archive and repository root"
+          "text": "Finish payload / metadata / digest and sync temporary file"
         },
         {
           "type": "alt",
@@ -1557,7 +1550,7 @@
           "type": "message",
           "source": "Backup",
           "target": "Repo",
-          "text": "Commit v8 header / entries / metadata / counts"
+          "text": "Publish v9 file with metadata and digest"
         },
         {
           "type": "return",
@@ -1674,7 +1667,7 @@
         {
           "id": "Repo",
           "name": "Repository",
-          "type": "database"
+          "type": "entity"
         },
         {
           "id": "Restore",
@@ -1698,7 +1691,7 @@
           "type": "message",
           "source": "API",
           "target": "Jobs",
-          "text": "List committed backup headers"
+          "text": "Scan published backup files"
         },
         {
           "type": "message",
@@ -1746,7 +1739,7 @@
           "type": "message",
           "source": "Restore",
           "target": "Repo",
-          "text": "Read v8 metadata / match key and fingerprint"
+          "text": "Read v9 footer / match external key and fingerprint"
         },
         {
           "type": "message",

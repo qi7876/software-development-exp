@@ -1,98 +1,109 @@
-# Sequential archive format v2
+# Self-contained backup format v9
 
-Repository format/schema v8 stores one `<backup_id>.bak` per
-backup. This project-defined format replaces the mirrored source tree; it does
-not implement tar compatibility or invoke an external packer. SQLite remains the
-publication authority and catalog. Restoration requires both the catalog and
-archive; root metadata and backup settings are stored only in SQLite.
+A published backup is one `<backup_id>.bak` file. It contains the codec settings,
+key identifier/fingerprint, root and entry metadata, file data, creation time,
+source path, statistics, and a SHA-256 digest. No repository database or sidecar is
+required. Copy the file, keeping its name, into an empty repository to list and
+restore it. Encrypted backups still require their external configured key.
 
-## Pipeline and tradeoffs
+## Container layout
 
-Backup collects filtered entries and Unix metadata before reading file data,
-preserving the existing traversal and directory pruning behavior. It then writes:
+All lengths are unsigned little-endian. There is no padding.
+
+| Field | Representation |
+| --- | --- |
+| Container magic/version | 8 bytes `b"BAKFILE\x01"` |
+| Encoded payload | Sequential archive v2, optionally compressed and encrypted |
+| Metadata | Compact UTF-8 JSON `Manifest`, `format_version: 9` |
+| Metadata length | u64, 1 through 67,108,864 bytes (64 MiB) |
+| Footer marker | 8 bytes `b"BAKEND\0\x01"` |
+| Digest | 32 raw SHA-256 bytes covering every preceding byte |
+
+The last 48 bytes locate the metadata and bound the encoded payload without
+scanning or decoding it. Validate lengths before allocation. The manifest holds
+`backup_id`, `created_at`, `source`, `compression`, `encryption`,
+`checksum_algorithm`, `root_metadata`, `backup_stats`, and ordered `entries`.
+`archive_checksum` is derived from the final digest when reading; it is not
+serialized inside its own checksum input. The filename must match the stored ID.
+Unknown container versions, missing markers, impossible lengths, malformed
+metadata, invalid codec settings, and invalid metadata invariants fail explicitly.
+
+Compression is null, `{"algorithm":"zstd","level":3}`, or
+`{"algorithm":"lz77","window_kib":64,"search_depth":32}`. Encryption is null or
+`{"algorithm":"aes-256-gcm","key_id":"current","fingerprint":"..."}` (also
+supports `xchacha20-poly1305`). The encrypted stream contains its own nonce and,
+for AES, salt. Secret key bytes are never embedded. See [content encryption](content-encryption.md).
+
+## Streaming pipeline
 
 ```text
 entry headers + file data + end marker
     → optional Zstd or project LZ77
     → optional XChaCha20-Poly1305 or AES-256-GCM STREAM
-    → SHA-256 during writing
-    → <backup_id>.bak
+    → container payload
+container magic + payload + metadata + length + footer marker
+    → SHA-256 accumulated during writing
+    → final digest
 ```
 
-Packing reads each file once and uses a 128 KiB copy buffer plus bounded header,
-I/O, codec and encryption buffers. Collected entry metadata still occupies O(n)
-memory. Directories and symbolic links are header-only records: packing never
-opens link targets or creates their mirrored paths in the repository. Compression
-history spans entries; only the final archive needs file synchronization.
+Metadata is placed after the payload because file sizes and the final entry list
+are known during packing. This avoids reserving a variable-size header or
+rereading the file to calculate its digest. File contents use a 128 KiB copy buffer
+and bounded codec/AEAD buffers. Collected entry metadata still occupies O(n)
+memory; the metadata section is limited to 64 MiB.
 
-There is one SHA-256 per backup, covering the exact final `.bak` bytes after
-compression and encryption, including encoding headers and final authentication
-tags. The digest is stored as lowercase hexadecimal in SQLite's backup header.
-Backup hashes accepted output bytes while writing, and restore hashes raw input
-bytes while reading, so neither operation needs an additional pass over the
-archive. A checksum mismatch identifies a damaged archive rather than an individual file. Per-file hashing and checksum trailers are removed. Compression can
-reduce the number of bytes hashed; no runtime speedup is assumed without a
-representative measurement.
+The decoded payload retains sequential archive v2: `b"BAKARC\0\x02"`, followed by
+u32 entry-header length (1 through 1,048,576), a JSON `ManifestEntry`, and exactly
+`original_size` data bytes for files. Directories and symlinks are header-only.
+The explicit end marker is u32 zero followed by decoded EOF. Entry kind is
+`File { original_size }`, `Directory`, or `Symlink { target }`. There are no
+per-entry digests and no tar compatibility or random-access extraction index.
 
-Whole-stream encoding makes full restoration sequential. There is no random
-access index or selective extraction API. A damaged stream can prevent restoration
-of later records. Source trees must remain unchanged: the packer detects a file
-shrinking or growing during its copy, but does not provide snapshot consistency
-or detect every concurrent edit.
+## Publication and recovery
 
-## Wire layout before encoding
+Write exclusively to a unique hidden `.partial` file in the destination
+repository. Finish archive framing, compression, and encryption; append the
+metadata, footer, and digest; then synchronize the file. Publish it by creating a
+hard link at `<backup_id>.bak`, which cannot overwrite an existing name.
+Synchronize the repository directory, remove the temporary link, and synchronize
+it again. The repository filesystem must support hard links and directory sync.
 
-All integer fields below are unsigned little-endian. There is no block padding.
+Ordinary failures remove only the writer's own temporary file. A process crash
+can leave `.partial` files, which listing ignores and does not automatically
+delete. Final `.bak` names refer to complete inodes. A directory-sync failure
+after linking can leave a visible final backup despite a failed job. File
+publication and the subsequent job-history commit are separate durability
+boundaries; a complete backup may exist even if task completion was interrupted.
 
-| Field | Representation |
-| --- | --- |
-| Magic/version | 8 bytes `b"BAKARC\0\x02"` |
-| Entry header length | u32, 1 through 1,048,576 |
-| Entry header | Exactly that many bytes of UTF-8 JSON |
-| File data | Exactly `original_size` bytes; files only |
-| Further entries | Repeat header length, header, optional file data |
-| End marker | u32 zero, followed by decoded EOF |
+## Listing and restoration
 
-A header has `relative_path`, `metadata` and `kind`. Paths use the existing serde
-`PathBuf` representation; non-UTF-8 paths are not supported. Metadata contains
-`uid`, `gid`, `mode`, `atime` and `mtime` as described in the
-[repository schema](repository-schema.md). Kind is one of:
+Listing scans `.bak` files and reads their metadata/footer, without reading file
+payloads or requiring encryption keys. Results are newest first, with backup IDs
+ascending for equal timestamps. This replaces an indexed SQL query: listing cost
+now grows with the number and metadata size of backups. Invalid final `.bak`
+files are reported as errors; unrelated files and `.partial` output are ignored.
 
-```json
-{"type":"File","original_size":123}
-{"type":"Directory"}
-{"type":"Symlink","target":"../original-target"}
-```
+Restore opens the container, validates all relative paths, path uniqueness,
+parent-before-child directory relationships, timestamps, modes, statistics, and
+codec settings before creating output entries. It resolves the configured key,
+selects the recorded decoder, and compares each decoded entry header against the
+saved manifest. It reads only the bounded encoded payload into the codec, requires
+the archive end marker and codec/AEAD completion, then hashes the metadata and
+footer bytes and verifies the final digest. Saved directory attributes are applied
+after children; root attributes are applied last. Files and directories are
+synchronized before success. Failed restores can leave partial output.
 
-There are no per-entry checksums. Header lengths are checked before allocation or
-writing, and unknown header fields/types are errors.
+The outer metadata is plaintext, as the old SQLite catalog was: file names,
+source paths, Unix metadata, sizes, statistics, and link targets remain visible.
+SHA-256 detects accidental corruption, not deliberate replacement of both content
+and digest. Encryption authenticates encoded entry headers/file data and binds
+the backup ID, canonical archive filename, compression settings, and key
+fingerprint through the existing AAD. The outer metadata is not fully AEAD
+protected; repositories remain trusted. Keep source trees unchanged during backup.
 
-## Publication and restore
+## Compatibility
 
-The packer creates `<backup_id>.bak` exclusively at the repository root. No
-archive subdirectory is created.
-It finishes archive framing, compression and encryption in that order, synchronizes
-the archive and repository root, and only then commits the SQLite header,
-archive digest, ordered entries and statistics in one transaction. Duplicate IDs do not overwrite
-existing archives. Failed publication can leave an unpublished archive; listing
-continues to read only committed SQLite records. Automatic cleanup is not provided.
-
-Restore validates all catalog paths before creating entries and validates each
-archive header against the corresponding catalog path, metadata and kind before
-creating that entry. It copies exactly the declared file size. It requires
-the explicit end marker, rejects extra decoded bytes or records, and finishes the
-outer codec/authentication reader, then compares the final raw-input digest with
-SQLite's `archive_checksum` before success. Saved directory attributes are
-applied after children and root attributes last. Partial output can remain after
-a failed restore. Repositories remain trusted; this is not a sandbox for extracting
-adversarially constructed archives or modified catalogs.
-
-The encryption AAD uses `<backup_id>.bak` as the path, together with the existing
-backup ID, compression configuration and key fingerprint bindings. An encrypted
-archive covers its headers as well as file data; the separate SQLite catalog
-still exposes paths, metadata, file sizes, the archive checksum and link targets. See
-[content encryption](content-encryption.md).
-
-Repository schemas through v7, including the previous `backups/` layout, are rejected without migration or deletion. Use
-a new repository for v8 and the prior binary to operate old repositories. The
-HTTP request contract and job schema v5 are unchanged.
+Job schema v5 and the HTTP contract remain unchanged. Repository formats through
+v8 require their original database and prior binary. This version rejects legacy
+repository databases without modifying them; use a new directory for v9. There
+is no automatic conversion, deletion, or legacy read fallback.
