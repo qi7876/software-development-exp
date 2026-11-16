@@ -4,7 +4,7 @@
 
 Individual users access an optional browser console deployed separately and served from `web_ui.path`; automation scripts use clients such as curl. Both access the same HTTP API, authenticated by a Bearer secret key. Users submit backup and restore requests, receive a durable job ID immediately, and query outcomes while background execution proceeds. The console supports repository listing, restore selection, paginated task history, and switching between local or remote API services. Browser-origin storage persists connection addresses, names, and plain-text keys; the selected service is verified when reopening the page. Each service keeps its own jobs and repositories. Paths always belong to the selected server device.
 
-The service reads local configuration and persists its job queue and history in a SQLite database in the working directory. Full backups store the information needed for identification, verification, and restoration in a SQLite database at each local repository root. Contents, optionally compressed with Zstd or project LZ77 and/or encrypted with XChaCha20-Poly1305 or AES-256-GCM, are packed into one sequential archive per backup. Users can list published backup summaries from repository metadata. Backup and restore execution currently support Unix platforms.
+The service reads local configuration and persists its job queue and history in a SQLite database in the working directory. Full backups store the information needed for identification, verification, and restoration inside each self-contained `.bak` file; repositories have no database. Contents, optionally compressed with Zstd or project LZ77 and/or encrypted with XChaCha20-Poly1305 or AES-256-GCM, are packed into one sequential archive per backup. Users can list published backup summaries from repository metadata. Backup and restore execution currently support Unix platforms.
 
 ```text
 Users / automation scripts <-- HTTP --> bak <---> local configuration
@@ -16,4 +16,4 @@ Users / automation scripts <-- HTTP --> bak <---> local configuration
                                                  implemented on Unix)
 ```
 
-SQLite transactions preserve job admission and metadata records; they do not make external filesystem changes transactional. Deployment currently assumes one service instance per working directory and local filesystems for its SQLite databases.
+SQLite transactions preserve job admission and outcomes; backup-file publication has its own durability boundary. Deployment currently assumes one service instance per working directory and local filesystems for its task database.

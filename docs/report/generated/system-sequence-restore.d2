@@ -12,11 +12,11 @@ diagram: "Published Listing and Verified Restore" {
   Client: "HTTP client" {shape: person}
   API: "<<boundary>>\nAPI" {shape: rectangle}
   Jobs: "<<control>>\nJobManager / worker" {shape: rectangle}
-  Repo: "Repository" {shape: cylinder}
+  Repo: "<<entity>>\nRepository" {shape: rectangle}
   Restore: "<<control>>\nrestore" {shape: rectangle}
   Dest: "<<entity>>\nDestination" {shape: rectangle}
   Client -> API: "GET /api/backups?repository=PATH"
-  API -> Jobs: "List committed backup headers"
+  API -> Jobs: "Scan published backup files"
   Jobs -> Repo: "Read summaries ordered by time and ID"
   API -> Client: "200 + backups array" {style.stroke-dash: 5}
   Client -> API: "POST /api/restores + Bearer key"
@@ -24,7 +24,7 @@ diagram: "Published Listing and Verified Restore" {
   API -> Client: "202 + Location" {style.stroke-dash: 5}
   Jobs -> Restore: "Claim job / execute through\nspawn_blocking"
   Restore -> Dest: "Validate existing empty, non-overlapping\ndirectory"
-  Restore -> Repo: "Read v8 metadata / match key and\nfingerprint"
+  Restore -> Repo: "Read v9 footer / match external key and\nfingerprint"
   Restore -> Restore: "Validate all entry paths before writes"
   fragment_11: alt {
     branch_11: "[All payloads and integrity checks\nsucceed]" {

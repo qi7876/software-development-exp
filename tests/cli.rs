@@ -199,6 +199,9 @@ async fn stop_waits_for_active_backup_and_retains_queued_work() -> TestResult {
     std::fs::create_dir(directory.join("source"))?;
     std::fs::create_dir(directory.join("repo"))?;
     std::fs::write(directory.join("source/file"), "backup contents")?;
+    let mut workload = vec![0; 16 * 1024 * 1024];
+    rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut workload);
+    std::fs::write(directory.join("source/active-workload"), workload)?;
     let start = fixture.start(&directory)?;
     success(&start);
     let text = String::from_utf8_lossy(&start.stdout);
@@ -250,16 +253,16 @@ async fn stop_waits_for_active_backup_and_retains_queued_work() -> TestResult {
         }
     };
     wait_state(backup().await?, "succeeded").await?;
+    let active = backup().await?;
+    wait_state(active.clone(), "running").await?;
+    let queued = backup().await?;
     let mut repository = SqliteConnection::connect_with(
-        &SqliteConnectOptions::new().filename(directory.join("repo/repository.sqlite3")),
+        &SqliteConnectOptions::new().filename(directory.join("jobs.sqlite3")),
     )
     .await?;
     sqlx::query("BEGIN IMMEDIATE")
         .execute(&mut repository)
         .await?;
-    let active = backup().await?;
-    wait_state(active.clone(), "running").await?;
-    let queued = backup().await?;
     let mut stop = Command::new(env!("CARGO_BIN_EXE_bak"))
         .args(["server", "stop"])
         .env("XDG_STATE_HOME", fixture.0.join("state"))

@@ -71,8 +71,8 @@ diagram: "Facade, Modules and Data Access" {
     }
     Repo: "<<module>>\nrepository" {
       shape: class
-      "+ Manifest::read(path, id)": "Manifest"
-      "+ Manifest::write(path)": "Result"
+      "+ ArchiveFile::read(path, id)": "ArchiveFile"
+      "+ PendingArchive::publish(manifest)": "Result"
       "+ list(path)": "Vec<RepoBackupInfo>"
     }
     Lz77: "<<module>>\nlz77" {

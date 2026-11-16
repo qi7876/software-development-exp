@@ -27,21 +27,6 @@ pub(crate) enum EncryptionAlgorithm {
     #[serde(rename = "aes-256-gcm")]
     Aes256Gcm,
 }
-impl EncryptionAlgorithm {
-    pub(in crate::jobs) fn format(self) -> &'static str {
-        match self {
-            Self::XChaCha20Poly1305 => "xchacha20poly1305-stream-be32-v2",
-            Self::Aes256Gcm => "aes256gcm-stream-be32-v3",
-        }
-    }
-    pub(in crate::jobs) fn from_format(value: &str) -> Option<Self> {
-        match value {
-            "xchacha20poly1305-stream-be32-v2" => Some(Self::XChaCha20Poly1305),
-            "aes256gcm-stream-be32-v3" => Some(Self::Aes256Gcm),
-            _ => None,
-        }
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct KeyInfo {

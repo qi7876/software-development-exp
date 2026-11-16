@@ -5,9 +5,11 @@ pub(crate) use filter::Filter;
 
 use super::{
     JobError, archive,
-    content::{BackupOptions, Checksum, Content, Keyring},
-    filesystem::{get_absolute_directory_path, paths_overlap, sync_directory},
-    repository::{BackupStats, Manifest, ManifestEntry, ManifestEntryKind, UnixMetadata},
+    content::{BackupOptions, Content, Keyring},
+    filesystem::{get_absolute_directory_path, paths_overlap},
+    repository::{
+        BackupStats, Manifest, ManifestEntry, ManifestEntryKind, PendingArchive, UnixMetadata,
+    },
 };
 use chrono::{SecondsFormat, Utc};
 use http::StatusCode;
@@ -145,30 +147,21 @@ fn backup_all_files(
     absolute_source_path: &Path,
     archive_path: &Path,
     content: &Content<'_>,
-) -> Result<(Vec<ManifestEntry>, String), JobError> {
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(archive_path)
-        .map_err(|error| {
-            JobError::new(
-                if error.kind() == io::ErrorKind::AlreadyExists {
-                    StatusCode::CONFLICT
-                } else {
-                    StatusCode::INTERNAL_SERVER_ERROR
-                },
-                format!(
-                    "failed to create archive {}: {error}",
-                    archive_path.display()
-                ),
-            )
-        })?;
-    let pack = || -> io::Result<(Vec<ManifestEntry>, String)> {
-        let mut output = Checksum::new(file);
+) -> Result<(Vec<ManifestEntry>, PendingArchive), JobError> {
+    let repository = archive_path
+        .parent()
+        .ok_or_else(|| JobError::internal("archive has no parent"))?;
+    let backup_id = archive_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| JobError::internal("invalid archive filename"))?;
+    let mut pending = PendingArchive::create(repository, backup_id)?;
+    let pack = || -> io::Result<Vec<ManifestEntry>> {
+        let output = pending.output()?;
         let name = archive_path
             .file_name()
             .ok_or_else(|| io::Error::other("archive has no filename"))?;
-        let encoder = content.writer(&mut output, Path::new(name))?;
+        let encoder = content.writer(output, Path::new(name))?;
         let mut archive = archive::Writer::new(encoder)?;
         let mut entries = Vec::with_capacity(backup_entries.len());
         for backup_entry in backup_entries {
@@ -230,11 +223,9 @@ fn backup_all_files(
             entries.push(entry);
         }
         archive.finish()?.finish()?;
-        let (file, checksum) = output.finish();
-        file.sync_all()?;
-        Ok((entries, checksum))
+        Ok(entries)
     };
-    pack().map_err(|error| {
+    pack().map(|entries| (entries, pending)).map_err(|error| {
         JobError::internal(format!(
             "failed to write archive {}: {error}",
             archive_path.display()
@@ -269,36 +260,32 @@ pub(super) fn run_with_options(
     let (backup_stats, backup_entries) = path_traversal(&absolute_source_path, &compiled_filter)?;
 
     #[cfg(not(unix))]
-    sync_directory(&absolute_repository_path)?;
+    super::filesystem::sync_directory(&absolute_repository_path)?;
 
     let archive_path = archive::path(&absolute_repository_path, backup_id);
 
     let created_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-    let (manifest_entries, archive_checksum) = backup_all_files(
+    let (manifest_entries, pending) = backup_all_files(
         backup_entries,
         &absolute_source_path,
         &archive_path,
         &content,
     )?;
 
-    sync_directory(&absolute_repository_path)?;
-
     let manifest = Manifest {
-        format_version: 8,
+        format_version: 9,
         backup_id: backup_id.to_owned(),
         created_at,
         source: absolute_source_path,
         compression: options.compression.clone(),
         encryption: options.encryption.clone(),
         checksum_algorithm: "sha256".to_string(),
-        archive_checksum,
+        archive_checksum: String::new(),
         entries: manifest_entries,
         root_metadata,
         backup_stats,
     };
-    let handle = tokio::runtime::Handle::try_current()
-        .map_err(|error| JobError::internal(format!("cannot access Tokio runtime: {error}")))?;
-    handle.block_on(manifest.write(&absolute_repository_path))?;
+    pending.publish(&manifest)?;
 
     Ok(())
 }
@@ -322,13 +309,16 @@ pub(super) fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::{super::repository::REPO_SCHEMA, super::storage, *};
+    use super::*;
     use crate::test_support::{TestDirectory, unfiltered};
     use sha2::{Digest, Sha256};
     use std::error::Error;
 
     fn verify_archive(path: &Path, entries: &[ManifestEntry]) -> Result<(), Box<dyn Error>> {
-        let decoder = zstd::stream::read::Decoder::new(std::fs::File::open(path)?)?;
+        let mut backup = super::super::repository::ArchiveFile::open(path)?;
+        use std::io::{Read, Seek, SeekFrom};
+        backup.file.seek(SeekFrom::Start(8))?;
+        let decoder = zstd::stream::read::Decoder::new(backup.file.take(backup.payload_len))?;
         let mut archive = archive::Reader::new(decoder)?;
         for entry in entries {
             archive.expect_entry(entry)?;
@@ -539,10 +529,10 @@ mod tests {
         })
         .await??;
 
-        let manifest = Manifest::read(&repository, "backup-001").await?;
+        let manifest = Manifest::read(&repository, "backup-001")?;
         assert_eq!(manifest.backup_id, "backup-001");
         assert_eq!(manifest.source, std::fs::canonicalize(&source)?);
-        assert_eq!(manifest.format_version, 8);
+        assert_eq!(manifest.format_version, 9);
         assert!(matches!(
             manifest.compression,
             Some(super::super::content::CompressionOptions::Zstd(_))
@@ -594,13 +584,12 @@ mod tests {
         }
         assert!(!backup_root.join("backups").exists());
         assert!(archive::path(&repository, "backup-001").is_file());
+        let encoded = std::fs::read(archive::path(&repository, "backup-001"))?;
         assert_eq!(
             manifest.archive_checksum,
-            hex::encode(Sha256::digest(std::fs::read(archive::path(
-                &repository,
-                "backup-001"
-            ))?))
+            hex::encode(Sha256::digest(&encoded[..encoded.len() - 32]))
         );
+        assert!(!repository.join("repository.sqlite3").exists());
         verify_archive(&archive::path(&repository, "backup-001"), &manifest.entries)?;
         assert!(
             std::fs::read_dir(source.join("empty"))?
@@ -655,7 +644,7 @@ mod tests {
             )
         })
         .await??;
-        let manifest = Manifest::read(&repository, "links").await?;
+        let manifest = Manifest::read(&repository, "links")?;
         assert_eq!(manifest.entries.len(), 7);
         assert_eq!(manifest.backup_stats.entries_created, 7);
         assert_eq!(manifest.backup_stats.skipped_unsupported, 1);
@@ -727,7 +716,7 @@ mod tests {
             run(&source_for_run, &repository_for_run, &filter, "filtered")
         })
         .await??;
-        let manifest = Manifest::read(&repository, "filtered").await?;
+        let manifest = Manifest::read(&repository, "filtered")?;
         let paths: std::collections::BTreeSet<_> = manifest
             .entries
             .iter()
@@ -790,7 +779,7 @@ mod tests {
             )
         })
         .await??;
-        let manifest = Manifest::read(&repository, "empty").await?;
+        let manifest = Manifest::read(&repository, "empty")?;
         assert!(manifest.entries.is_empty());
         assert_eq!(manifest.backup_stats.entries_created, 0);
         assert_eq!(manifest.backup_stats.skipped_unsupported, 0);
@@ -820,8 +809,7 @@ mod tests {
             )
         })
         .await??;
-        let expected_manifest =
-            serde_json::to_value(Manifest::read(&repository, "backup-001").await?)?;
+        let expected_manifest = serde_json::to_value(Manifest::read(&repository, "backup-001")?)?;
         let backup_file = repository.join("backup-001.bak");
         let expected_compressed = std::fs::read(&backup_file)?;
         std::fs::write(&source_file, b"changed")?;
@@ -840,103 +828,46 @@ mod tests {
         let error = retry.err().ok_or("accepted duplicate backup ID")?;
         assert_eq!(error.code, StatusCode::CONFLICT);
         assert_eq!(
-            serde_json::to_value(Manifest::read(&repository, "backup-001").await?)?,
+            serde_json::to_value(Manifest::read(&repository, "backup-001")?)?,
             expected_manifest
         );
         assert_eq!(std::fs::read(&backup_file)?, expected_compressed);
         verify_archive(
             &backup_file,
-            &Manifest::read(&repository, "backup-001").await?.entries,
+            &Manifest::read(&repository, "backup-001")?.entries,
         )?;
         assert_eq!(std::fs::read(&source_file)?, b"changed");
         Ok(())
     }
 
     #[cfg(unix)]
+    #[cfg(unix)]
     #[tokio::test]
-    async fn full_backup_run_does_not_publish_failed_metadata() -> Result<(), Box<dyn Error>> {
+    async fn full_backup_run_does_not_publish_failed_archive() -> Result<(), Box<dyn Error>> {
+        use std::os::unix::{ffi::OsStringExt, fs::symlink};
         let directory = TestDirectory::new()?;
         let source = directory.path().join("source");
         let repository = directory.path().join("repository");
         std::fs::create_dir(&source)?;
         std::fs::create_dir(&repository)?;
-        let source_file = source.join("hello.txt");
-        std::fs::write(&source_file, b"original")?;
-
-        let source_for_run = source.clone();
-        let repository_for_run = repository.clone();
-        tokio::task::spawn_blocking(move || {
-            run(
-                &source_for_run,
-                &repository_for_run,
-                &unfiltered()?,
-                "backup-001",
-            )
-        })
-        .await??;
-        let expected_manifest =
-            serde_json::to_value(Manifest::read(&repository, "backup-001").await?)?;
-        let existing_backup_file = repository.join("backup-001.bak");
-        let expected_compressed = std::fs::read(&existing_backup_file)?;
-
-        let database_path = repository.join("repository.sqlite3");
-        let pool = storage::open(&database_path, REPO_SCHEMA, false).await?;
-        // Fail after inserting the header, exercising rollback and propagation
-        // through run with a real SQLite transaction.
-        sqlx::query(
-            "CREATE TRIGGER reject_backup_entry BEFORE INSERT ON entries
-             WHEN NEW.backup_id = 'backup-002'
-             BEGIN SELECT RAISE(ABORT, 'injected metadata publication failure'); END",
-        )
-        .execute(&pool)
-        .await?;
-        pool.close().await;
-        std::fs::write(&source_file, b"changed")?;
-
-        let source_for_run = source.clone();
-        let repository_for_run = repository.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            run(
-                &source_for_run,
-                &repository_for_run,
-                &unfiltered()?,
-                "backup-002",
-            )
-        })
-        .await?;
-        let error = result.err().ok_or("accepted failed metadata publication")?;
-        assert_eq!(error.code, StatusCode::INTERNAL_SERVER_ERROR);
-        assert!(
-            error
-                .message
-                .contains("injected metadata publication failure")
-        );
-
-        // The contents were written before publication was attempted. Their
-        // presence alone must not make the backup visible in repository metadata.
-        assert!(repository.join("backup-002.bak").is_file());
-        let missing = Manifest::read(&repository, "backup-002")
-            .await
+        std::fs::write(source.join("hello.txt"), b"original")?;
+        run(&source, &repository, &unfiltered()?, "backup-001")?;
+        let original = std::fs::read(repository.join("backup-001.bak"))?;
+        symlink(
+            std::ffi::OsString::from_vec(vec![0xff]),
+            source.join("invalid-link"),
+        )?;
+        let error = run(&source, &repository, &unfiltered()?, "backup-002")
             .err()
-            .ok_or("published failed backup")?;
-        assert_eq!(missing.code, StatusCode::NOT_FOUND);
-        let pool = storage::open(&database_path, REPO_SCHEMA, false).await?;
-        for query in [
-            "SELECT COUNT(*) FROM backups",
-            "SELECT COUNT(*) FROM entries",
-        ] {
-            assert_eq!(
-                sqlx::query_scalar::<_, i64>(query).fetch_one(&pool).await?,
-                1
-            );
-        }
-        pool.close().await;
+            .ok_or("accepted invalid path encoding")?;
+        assert_eq!(error.code, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(!repository.join("backup-002.bak").exists());
+        assert_eq!(std::fs::read(repository.join("backup-001.bak"))?, original);
         assert_eq!(
-            serde_json::to_value(Manifest::read(&repository, "backup-001").await?)?,
-            expected_manifest
+            std::fs::read_dir(&repository)?.count(),
+            1,
+            "partial output must be cleaned after failure"
         );
-        assert_eq!(std::fs::read(&existing_backup_file)?, expected_compressed);
-        assert_eq!(std::fs::read(&source_file)?, b"changed");
         Ok(())
     }
 }

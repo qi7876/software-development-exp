@@ -1,12 +1,20 @@
 use super::{
-    JobError,
-    content::{CompressionOptions, Encryption, EncryptionAlgorithm},
-    filesystem::get_absolute_directory_path,
-    storage,
+    JobError, archive,
+    content::{Checksum, CompressionOptions, Encryption},
+    filesystem::{get_absolute_directory_path, sync_directory},
 };
 use http::StatusCode;
-use sqlx::Row;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    fs::File,
+    io::{self, Read, Seek, SeekFrom, Write},
+    path::{Component, Path, PathBuf},
+};
+
+const MAGIC: &[u8; 8] = b"BAKFILE\x01";
+const FOOTER: &[u8; 8] = b"BAKEND\0\x01";
+const TRAILER_SIZE: u64 = 48;
+const MAX_METADATA_SIZE: u64 = 64 * 1024 * 1024;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(super) struct BackupStats {
@@ -23,62 +31,7 @@ pub(crate) struct RepoBackupInfo {
     pub(super) encryption: Option<Encryption>,
 }
 
-pub(super) const REPO_SCHEMA: storage::Schema = storage::Schema {
-    version: 8,
-    sql: "
-CREATE TABLE backups (
-    backup_id TEXT PRIMARY KEY NOT NULL,
-    format_version INTEGER NOT NULL CHECK (format_version = 8),
-    created_at TEXT NOT NULL,
-    source TEXT NOT NULL,
-    compression TEXT NOT NULL CHECK (json_valid(compression)),
-    encryption TEXT NOT NULL CHECK (encryption IN ('none', 'xchacha20poly1305-stream-be32-v2', 'aes256gcm-stream-be32-v3')),
-    encryption_key_id TEXT,
-    encryption_key_fingerprint TEXT,
-
-    checksum_algorithm TEXT NOT NULL CHECK (checksum_algorithm = 'sha256'),
-    archive_checksum TEXT NOT NULL CHECK (length(archive_checksum) = 64 AND archive_checksum NOT GLOB '*[^0-9a-f]*'),
-    root_uid INTEGER NOT NULL CHECK (root_uid BETWEEN 0 AND 4294967295),
-    root_gid INTEGER NOT NULL CHECK (root_gid BETWEEN 0 AND 4294967295),
-    root_mode INTEGER NOT NULL CHECK (root_mode BETWEEN 0 AND 4095),
-    root_atime_seconds INTEGER NOT NULL,
-    root_atime_nanoseconds INTEGER NOT NULL CHECK (root_atime_nanoseconds BETWEEN 0 AND 999999999),
-    root_mtime_seconds INTEGER NOT NULL,
-    root_mtime_nanoseconds INTEGER NOT NULL CHECK (root_mtime_nanoseconds BETWEEN 0 AND 999999999),
-    entries_created INTEGER NOT NULL CHECK (entries_created >= 0),
-    skipped_unsupported INTEGER NOT NULL CHECK (skipped_unsupported >= 0),
-    skipped_filtered INTEGER NOT NULL CHECK (skipped_filtered >= 0),
-    CHECK (
-        (encryption = 'none' AND encryption_key_id IS NULL AND encryption_key_fingerprint IS NULL) OR
-        (encryption IN ('xchacha20poly1305-stream-be32-v2', 'aes256gcm-stream-be32-v3') AND encryption_key_id IS NOT NULL AND length(encryption_key_id) > 0 AND encryption_key_fingerprint IS NOT NULL AND length(encryption_key_fingerprint) = 64)
-    )
-);
-CREATE TABLE entries (
-    backup_id TEXT NOT NULL REFERENCES backups(backup_id),
-    ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
-    type TEXT NOT NULL CHECK (type IN ('file', 'directory', 'symlink')),
-    path TEXT NOT NULL,
-    uid INTEGER NOT NULL CHECK (uid BETWEEN 0 AND 4294967295),
-    gid INTEGER NOT NULL CHECK (gid BETWEEN 0 AND 4294967295),
-    mode INTEGER NOT NULL CHECK (mode BETWEEN 0 AND 4095),
-    atime_seconds INTEGER NOT NULL,
-    atime_nanoseconds INTEGER NOT NULL CHECK (atime_nanoseconds BETWEEN 0 AND 999999999),
-    mtime_seconds INTEGER NOT NULL,
-    mtime_nanoseconds INTEGER NOT NULL CHECK (mtime_nanoseconds BETWEEN 0 AND 999999999),
-    original_size INTEGER,
-    link_target TEXT,
-    PRIMARY KEY (backup_id, ordinal),
-    UNIQUE (backup_id, path),
-    CHECK (
-        (type = 'file' AND original_size IS NOT NULL AND original_size >= 0 AND link_target IS NULL) OR
-        (type = 'directory' AND original_size IS NULL AND link_target IS NULL) OR
-        (type = 'symlink' AND original_size IS NULL AND link_target IS NOT NULL)
-    )
-);
-",
-};
-
-// Repository metadata is committed once and is immutable thereafter.
+// All metadata needed to list and restore this archive lives in its footer.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(super) struct Manifest {
     pub(super) format_version: u32,
@@ -88,6 +41,7 @@ pub(super) struct Manifest {
     pub(super) compression: Option<CompressionOptions>,
     pub(super) encryption: Option<Encryption>,
     pub(super) checksum_algorithm: String,
+    #[serde(skip)]
     pub(super) archive_checksum: String,
     pub(super) root_metadata: UnixMetadata,
     pub(super) backup_stats: BackupStats,
@@ -126,27 +80,6 @@ pub(super) enum ManifestEntryKind {
 }
 
 impl UnixMetadata {
-    fn from_row(row: &sqlx::sqlite::SqliteRow, prefix: &str) -> Result<Self, JobError> {
-        let unsigned = |field: &str| -> Result<u32, JobError> {
-            let column = format!("{prefix}{field}");
-            u32::try_from(row.try_get::<i64, _>(column.as_str())?)
-                .map_err(|error| JobError::internal(format!("invalid {column}: {error}")))
-        };
-        Ok(Self {
-            uid: unsigned("uid")?,
-            gid: unsigned("gid")?,
-            mode: unsigned("mode")?,
-            atime: FileTimestamp {
-                seconds: row.try_get(format!("{prefix}atime_seconds").as_str())?,
-                nanoseconds: unsigned("atime_nanoseconds")?,
-            },
-            mtime: FileTimestamp {
-                seconds: row.try_get(format!("{prefix}mtime_seconds").as_str())?,
-                nanoseconds: unsigned("mtime_nanoseconds")?,
-            },
-        })
-    }
-
     #[cfg(unix)]
     pub(super) fn read(path: &Path) -> Result<Self, JobError> {
         use std::os::unix::fs::MetadataExt;
@@ -186,767 +119,536 @@ impl UnixMetadata {
     }
 }
 
-fn compression_from_row(
-    row: &sqlx::sqlite::SqliteRow,
-) -> Result<Option<CompressionOptions>, JobError> {
-    let compression: Option<CompressionOptions> =
-        serde_json::from_str(&row.try_get::<String, _>("compression")?)?;
-    if let Some(options) = &compression {
-        options.validate().map_err(|error| {
-            JobError::internal(format!("invalid compression metadata: {}", error.message))
-        })?;
+fn validate_id(id: &str) -> Result<(), JobError> {
+    if id.is_empty() || id == "." || id == ".." || id.contains(['/', '\\']) {
+        return Err(JobError::new(StatusCode::BAD_REQUEST, "invalid backup ID"));
     }
-    Ok(compression)
-}
-
-fn encryption_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Option<Encryption>, JobError> {
-    let id: Option<String> = row.try_get("encryption_key_id")?;
-    let fingerprint: Option<String> = row.try_get("encryption_key_fingerprint")?;
-    match (
-        row.try_get::<String, _>("encryption")?.as_str(),
-        id,
-        fingerprint,
-    ) {
-        ("none", None, None) => Ok(None),
-        (format, Some(key_id), Some(fingerprint))
-            if EncryptionAlgorithm::from_format(format).is_some()
-                && !key_id.trim().is_empty()
-                && fingerprint.len() == 64
-                && hex::decode(&fingerprint).is_ok() =>
-        {
-            Ok(Some(Encryption {
-                algorithm: EncryptionAlgorithm::from_format(format)
-                    .ok_or_else(|| JobError::internal("invalid encryption format"))?,
-                key_id,
-                fingerprint,
-            }))
-        }
-        _ => Err(JobError::internal("invalid encryption metadata")),
-    }
+    Ok(())
 }
 
 impl Manifest {
-    pub(super) async fn read(repository: &Path, backup_id: &str) -> Result<Self, JobError> {
-        let path = repository.join("repository.sqlite3");
-        let pool = storage::open(&path, REPO_SCHEMA, false).await?;
-        let result = async {
-            let mut transaction = pool.begin().await?;
-            let row = sqlx::query("SELECT * FROM backups WHERE backup_id = ?")
-                .bind(backup_id)
-                .fetch_optional(&mut *transaction)
-                .await?
-                .ok_or_else(|| {
-                    JobError::new(
-                        StatusCode::NOT_FOUND,
-                        format!("backup {backup_id} not found"),
-                    )
-                })?;
-            let mut manifest = Self {
-                format_version: u32::try_from(row.try_get::<i64, _>("format_version")?).map_err(
-                    |error| JobError::internal(format!("invalid format version: {error}")),
-                )?,
-                backup_id: row.try_get("backup_id")?,
-                created_at: row.try_get("created_at")?,
-                source: serde_json::from_str(&row.try_get::<String, _>("source")?)?,
-                compression: compression_from_row(&row)?,
-                encryption: encryption_from_row(&row)?,
-                checksum_algorithm: row.try_get("checksum_algorithm")?,
-                archive_checksum: row.try_get("archive_checksum")?,
-                root_metadata: UnixMetadata::from_row(&row, "root_")?,
-                backup_stats: BackupStats {
-                    entries_created: row.try_get("entries_created")?,
-                    skipped_unsupported: row.try_get("skipped_unsupported")?,
-                    skipped_filtered: row.try_get("skipped_filtered")?,
-                },
-                entries: Vec::new(),
-            };
-            manifest.validate_format()?;
-            for row in sqlx::query("SELECT * FROM entries WHERE backup_id = ? ORDER BY ordinal")
-                .bind(backup_id)
-                .fetch_all(&mut *transaction)
-                .await?
-            {
-                let relative_path = serde_json::from_str(&row.try_get::<String, _>("path")?)?;
-                let kind = match row.try_get::<String, _>("type")?.as_str() {
-                    "directory" => ManifestEntryKind::Directory {},
-                    "file" => ManifestEntryKind::File {
-                        original_size: u64::try_from(row.try_get::<i64, _>("original_size")?)
-                            .map_err(|error| {
-                                JobError::internal(format!("invalid original size: {error}"))
-                            })?,
-                    },
-                    "symlink" => ManifestEntryKind::Symlink {
-                        target: serde_json::from_str(&row.try_get::<String, _>("link_target")?)?,
-                    },
-                    kind => return Err(JobError::internal(format!("invalid entry type {kind}"))),
-                };
-                let entry = ManifestEntry {
-                    relative_path,
-                    metadata: UnixMetadata::from_row(&row, "")?,
-                    kind,
-                };
-                manifest.entries.push(entry);
-            }
-            manifest.validate_entry_count()?;
-            transaction.commit().await?;
-            Ok::<_, JobError>(manifest)
-        }
-        .await;
-        pool.close().await;
-        result.map_err(|error| {
-            JobError::new(
-                error.code,
-                format!(
-                    "cannot read metadata for backup {backup_id} from {}: {error}",
-                    path.display()
-                ),
-            )
-        })
+    #[cfg(test)]
+    pub(super) fn read(repository: &Path, backup_id: &str) -> Result<Self, JobError> {
+        validate_id(backup_id)?;
+        Ok(ArchiveFile::read(repository, backup_id)?.manifest)
     }
 
-    pub(super) async fn write(&self, repository: &Path) -> Result<(), JobError> {
-        self.validate_format()?;
-        let path = repository.join("repository.sqlite3");
-        let pool = storage::open(&path, REPO_SCHEMA, true).await?;
-        let result = async {
-            let mut transaction = pool.begin().await?;
-            let root = &self.root_metadata;
-            sqlx::query("INSERT INTO backups (
-                backup_id, format_version, created_at, source, compression, checksum_algorithm, archive_checksum,
-                root_uid, root_gid, root_mode, root_atime_seconds, root_atime_nanoseconds,
-                root_mtime_seconds, root_mtime_nanoseconds,
-                entries_created, skipped_unsupported, skipped_filtered, encryption, encryption_key_id, encryption_key_fingerprint
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-                .bind(&self.backup_id).bind(i64::from(self.format_version)).bind(&self.created_at)
-                .bind(serde_json::to_string(&self.source)?).bind(serde_json::to_string(&self.compression)?).bind(&self.checksum_algorithm).bind(&self.archive_checksum)
-                .bind(i64::from(root.uid)).bind(i64::from(root.gid)).bind(i64::from(root.mode))
-                .bind(root.atime.seconds).bind(i64::from(root.atime.nanoseconds))
-                .bind(root.mtime.seconds).bind(i64::from(root.mtime.nanoseconds))
-                .bind(self.backup_stats.entries_created).bind(self.backup_stats.skipped_unsupported).bind(self.backup_stats.skipped_filtered)
-                .bind(self.encryption.as_ref().map_or("none", |e| e.algorithm.format()))
-                .bind(self.encryption.as_ref().map(|e| &e.key_id)).bind(self.encryption.as_ref().map(|e| &e.fingerprint))
-                .execute(&mut *transaction).await?;
-            for (ordinal, entry) in self.entries.iter().enumerate() {
-                let (kind, size, target) = match &entry.kind {
-                    ManifestEntryKind::Directory => ("directory", None, None),
-                    ManifestEntryKind::File { original_size } => (
-                        "file",
-                        Some(i64::try_from(*original_size).map_err(|error| JobError::internal(format!("file size for {} is out of range: {error}", entry.relative_path.display())))?),
-                        None,
-                    ),
-                    ManifestEntryKind::Symlink { target } => (
-                        "symlink", None, Some(serde_json::to_string(target)?),
-                    ),
-                };
-                let metadata = &entry.metadata;
-                let ordinal = i64::try_from(ordinal).map_err(|error| JobError::internal(format!("entry ordinal is out of range: {error}")))?;
-                sqlx::query("INSERT INTO entries (
-                    backup_id, ordinal, type, path, original_size, link_target,
-                    uid, gid, mode, atime_seconds, atime_nanoseconds, mtime_seconds, mtime_nanoseconds
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-                    .bind(&self.backup_id).bind(ordinal).bind(kind).bind(serde_json::to_string(&entry.relative_path)?)
-                    .bind(size).bind(target)
-                    .bind(i64::from(metadata.uid)).bind(i64::from(metadata.gid)).bind(i64::from(metadata.mode))
-                    .bind(metadata.atime.seconds).bind(i64::from(metadata.atime.nanoseconds))
-                    .bind(metadata.mtime.seconds).bind(i64::from(metadata.mtime.nanoseconds))
-                    .execute(&mut *transaction).await?;
+    fn validate(&self) -> Result<(), JobError> {
+        validate_id(&self.backup_id)?;
+        if self.format_version != 9 || self.checksum_algorithm != "sha256" {
+            return Err(JobError::internal(
+                "unsupported self-contained backup format or checksum algorithm",
+            ));
+        }
+        chrono::DateTime::parse_from_rfc3339(&self.created_at)
+            .map_err(|e| JobError::internal(format!("invalid backup timestamp: {e}")))?;
+        if let Some(compression) = &self.compression {
+            compression.validate()?;
+        }
+        if let Some(encryption) = &self.encryption
+            && (encryption.key_id.trim().is_empty()
+                || encryption.fingerprint.len() != 64
+                || hex::decode(&encryption.fingerprint).is_err())
+        {
+            return Err(JobError::internal("invalid encryption metadata"));
+        }
+        if self.backup_stats.entries_created
+            != i64::try_from(self.entries.len()).map_err(|e| JobError::internal(e.to_string()))?
+            || self.backup_stats.skipped_filtered < 0
+            || self.backup_stats.skipped_unsupported < 0
+        {
+            return Err(JobError::internal("invalid backup statistics"));
+        }
+        let valid_metadata = |metadata: &UnixMetadata| -> Result<(), JobError> {
+            if metadata.mode > 0o7777
+                || metadata.atime.nanoseconds >= 1_000_000_000
+                || metadata.mtime.nanoseconds >= 1_000_000_000
+            {
+                return Err(JobError::internal("invalid Unix metadata"));
             }
-            self.validate_entry_count()?;
-            transaction.commit().await?;
-            Ok::<_, JobError>(())
-        }.await;
-        pool.close().await;
-        result.map_err(|error| {
+            Ok(())
+        };
+        valid_metadata(&self.root_metadata)?;
+        let mut seen = BTreeMap::new();
+        for entry in &self.entries {
+            let path = &entry.relative_path;
+            if path.as_os_str().is_empty()
+                || !path.components().all(|c| matches!(c, Component::Normal(_)))
+            {
+                return Err(JobError::internal(format!(
+                    "invalid backup entry path: {}",
+                    path.display()
+                )));
+            }
+            if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty())
+                && seen.get(parent) != Some(&true)
+            {
+                return Err(JobError::internal(format!(
+                    "invalid backup entry parent: {}",
+                    path.display()
+                )));
+            }
+            if seen
+                .insert(
+                    path.as_path(),
+                    matches!(entry.kind, ManifestEntryKind::Directory),
+                )
+                .is_some()
+            {
+                return Err(JobError::internal("duplicate backup entry path"));
+            }
+            valid_metadata(&entry.metadata)?;
+        }
+        Ok(())
+    }
+}
+
+pub(super) struct ArchiveFile {
+    pub(super) file: File,
+    pub(super) manifest: Manifest,
+    pub(super) payload_len: u64,
+    pub(super) metadata_len: u64,
+}
+
+impl ArchiveFile {
+    pub(super) fn read(repository: &Path, backup_id: &str) -> Result<Self, JobError> {
+        validate_id(backup_id)?;
+        check_existing_format(repository)?;
+        Self::open(&archive::path(repository, backup_id))
+    }
+
+    pub(super) fn open(path: &Path) -> Result<Self, JobError> {
+        if !path.try_exists()? {
+            return Err(JobError::new(StatusCode::NOT_FOUND, "backup not found"));
+        }
+        let read = || -> Result<Self, JobError> {
+            if !std::fs::symlink_metadata(path)?.is_file() {
+                return Err(JobError::internal("backup must be a regular file"));
+            }
+            let mut file = File::open(path)?;
+            let length = file.metadata()?.len();
+            if length < 8 + TRAILER_SIZE {
+                return Err(JobError::internal("truncated self-contained backup"));
+            }
+            let mut magic = [0; 8];
+            file.read_exact(&mut magic)?;
+            if &magic != MAGIC {
+                return Err(JobError::internal(
+                    "unsupported backup format; legacy archives require the prior binary and repository database",
+                ));
+            }
+            file.seek(SeekFrom::End(-(TRAILER_SIZE as i64)))?;
+            let mut bytes = [0; 8];
+            file.read_exact(&mut bytes)?;
+            let metadata_len = u64::from_le_bytes(bytes);
+            file.read_exact(&mut bytes)?;
+            if &bytes != FOOTER {
+                return Err(JobError::internal("invalid or incomplete backup footer"));
+            }
+            let mut digest = [0; 32];
+            file.read_exact(&mut digest)?;
+            if metadata_len == 0
+                || metadata_len > MAX_METADATA_SIZE
+                || metadata_len > length - 8 - TRAILER_SIZE
+            {
+                return Err(JobError::internal("invalid backup metadata length"));
+            }
+            let payload_len = length - 8 - TRAILER_SIZE - metadata_len;
+            file.seek(SeekFrom::Start(8 + payload_len))?;
+            let mut metadata = vec![0; metadata_len as usize];
+            file.read_exact(&mut metadata)?;
+            let mut manifest: Manifest = serde_json::from_slice(&metadata)?;
+            manifest.archive_checksum = hex::encode(digest);
+            manifest.validate()?;
+            if path.file_stem().and_then(|s| s.to_str()) != Some(manifest.backup_id.as_str()) {
+                return Err(JobError::internal(
+                    "backup filename does not match its stored ID",
+                ));
+            }
+            file.rewind()?;
+            Ok(Self {
+                file,
+                manifest,
+                payload_len,
+                metadata_len,
+            })
+        };
+        read().map_err(|error| {
             JobError::internal(format!(
-                "cannot write metadata for backup {} to {}: {error}",
-                self.backup_id,
-                path.display()
+                "cannot read backup {}: {}",
+                path.display(),
+                error.message
             ))
         })
     }
+}
 
-    fn validate_entry_count(&self) -> Result<(), JobError> {
-        let count = i64::try_from(self.entries.len())
-            .map_err(|error| JobError::internal(format!("entry count is out of range: {error}")))?;
-        if self.backup_stats.entries_created != count {
-            return Err(JobError::internal(
-                "entries_created does not match the stored entry count",
+pub(super) struct PendingArchive {
+    output: Option<Checksum<File>>,
+    temporary: PathBuf,
+    destination: PathBuf,
+}
+
+impl PendingArchive {
+    pub(super) fn create(repository: &Path, backup_id: &str) -> Result<Self, JobError> {
+        validate_id(backup_id)?;
+        let destination = archive::path(repository, backup_id);
+        if destination.try_exists()? {
+            return Err(JobError::new(
+                StatusCode::CONFLICT,
+                "backup ID already exists",
             ));
         }
-        Ok(())
+        let temporary = repository.join(format!(".{backup_id}.{}.partial", uuid::Uuid::new_v4()));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&temporary)?;
+        let mut pending = Self {
+            output: Some(Checksum::new(file)),
+            temporary,
+            destination,
+        };
+        pending.output()?.write_all(MAGIC)?;
+        Ok(pending)
     }
 
-    fn validate_format(&self) -> Result<(), JobError> {
-        if let Some(compression) = &self.compression {
-            compression.validate().map_err(|error| {
-                JobError::internal(format!("invalid compression metadata: {}", error.message))
-            })?;
+    pub(super) fn output(&mut self) -> io::Result<&mut Checksum<File>> {
+        self.output
+            .as_mut()
+            .ok_or_else(|| io::Error::other("backup output is already finalized"))
+    }
+
+    pub(super) fn publish(mut self, manifest: &Manifest) -> Result<(), JobError> {
+        manifest.validate()?;
+        let bytes = serde_json::to_vec(manifest)?;
+        if bytes.len() as u64 > MAX_METADATA_SIZE {
+            return Err(JobError::internal("backup metadata exceeds 64 MiB"));
         }
-        if self.archive_checksum.len() != 64 || hex::decode(&self.archive_checksum).is_err() {
-            return Err(JobError::internal("invalid archive checksum"));
-        }
-        if self.format_version != 8 || self.checksum_algorithm != "sha256" {
-            return Err(JobError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "unsupported manifest format, compression or checksum algorithm",
-            ));
-        }
+        let output = self.output()?;
+        output.write_all(&bytes)?;
+        output.write_all(&(bytes.len() as u64).to_le_bytes())?;
+        output.write_all(FOOTER)?;
+        let (mut file, checksum) = self
+            .output
+            .take()
+            .ok_or_else(|| JobError::internal("backup output is already finalized"))?
+            .finish();
+        file.write_all(&hex::decode(checksum).map_err(|e| JobError::internal(e.to_string()))?)?;
+        file.sync_all()?;
+        // A hard link publishes the complete inode without replacing an existing backup ID.
+        std::fs::hard_link(&self.temporary, &self.destination).map_err(|e| {
+            JobError::new(
+                if e.kind() == io::ErrorKind::AlreadyExists {
+                    StatusCode::CONFLICT
+                } else {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                },
+                format!("cannot publish backup {}: {e}", self.destination.display()),
+            )
+        })?;
+        let parent = self
+            .destination
+            .parent()
+            .ok_or_else(|| JobError::internal("backup has no repository directory"))?;
+        sync_directory(parent)?;
+        std::fs::remove_file(&self.temporary)?;
+        sync_directory(parent)?;
         Ok(())
+    }
+}
+
+impl Drop for PendingArchive {
+    fn drop(&mut self) {
+        if let Err(error) = std::fs::remove_file(&self.temporary)
+            && error.kind() != io::ErrorKind::NotFound
+        {
+            eprintln!(
+                "cannot remove partial backup {}: {error}",
+                self.temporary.display()
+            );
+        }
     }
 }
 
 pub(super) fn check_existing_format(repository: &Path) -> Result<(), JobError> {
-    let path = repository.join("repository.sqlite3");
-    if path.try_exists().map_err(|error| {
-        JobError::internal(format!("cannot inspect repository database: {error}"))
-    })? {
-        let handle = tokio::runtime::Handle::try_current()
-            .map_err(|error| JobError::internal(format!("cannot access Tokio runtime: {error}")))?;
-        handle.block_on(async {
-            let pool = storage::open(&path, REPO_SCHEMA, false).await?;
-            pool.close().await;
-            Ok::<_, JobError>(())
-        })?;
+    if repository.join("repository.sqlite3").try_exists()? {
+        return Err(JobError::internal(
+            "legacy repository database detected; use a new repository for self-contained backups and the prior binary for old backups",
+        ));
     }
     Ok(())
 }
 
 pub(super) fn list(repository: &Path) -> Result<Vec<RepoBackupInfo>, JobError> {
-    let absolute_repository_path = get_absolute_directory_path(repository)?;
-    let absolute_db_path = absolute_repository_path.join("repository.sqlite3");
-
-    if !absolute_db_path.try_exists().map_err(|error| {
-        JobError::internal(format!(
-            "failed to check whether repository.sqlite3 {} is existing or not: {error}",
-            absolute_db_path.display()
-        ))
-    })? {
-        return Ok(Vec::new());
-    }
-
-    let handle = tokio::runtime::Handle::try_current()
-        .map_err(|error| JobError::internal(format!("cannot access Tokio runtime: {error}")))?;
-
-    handle.block_on(async {
-        let pool = storage::open(&absolute_db_path, REPO_SCHEMA, false).await?;
-
-        let result = async {
-            let rows = sqlx::query(
-                "
-                SELECT backup_id, created_at, compression, encryption, encryption_key_id, encryption_key_fingerprint
-                FROM backups
-                ORDER BY created_at DESC, backup_id ASC
-                ",
-            )
-            .fetch_all(&pool)
-            .await?;
-
-            let mut summaries = Vec::with_capacity(rows.len());
-            for row in rows {
-                summaries.push(RepoBackupInfo {
-                    backup_id: row.try_get("backup_id")?,
-                    created_at: row.try_get("created_at")?,
-                    compression: compression_from_row(&row)?,
-                    encryption: encryption_from_row(&row)?,
-                });
-            }
-            Ok(summaries)
+    let directory = get_absolute_directory_path(repository)?;
+    check_existing_format(&directory)?;
+    let mut summaries = Vec::new();
+    for entry in std::fs::read_dir(&directory)? {
+        let path = entry?.path();
+        if path.extension() != Some(std::ffi::OsStr::new("bak")) {
+            continue;
         }
-        .await;
-
-        pool.close().await;
-        result
-    })
+        let manifest = ArchiveFile::open(&path)?.manifest;
+        summaries.push(RepoBackupInfo {
+            backup_id: manifest.backup_id,
+            created_at: manifest.created_at,
+            compression: manifest.compression,
+            encryption: manifest.encryption,
+        });
+    }
+    summaries.sort_by(|a, b| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| a.backup_id.cmp(&b.backup_id))
+    });
+    Ok(summaries)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::TestDirectory;
+    use crate::test_support::{TestDirectory, rewrite_backup_metadata};
     use proptest::{
-        collection::btree_map,
         prelude::*,
-        test_runner::{Config, RngSeed, TestCaseError},
+        test_runner::{Config, RngSeed},
     };
-    use std::{collections::BTreeMap, error::Error};
+    use sha2::{Digest, Sha256};
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-    type TestResult = Result<(), Box<dyn Error>>;
-
-    #[tokio::test]
-    async fn v8_schema_enforces_metadata_and_entry_types() -> TestResult {
-        let directory = TestDirectory::new()?;
-        let pool = storage::open(
-            &directory.path().join("repository.sqlite3"),
-            REPO_SCHEMA,
-            true,
-        )
-        .await?;
-        assert_eq!(
-            sqlx::query_scalar::<_, i64>("PRAGMA user_version")
-                .fetch_one(&pool)
-                .await?,
-            8
-        );
-        sqlx::query(
-            "INSERT INTO backups (
-            backup_id, format_version, created_at, source, compression, checksum_algorithm, archive_checksum,
-            root_uid, root_gid, root_mode, root_atime_seconds, root_atime_nanoseconds,
-            root_mtime_seconds, root_mtime_nanoseconds,
-            entries_created, skipped_unsupported, skipped_filtered, encryption
-        ) VALUES ('backup', 8, '2026-10-23T00:00:00Z', '\"/source\"', '{\"algorithm\":\"zstd\",\"level\":3}', 'sha256', '0000000000000000000000000000000000000000000000000000000000000000',
-            4294967295, 0, 4095, -1, 999999999, 0, 0, 3, 2, 1, 'none')",
-        )
-        .execute(&pool)
-        .await?;
-        for (ordinal, kind, size, target) in [
-            (0i64, "file", Some(0i64), None),
-            (1, "directory", None, None),
-            (2, "symlink", None, Some("\"../missing\"")),
-        ] {
-            sqlx::query(
-                "INSERT INTO entries (
-                backup_id, ordinal, type, path, uid, gid, mode,
-                atime_seconds, atime_nanoseconds, mtime_seconds, mtime_nanoseconds,
-                original_size, link_target
-            ) VALUES ('backup', ?, ?, ?, 1000, 1000, 420, 0, 0, 0, 0, ?, ?)",
-            )
-            .bind(ordinal)
-            .bind(kind)
-            .bind(format!("\"{kind}\""))
-            .bind(size)
-            .bind(target)
-            .execute(&pool)
-            .await?;
-        }
-        for statement in [
-            "UPDATE entries SET uid = -1",
-            "UPDATE entries SET gid = 4294967296",
-            "UPDATE entries SET mode = 4096",
-            "UPDATE entries SET atime_nanoseconds = -1",
-            "UPDATE entries SET mtime_nanoseconds = 1000000000",
-            "UPDATE entries SET type = 'socket'",
-            "UPDATE entries SET original_size = NULL WHERE type = 'file'",
-            "UPDATE entries SET original_size = -1 WHERE type = 'file'",
-            "UPDATE backups SET archive_checksum = NULL",
-            "UPDATE backups SET archive_checksum = 'bad'",
-            "UPDATE backups SET archive_checksum = 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz'",
-            "UPDATE entries SET link_target = NULL WHERE type = 'symlink'",
-            "UPDATE entries SET link_target = 'target' WHERE type = 'directory'",
-            "UPDATE entries SET original_size = 0 WHERE type = 'symlink'",
-            "UPDATE entries SET path = 'duplicate'",
-            "UPDATE entries SET backup_id = 'missing'",
-            "UPDATE backups SET format_version = 1",
-            "UPDATE backups SET root_uid = NULL",
-            "UPDATE backups SET root_mtime_nanoseconds = 1000000000",
-            "UPDATE backups SET entries_created = -1",
-            "UPDATE backups SET skipped_unsupported = -1",
-            "UPDATE backups SET skipped_filtered = -1",
-        ] {
-            assert!(
-                sqlx::query(statement).execute(&pool).await.is_err(),
-                "accepted {statement}"
-            );
-        }
-        pool.close().await;
-        Ok(())
-    }
-
-    async fn list_at(
-        repository: &Path,
-    ) -> Result<Result<Vec<RepoBackupInfo>, JobError>, tokio::task::JoinError> {
-        let repository = repository.to_owned();
-        tokio::task::spawn_blocking(move || list(&repository)).await
-    }
-
-    fn header(repository: &Path, backup_id: &str, second: u8) -> Manifest {
+    fn metadata(id: &str, time: &str) -> Manifest {
         Manifest {
-            format_version: 8,
-            backup_id: backup_id.to_owned(),
-            created_at: format!("2026-10-13T00:00:{second:02}.000Z"),
-            source: repository.to_owned(),
-            compression: Some(CompressionOptions::Zstd(
-                super::super::content::ZstdOptions::default(),
-            )),
+            format_version: 9,
+            backup_id: id.into(),
+            created_at: time.into(),
+            source: "/source".into(),
+            compression: None,
             encryption: None,
             checksum_algorithm: "sha256".into(),
-            archive_checksum: "0".repeat(64),
-            root_metadata: metadata(100),
+            archive_checksum: String::new(),
+            root_metadata: UnixMetadata {
+                uid: 0,
+                gid: 0,
+                mode: 0o755,
+                atime: FileTimestamp {
+                    seconds: 0,
+                    nanoseconds: 0,
+                },
+                mtime: FileTimestamp {
+                    seconds: 0,
+                    nanoseconds: 0,
+                },
+            },
             backup_stats: BackupStats {
                 entries_created: 0,
-                skipped_unsupported: 2,
-                skipped_filtered: 3,
+                skipped_filtered: 0,
+                skipped_unsupported: 0,
             },
             entries: Vec::new(),
         }
     }
 
-    async fn check_listing_order(backups: BTreeMap<String, u8>) -> TestResult {
+    fn publish(repository: &Path, manifest: &Manifest) -> Result<(), JobError> {
+        let mut pending = PendingArchive::create(repository, &manifest.backup_id)?;
+        pending.output()?.write_all(b"encoded-payload")?;
+        pending.publish(manifest)
+    }
+
+    #[test]
+    fn one_file_carries_metadata_and_integrity_into_an_empty_repository() -> TestResult {
+        let original = TestDirectory::new()?;
+        let destination = TestDirectory::new()?;
+        let manifest = metadata("copy-me", "2026-11-16T00:00:00Z");
+        publish(original.path(), &manifest)?;
+        let name = archive::file_name(&manifest.backup_id);
+        std::fs::copy(original.path().join(&name), destination.path().join(&name))?;
+        let read = Manifest::read(destination.path(), "copy-me")?;
+        assert_eq!(
+            serde_json::to_value(&manifest)?,
+            serde_json::to_value(&read)?
+        );
+        let bytes = std::fs::read(destination.path().join(name))?;
+        assert_eq!(&bytes[..8], MAGIC);
+        assert_eq!(&bytes[bytes.len() - 40..bytes.len() - 32], FOOTER);
+        assert_eq!(
+            read.archive_checksum,
+            hex::encode(Sha256::digest(&bytes[..bytes.len() - 32]))
+        );
+        assert_eq!(list(destination.path())?[0].backup_id, "copy-me");
+        assert_eq!(std::fs::read_dir(destination.path())?.count(), 1);
+        assert!(!destination.path().join("repository.sqlite3").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn publication_is_exclusive_even_when_two_writers_start_together() -> TestResult {
         let directory = TestDirectory::new()?;
-        let repository = directory.path();
-        // Initialize even for an empty generated set, covering an empty metadata DB.
-        storage::open(&repository.join("repository.sqlite3"), REPO_SCHEMA, true)
-            .await?
-            .close()
-            .await;
-        for (backup_id, second) in backups.iter().rev() {
-            header(repository, backup_id, *second)
-                .write(repository)
-                .await?;
+        let manifest = metadata("same-id", "2026-11-16T00:00:00Z");
+        let mut first = PendingArchive::create(directory.path(), "same-id")?;
+        let mut second = PendingArchive::create(directory.path(), "same-id")?;
+        assert!(list(directory.path())?.is_empty());
+        first.output()?.write_all(b"first")?;
+        second.output()?.write_all(b"second")?;
+        first.publish(&manifest)?;
+        let before = std::fs::read(directory.path().join("same-id.bak"))?;
+        assert_eq!(
+            second
+                .publish(&manifest)
+                .err()
+                .ok_or("overwrote published backup")?
+                .code,
+            StatusCode::CONFLICT
+        );
+        assert_eq!(std::fs::read(directory.path().join("same-id.bak"))?, before);
+        assert_eq!(std::fs::read_dir(directory.path())?.count(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn failed_or_abandoned_writers_do_not_publish_or_remove_unowned_partials() -> TestResult {
+        let directory = TestDirectory::new()?;
+        let orphan = directory.path().join(".old.partial");
+        std::fs::write(&orphan, b"preserve")?;
+        {
+            let mut pending = PendingArchive::create(directory.path(), "unfinished")?;
+            pending.output()?.write_all(b"partial")?;
         }
-        // The oracle sorts numeric times, independently of SQL/text ordering.
-        let mut expected: Vec<_> = backups.into_iter().collect();
-        expected.sort_by(|(left_id, left_time), (right_id, right_time)| {
-            right_time
-                .cmp(left_time)
-                .then_with(|| left_id.cmp(right_id))
-        });
-        let expected: Vec<_> = expected
-            .into_iter()
-            .map(|(id, second)| (id, format!("2026-10-13T00:00:{second:02}.000Z")))
-            .collect();
-        for _ in 0..2 {
-            let actual: Vec<_> = list_at(repository)
-                .await??
-                .into_iter()
-                .map(|summary| (summary.backup_id, summary.created_at))
-                .collect();
-            assert_eq!(actual, expected);
+        let mut invalid = metadata("invalid", "2026-11-16T00:00:00Z");
+        invalid.backup_stats.entries_created = 1;
+        assert!(publish(directory.path(), &invalid).is_err());
+        assert!(list(directory.path())?.is_empty());
+        assert_eq!(std::fs::read_dir(directory.path())?.count(), 1);
+        assert_eq!(std::fs::read(orphan)?, b"preserve");
+        Ok(())
+    }
+
+    #[test]
+    fn listings_preserve_order_and_require_no_key_material() -> TestResult {
+        use super::super::content::{CompressionOptions, EncryptionAlgorithm, ZstdOptions};
+        let directory = TestDirectory::new()?;
+        for (id, time) in [
+            ("b", "2026-11-16T00:00:00Z"),
+            ("a", "2026-11-16T00:00:00Z"),
+            ("new", "2026-11-17T00:00:00Z"),
+        ] {
+            let mut manifest = metadata(id, time);
+            manifest.compression = Some(CompressionOptions::Zstd(ZstdOptions { level: 7 }));
+            manifest.encryption = Some(Encryption {
+                algorithm: EncryptionAlgorithm::Aes256Gcm,
+                key_id: "external-key".into(),
+                fingerprint: "ab".repeat(32),
+            });
+            publish(directory.path(), &manifest)?;
         }
+        let items = list(directory.path())?;
+        assert_eq!(
+            items
+                .iter()
+                .map(|m| m.backup_id.as_str())
+                .collect::<Vec<_>>(),
+            ["new", "a", "b"]
+        );
+        assert_eq!(
+            items[0]
+                .encryption
+                .as_ref()
+                .ok_or("missing encryption")?
+                .key_id,
+            "external-key"
+        );
+        assert_eq!(serde_json::to_value(&items[0].compression)?["level"], 7);
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_footer_lengths_versions_and_trailing_bytes_are_rejected() -> TestResult {
+        let directory = TestDirectory::new()?;
+        let path = directory.path().join("test.bak");
+        publish(directory.path(), &metadata("test", "2026-11-16T00:00:00Z"))?;
+        let valid = std::fs::read(&path)?;
+        let mut cases = vec![
+            vec![],
+            valid[..7].to_vec(),
+            valid[..valid.len() - 1].to_vec(),
+            [valid.as_slice(), &[0]].concat(),
+        ];
+        let mut version = valid.clone();
+        version[7] = 99;
+        cases.push(version);
+        for length in [0, MAX_METADATA_SIZE + 1, u64::MAX] {
+            let mut bytes = valid.clone();
+            let start = bytes.len() - TRAILER_SIZE as usize;
+            bytes[start..start + 8].copy_from_slice(&length.to_le_bytes());
+            cases.push(bytes);
+        }
+        for bytes in cases {
+            std::fs::write(&path, &bytes)?;
+            assert!(ArchiveFile::open(&path).is_err());
+            assert!(list(directory.path()).is_err());
+            assert_eq!(std::fs::read(&path)?, bytes);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_metadata_is_rejected_before_any_restoration() -> TestResult {
+        let directory = TestDirectory::new()?;
+        let path = directory.path().join("test.bak");
+        publish(directory.path(), &metadata("test", "2026-11-16T00:00:00Z"))?;
+        let original = std::fs::read(&path)?;
+        for (field, value) in [
+            ("format_version", serde_json::json!(8)),
+            ("created_at", serde_json::json!("invalid")),
+            ("compression", serde_json::json!({"algorithm":"unknown"})),
+            (
+                "encryption",
+                serde_json::json!({"algorithm":"aes-256-gcm","key_id":"key","fingerprint":"invalid"}),
+            ),
+            (
+                "backup_stats",
+                serde_json::json!({"entries_created":1,"skipped_filtered":0,"skipped_unsupported":0}),
+            ),
+            ("backup_id", serde_json::json!("../escape")),
+        ] {
+            std::fs::write(&path, &original)?;
+            rewrite_backup_metadata(&path, |metadata| {
+                metadata[field] = value;
+            })?;
+            assert!(
+                ArchiveFile::open(&path).is_err(),
+                "accepted invalid {field}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_databases_and_invalid_ids_are_preserved_without_writes() -> TestResult {
+        let directory = TestDirectory::new()?;
+        for id in ["", ".", "..", "../escape", "a/b", "a\\b"] {
+            assert!(PendingArchive::create(directory.path(), id).is_err());
+        }
+        assert!(list(directory.path())?.is_empty());
+        let database = directory.path().join("repository.sqlite3");
+        std::fs::write(&database, b"legacy database")?;
+        assert!(check_existing_format(directory.path()).is_err());
+        assert!(list(directory.path()).is_err());
+        assert_eq!(std::fs::read(database)?, b"legacy database");
         Ok(())
     }
 
     proptest! {
-        #![proptest_config(Config {
-            cases: 32,
-            rng_seed: RngSeed::Fixed(0xBAC1_2026),
-            ..Config::default()
-        })]
-
+        #![proptest_config(Config { cases: 32, failure_persistence: None, rng_seed: RngSeed::Fixed(0xA11F11E), ..Config::default() })]
         #[test]
-        fn generated_headers_are_listed_in_stable_order(
-            backups in btree_map("[a-z][a-z0-9]{0,7}", 0u8..4, 0..10),
-        ) {
-            let runtime = tokio::runtime::Builder::new_current_thread().enable_all()
-                .build().map_err(|error| TestCaseError::fail(error.to_string()))?;
-            runtime.block_on(check_listing_order(backups))
-                .map_err(|error| TestCaseError::fail(error.to_string()))?;
-        }
-    }
-
-    #[tokio::test]
-    async fn newest_first_and_equal_timestamp_ids_ascending() -> TestResult {
-        check_listing_order(
-            [
-                ("older".into(), 0),
-                ("z-newest".into(), 3),
-                ("a-newest".into(), 3),
-            ]
-            .into(),
-        )
-        .await
-    }
-
-    #[tokio::test]
-    async fn unpublished_archives_do_not_initialize_metadata() -> TestResult {
-        let directory = TestDirectory::new()?;
-        let repository = directory.path();
-        assert!(list_at(repository).await??.is_empty());
-        std::fs::write(repository.join("unpublished.bak"), b"keep contents")?;
-        assert!(list_at(repository).await??.is_empty());
-        assert!(!repository.join("repository.sqlite3").exists());
-        assert_eq!(std::fs::read_dir(repository)?.count(), 1);
-        assert_eq!(
-            std::fs::read(repository.join("unpublished.bak"))?,
-            b"keep contents"
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn failed_publication_does_not_appear_in_listing() -> TestResult {
-        let directory = TestDirectory::new()?;
-        let repository = directory.path();
-        header(repository, "published", 0).write(repository).await?;
-        std::fs::write(repository.join("unpublished.bak"), b"unpublished archive")?;
-        let mut failed = header(repository, "unpublished", 3);
-        failed.entries.push(ManifestEntry {
-            relative_path: "out-of-range".into(),
-            metadata: metadata(1),
-            kind: ManifestEntryKind::File {
-                original_size: u64::MAX,
-            },
-        });
-        assert!(failed.write(repository).await.is_err());
-        let summaries = list_at(repository).await??;
-        assert_eq!(summaries.len(), 1);
-        assert_eq!(summaries[0].backup_id, "published");
-        assert_eq!(summaries[0].created_at, "2026-10-13T00:00:00.000Z");
-        assert!(repository.join("unpublished.bak").is_file());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn invalid_metadata_is_an_error_instead_of_an_empty_list() -> TestResult {
-        for damage in ["corrupt", "unsupported-schema", "missing-table"] {
+        fn arbitrary_bytes_are_rejected_without_panicking(bytes in proptest::collection::vec(any::<u8>(), 0..8193)) {
             let directory = TestDirectory::new()?;
-            let repository = directory.path();
-            let database = repository.join("repository.sqlite3");
-            if damage == "corrupt" {
-                std::fs::write(&database, b"invalid SQLite database")?;
-            } else {
-                let pool = storage::open(&database, REPO_SCHEMA, true).await?;
-                if damage == "unsupported-schema" {
-                    sqlx::query("PRAGMA user_version = 99")
-                        .execute(&pool)
-                        .await?;
-                } else {
-                    sqlx::query("DROP TABLE backups").execute(&pool).await?;
-                }
-                pool.close().await;
-            }
-            let error = list_at(repository)
-                .await?
-                .err()
-                .ok_or("accepted invalid metadata")?;
-            assert_eq!(error.code, StatusCode::INTERNAL_SERVER_ERROR);
-            assert!(!error.message.is_empty());
-            assert!(database.exists());
+            let path = directory.path().join("random.bak");
+            std::fs::write(&path, &bytes)?;
+            prop_assert!(ArchiveFile::open(&path).is_err());
         }
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn invalid_repository_paths_are_rejected() -> TestResult {
-        let directory = TestDirectory::new()?;
-        let file = directory.path().join("file");
-        let missing = directory.path().join("missing");
-        std::fs::write(&file, b"keep contents")?;
-        let error = list_at(&file)
-            .await?
-            .err()
-            .ok_or("accepted file as repository")?;
-        assert_eq!(error.code, StatusCode::BAD_REQUEST);
-        let error = list_at(&missing)
-            .await?
-            .err()
-            .ok_or("accepted missing repository")?;
-        assert_eq!(error.code, StatusCode::INTERNAL_SERVER_ERROR);
-        assert!(!missing.exists());
-        assert_eq!(std::fs::read(&file)?, b"keep contents");
-        Ok(())
-    }
-
-    fn metadata(seed: u32) -> UnixMetadata {
-        UnixMetadata {
-            uid: u32::MAX - seed,
-            gid: 3_000_000_000 + seed,
-            mode: 0o4750 + seed % 8,
-            atime: FileTimestamp {
-                seconds: -1234 - i64::from(seed),
-                nanoseconds: seed,
-            },
-            mtime: FileTimestamp {
-                seconds: 1_700_000_000 + i64::from(seed),
-                nanoseconds: 999_999_999 - seed,
-            },
-        }
-    }
-
-    fn manifest() -> Manifest {
-        Manifest {
-            format_version: 8,
-            backup_id: "backup-001".into(),
-            created_at: "2026-10-09T00:00:00Z".into(),
-            source: "/source".into(),
-            compression: Some(CompressionOptions::Zstd(
-                super::super::content::ZstdOptions::default(),
-            )),
-            encryption: None,
-            checksum_algorithm: "sha256".into(),
-            archive_checksum: "0".repeat(64),
-            root_metadata: metadata(100),
-            backup_stats: BackupStats {
-                entries_created: 4,
-                skipped_unsupported: 2,
-                skipped_filtered: 3,
-            },
-            entries: vec![
-                ManifestEntry {
-                    relative_path: "empty".into(),
-                    metadata: metadata(1),
-                    kind: ManifestEntryKind::Directory {},
-                },
-                ManifestEntry {
-                    relative_path: "file.txt".into(),
-                    metadata: metadata(2),
-                    kind: ManifestEntryKind::File { original_size: 0 },
-                },
-                ManifestEntry {
-                    relative_path: "relative link".into(),
-                    metadata: metadata(3),
-                    kind: ManifestEntryKind::Symlink {
-                        target: "../目录/./missing".into(),
-                    },
-                },
-                ManifestEntry {
-                    relative_path: "absolute-link".into(),
-                    metadata: metadata(4),
-                    kind: ManifestEntryKind::Symlink {
-                        target: "/outside/missing".into(),
-                    },
-                },
-            ],
-        }
-    }
-
-    #[tokio::test]
-    async fn metadata_round_trip_and_duplicate_ids() -> Result<(), Box<dyn std::error::Error>> {
-        let directory = TestDirectory::new()?;
-        let repository = directory.path();
-        assert!(Manifest::read(repository, "backup-001").await.is_err());
-        assert!(!repository.join("repository.sqlite3").exists());
-        let manifest = manifest();
-        manifest.write(repository).await?;
-        let expected = serde_json::to_value(&manifest)?;
-        assert_eq!(
-            serde_json::to_value(Manifest::read(repository, &manifest.backup_id).await?)?,
-            expected
-        );
-        assert!(manifest.write(repository).await.is_err());
-        assert_eq!(
-            serde_json::to_value(Manifest::read(repository, &manifest.backup_id).await?)?,
-            expected
-        );
-        let error = Manifest::read(repository, "missing")
-            .await
-            .err()
-            .ok_or("accepted missing backup")?;
-        assert_eq!(error.code, StatusCode::NOT_FOUND);
-        assert!(!repository.join("manifest.json").exists());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn failed_metadata_writes_roll_back_header_and_entries()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let directory = TestDirectory::new()?;
-        let mut manifest = manifest();
-        manifest.entries.push(ManifestEntry {
-            relative_path: "too-large".into(),
-            metadata: metadata(5),
-            kind: ManifestEntryKind::File {
-                original_size: u64::MAX,
-            },
-        });
-        let error = manifest
-            .write(directory.path())
-            .await
-            .err()
-            .ok_or("accepted out-of-range file size")?;
-        assert!(error.message.contains("too-large"));
-        let pool = storage::open(
-            &directory.path().join("repository.sqlite3"),
-            REPO_SCHEMA,
-            false,
-        )
-        .await?;
-        assert_eq!(
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM backups")
-                .fetch_one(&pool)
-                .await?,
-            0
-        );
-        assert_eq!(
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM entries")
-                .fetch_one(&pool)
-                .await?,
-            0
-        );
-        pool.close().await;
-        manifest.entries.pop();
-        manifest.write(directory.path()).await?;
-        manifest.format_version = 1;
-        assert!(manifest.write(directory.path()).await.is_err());
-        let pool = storage::open(
-            &directory.path().join("repository.sqlite3"),
-            REPO_SCHEMA,
-            false,
-        )
-        .await?;
-        let mut connection = pool.acquire().await?;
-        sqlx::query("PRAGMA ignore_check_constraints = ON")
-            .execute(&mut *connection)
-            .await?;
-        sqlx::query("UPDATE backups SET compression = 'unknown'")
-            .execute(&mut *connection)
-            .await?;
-        drop(connection);
-        pool.close().await;
-        assert!(
-            Manifest::read(directory.path(), &manifest.backup_id)
-                .await
-                .is_err()
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn invalid_metadata_and_counts_roll_back_publication() -> TestResult {
-        let directory = TestDirectory::new()?;
-        let mut manifest = manifest();
-        manifest.entries[1].metadata.mtime.nanoseconds = 1_000_000_000;
-        assert!(manifest.write(directory.path()).await.is_err());
-        manifest.entries[1].metadata = metadata(2);
-        manifest.backup_stats.entries_created = 5;
-        assert!(manifest.write(directory.path()).await.is_err());
-        assert!(list_at(directory.path()).await??.is_empty());
-        let pool = storage::open(
-            &directory.path().join("repository.sqlite3"),
-            REPO_SCHEMA,
-            false,
-        )
-        .await?;
-        assert_eq!(
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM entries")
-                .fetch_one(&pool)
-                .await?,
-            0
-        );
-        pool.close().await;
-        manifest.backup_stats.entries_created = 4;
-        manifest.write(directory.path()).await?;
-        let pool = storage::open(
-            &directory.path().join("repository.sqlite3"),
-            REPO_SCHEMA,
-            false,
-        )
-        .await?;
-        sqlx::query("UPDATE backups SET entries_created = 5")
-            .execute(&pool)
-            .await?;
-        pool.close().await;
-        assert!(
-            Manifest::read(directory.path(), &manifest.backup_id)
-                .await
-                .is_err()
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn legacy_manifests_are_not_imported() -> Result<(), Box<dyn std::error::Error>> {
-        let directory = TestDirectory::new()?;
-        let legacy = serde_json::to_vec(&manifest())?;
-        std::fs::write(directory.path().join("manifest.json"), &legacy)?;
-        assert!(
-            Manifest::read(directory.path(), "backup-001")
-                .await
-                .is_err()
-        );
-        assert_eq!(
-            std::fs::read(directory.path().join("manifest.json"))?,
-            legacy
-        );
-        Ok(())
     }
 }

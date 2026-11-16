@@ -593,12 +593,10 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "工作目录 jobs.sqlite3 保存 FIFO 队列与终态历史；"
-        "仓库 repository.sqlite3 保存备份头与有序条目。"
-        "backups/<backup_id>/ 镜像保存源相对路径，"
-        "载荷保留原名，内容可原样、只压缩、只加密或先压缩再加密；空目录和符号链接有独立条目。"
-        "文件与目录同步后，一次提交头、条目、Unix 根元数据与统计。"
-        "作业库 schema v5、仓库 format/schema "
-        "v5，旧数据库拒绝且不迁移。",
+        "仓库只保存自包含的 <backup_id>.bak；编码参数、文件清单、Unix 元数据、"
+        "统计和 SHA-256 均在文件内。"
+        "流式压缩加密完成后追加明文元数据与校验尾部，同步临时文件，再以不可覆盖的硬链接发布并同步目录。"
+        "作业库 schema v5 保持不变，新备份格式 v9 使用新仓库，旧仓库及数据库保留并由旧版读取。",
     )
     _paragraph(
         document,
@@ -708,8 +706,8 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "SQLite 使用 WAL、synchronous=FULL、外键、5 秒 busy timeout 和最多 4 个连接。"
-        "事务分别覆盖单个数据库，外部文件与作业库、仓库库不共享事务；"
-        "失败可留下未发布目录或部分恢复输出。"
+        "只有作业库使用 SQLite；备份文件发布与作业终态提交不共享事务。"
+        "崩溃可留下被忽略的临时文件，失败恢复可留下部分输出。"
         "不检测备份期间的源修改、不自动清理、不导入旧 JSON "
         "manifest/JSONL。HTTP 没有内置 TLS。",
     )
@@ -914,10 +912,10 @@ def _populate_system_design(
     for boundary in (
         "一个 bak 进程；HTTP、调度器、worker 和阻塞文件操作通过 Rust 调用与 Tokio 协作。",
         "API 只经 JobManager 门面访问业务；私有模块不为测试暴露。",
-        "仓库 format/schema v5、作业库 v5；"
+        "自包含备份格式 v9、作业库 v5；"
         "过滤和可选编码已实现，旧数据库与 JSON manifest "
         "不读取或迁移。",
-        "作业和仓库分属两个数据库；元数据提交与作业终态提交之间存在独立失败边界。",
+        "仓库不再使用数据库；文件发布与作业终态提交之间存在独立失败边界。",
         "Web 控制台和内容加密及配置式定时备份已实现；取消、增量和元数据加密尚未"
         "实现。未验证断电或非 Unix 执行。",
     ):

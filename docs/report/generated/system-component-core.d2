@@ -69,7 +69,7 @@ diagram: "bak: Module Responsibilities" {
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    Storage: "<<private SQLite setup>>\njobs::storage" {
+    Storage: "<<task SQLite setup>>\njobs::storage" {
       shape: rectangle
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
@@ -108,12 +108,11 @@ diagram: "bak: Module Responsibilities" {
   package_2.Jobs -> package_2.Backup: "Execute backup"
   package_2.Jobs -> package_2.Restore: "Execute restore"
   package_2.Jobs -> package_2.Repo: "List published backups"
-  package_2.Backup -> package_2.Repo: "Commit metadata"
+  package_2.Backup -> package_2.Repo: "Publish complete archive"
   package_2.Restore -> package_2.Repo: "Read metadata"
   package_2.Backup -> package_2.FS: "Paths / directory sync"
   package_2.Restore -> package_2.FS: "Paths / directory sync"
   package_2.Jobs -> package_2.Storage: "Initialize job DB"
-  package_2.Repo -> package_2.Storage: "Open repository DB"
   package_1.Server -> package_1.UI: "Optional static console"
   package_0.Main -> package_2.Jobs: "Generate / load keys"
   package_2.Jobs -> package_2.Content: "Expose key management"
