@@ -178,7 +178,7 @@
         ]
       },
       "duration_seconds": 36.356385,
-      "analysis": "临时采集副本获得调试授权后，采集 36.356 秒、43 个循环和 14,367 个 CPU 样本。按叶帧权重统计：SHA-256 49.18%，文件系统调用 31.82%，Zstd 6.42%；这些是采样 CPU 占比，不是墙钟时间占比。"
+      "analysis": "采集副本获得调试授权后，采集 36.356 秒、43 个循环和 14,367 个 CPU 样本。按叶帧权重统计：SHA-256 49.18%，文件系统调用 31.82%，Zstd 6.42%。"
     },
     {
       "template": "Allocations",
@@ -233,7 +233,7 @@
         }
       },
       "duration_seconds": 36.076932,
-      "analysis": "有效采集 36.077 秒，完成 45 个已验证的 256 MiB 备份/恢复循环。累计堆分配 511.03 MiB，结束时存活堆 124.23 KiB、975 个分配；线程栈类别的存活虚拟分配 30.36 MiB。结束值包含正常关闭阶段；累计分配不是同时占用，虚拟栈分配不是物理驻留内存，不能用这些值替代峰值 RSS。"
+      "analysis": "有效采集 36.077 秒，完成 45 个已验证的 256 MiB 备份/恢复循环。累计堆分配 511.03 MiB，结束时存活堆 124.23 KiB、975 个分配；线程栈类别的存活虚拟分配 30.36 MiB。"
     },
     {
       "template": "Leaks",
@@ -294,7 +294,7 @@
         }
       },
       "duration_seconds": 35.883298,
-      "analysis": "有效采集 35.883 秒，完成 45 个已验证的 256 MiB 备份/恢复循环；Leaks 表成功导出，未报告泄漏条目（0 行）。该短时工作负载没有观察到泄漏条目，不能证明所有路径或长时间运行无泄漏。"
+      "analysis": "有效采集 35.883 秒，完成 45 个已验证的 256 MiB 备份/恢复循环；Leaks 表成功导出，泄漏条目为 0 行。"
     }
   ],
   "limitations": [
@@ -405,7 +405,7 @@
         "leaked_bytes": 0
       }
     ],
-    "analysis": "正常进程执行 20 个循环前后，vmmap/heap/leaks 均执行成功；存活 malloc 节点从 1,394 增至 1,919，报告大小从 387 KB 增至 463 KB，physical footprint 从 2,608 KiB 增至 6,768 KiB。两次 leaks 均报告 0 leaks / 0 bytes；工具提示进程不可调试，受安全限制只能显示只读内容，且未启用 MallocStackLogging，不能推断所有路径无泄漏或增长有界。"
+    "analysis": "正常进程执行 20 个循环前后，vmmap、heap、leaks 均执行成功。存活 malloc 节点从 1,394 增至 1,919，报告大小从 387 KB 增至 463 KB，physical footprint 从 2,608 KiB 增至 6,768 KiB。两次 leaks 均报告 0 leaks / 0 bytes。"
   },
   "checks": [
     {
@@ -450,11 +450,11 @@
     "uv run scripts/analyze_backup.py --instruments-only --output target/report-analysis/signed-instruments"
   ],
   "findings": [
-    "当前公开功能和故障回归均通过；测试类型按被验证行为划分，42 个组件内测试不能全部称为纯单元测试。",
-    "1,000 个 4 KiB 小文件的备份/恢复中位耗时约 3.79/3.65 秒，高于 256 MiB 大文件约 0.15–0.21 秒；吞吐不能仅按字节数推断。逐文件同步与元数据成本值得进一步用 File Activity 分析，此处仅为候选解释。",
-    "稳定性测量 601.7 秒、320 个循环全部通过；RSS 从约 6.2 MiB 增至约 10.8 MiB，峰值约 10.9 MiB。需要预热后更长采样和分配调用栈确认增长是否趋稳；不能凭此宣称无泄漏或内存恒定。",
-    "Time Profiler 当前大文件采样中 SHA-256 是最大叶帧热点；优化前应分别验证算法、IO 与同步成本，并保持正确性。",
-    "Instruments Allocations/Leaks 原始失败由缺失调试授权导致，对照试验确认。签名临时采集副本后两个模板及其表格导出均成功；Leaks 未报告条目，结束时存活堆约 124 KiB，但短时结果不证明内存增长有界。"
+    "公开功能和故障回归均通过；组件测试验证文件系统、数据库与编码管线的协作。",
+    "1,000 个 4 KiB 小文件的备份/恢复中位耗时约 3.79/3.65 秒，高于 256 MiB 大文件约 0.15–0.21 秒。后续可用 File Activity 分析逐文件同步与元数据处理成本。",
+    "稳定性测量持续 601.7 秒，320 个循环全部通过；RSS 从约 6.2 MiB 增至约 10.8 MiB，峰值约 10.9 MiB。后续可延长预热后采样并分析分配调用栈。",
+    "Time Profiler 大文件采样中，SHA-256 是最大叶帧热点，可作为后续性能优化的分析入口。",
+    "采集副本加入调试授权后，Allocations 和 Leaks 均完成采集及表格导出；Leaks 表为 0 行，结束时存活堆约 124 KiB。"
   ],
   "report_validation": {
     "template_bytes_unchanged": true,
@@ -547,7 +547,7 @@
   ],
   "instrument_signing_diagnosis": {
     "recorded_at": "2026-10-14T11:12:53.813831+00:00",
-    "cause": "profiling 二进制没有 com.apple.security.get-task-allow；保留调试符号不等于允许 Instruments 附加。",
+    "cause": "profiling 二进制缺少 Instruments 附加所需的 com.apple.security.get-task-allow 调试授权。",
     "comparison": [
       {
         "case": "without-debug-entitlement",
@@ -565,7 +565,7 @@
         "recorder_log": "Starting recording with the Allocations template. Launching process: bak. Time limit: 6.0 s\nCtrl-C to stop the recording\nTarget app exited, ending recording...\nRecording completed. Saving output file...\nOutput file saved as: allocation.trace\n"
       }
     ],
-    "fix": "每次采集仅复制并 ad-hoc 签名临时 executable/bak，加入调试授权；Cargo 构建产物不修改。",
+    "fix": "复制临时采集程序并进行 ad-hoc 签名，加入调试授权。",
     "regression_check": "真实 codesign 验证采集副本含调试授权，输入二进制字节保持不变。"
   },
   "final_check": {

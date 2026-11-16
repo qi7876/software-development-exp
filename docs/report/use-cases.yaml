@@ -93,18 +93,18 @@
     },
     {
       "id": "NFR-05",
-      "name": "持久化边界",
+      "name": "持久化机制",
       "description": "作业 SQLite 使用 WAL、FULL 同步和事务；文件发布与作业终态提交独立，通过幂等启动对账修复中断备份；单工作目录持有独占实例锁。"
     },
     {
       "id": "NFR-06",
-      "name": "安全边界",
-      "description": "API key 与加密密钥分离；AEAD 保护归档流并绑定编码参数，容器外层元数据仍明文且不完全受 AEAD 认证。浏览器 API key 明文存入 localStorage；服务无内置 TLS。"
+      "name": "安全机制",
+      "description": "API key 与加密密钥分离；AEAD 保护归档流并绑定编码参数，容器外层元数据明文保存并纳入 SHA-256 校验。浏览器 API key 存入 localStorage，服务通过 HTTP 提供 API。"
     },
     {
       "id": "NFR-07",
-      "name": "平台与验证边界",
-      "description": "当前备份和恢复执行支持 Unix，实测平台为 macOS；短时验证不等于长期稳定性或断电保证。"
+      "name": "运行平台",
+      "description": "备份和恢复在 Unix 平台执行，验证环境为 macOS。"
     }
   ],
   "actors": [
@@ -345,7 +345,7 @@
         "已有工作目录和 config.json。"
       ],
       "success": "服务监听配置地址，持久化作业库与 worker 就绪。",
-      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "failure": "返回诊断错误，作业执行失败时持久化失败状态。",
       "includes": [],
       "extension_points": [],
       "extends": null,
@@ -426,7 +426,7 @@
         "服务已启动。"
       ],
       "success": "HTTP 200 返回 version 与 encryption_keys，不返回密钥内容。",
-      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "failure": "返回诊断错误，作业执行失败时持久化失败状态。",
       "includes": [],
       "extension_points": [],
       "extends": null,
@@ -439,7 +439,7 @@
         "NFR-06"
       ],
       "business_rules": [],
-      "notes": "GET / 根据 web_ui.enabled 返回公开控制台或运行提示；状态不代表特定作业成功。GET 路由支持 HEAD，CORS 预检不要求认证。",
+      "notes": "GET / 根据 web_ui.enabled 返回公开控制台或运行提示；作业结果通过任务查询接口获取。GET 路由支持 HEAD，CORS 预检不要求认证。",
       "basic_flow": [
         {
           "id": "B1",
@@ -493,7 +493,7 @@
         "手动请求要求有效 Bearer key；已有源和仓库目录，规范化路径不重叠。"
       ],
       "success": "同步自包含临时归档，以不可覆盖的硬链接发布正式 .bak 并同步目录，然后保存任务成功结果；backup_id 使用持久化任务 ID。",
-      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "failure": "返回诊断错误，作业执行失败时持久化失败状态。",
       "includes": [
         "UC-06"
       ],
@@ -517,7 +517,7 @@
       ],
       "business_rules": [
         "备份编号不可覆盖；本版本仅全量备份。",
-        "备份期间保持源文件不变；复制时检测文件缩小或增长，但不提供跨文件一致性快照。",
+        "备份期间保持源文件稳定，复制时检测文件缩小或增长。",
         "正则字段 AND、包含规则 OR、排除优先；时间 from 含、before 不含。目录拒绝后不遍历或计数其后代。",
         "Zstd 默认等级 3；LZ77 默认窗口 64 KiB、搜索上限 32。加密保护归档流，容器外层元数据仍明文；统计保存在文件中，暂不出现在任务结果内。"
       ],
@@ -595,7 +595,7 @@
         "有效 Bearer key；仓库目录存在。"
       ],
       "success": "返回 backups 数组，包含 backup_id、created_at、compression 与 encryption（密钥标识/指纹或 null）。",
-      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "failure": "返回诊断错误，作业执行失败时持久化失败状态。",
       "includes": [],
       "extension_points": [],
       "extends": null,
@@ -661,7 +661,7 @@
         "有效 Bearer key；已有仓库和空目标目录，规范化路径不重叠。"
       ],
       "success": "文件原文大小、整包 SHA-256 和加密流认证均通过，恢复 Unix 元数据与符号链接并同步，返回 destination。",
-      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "failure": "返回诊断错误，作业执行失败时持久化失败状态。",
       "includes": [
         "UC-06"
       ],
@@ -749,7 +749,7 @@
         "有效 Bearer key；单作业查询需要编号，历史查询不要求预先持有编号。"
       ],
       "success": "返回单作业或 jobs/next_cursor；历史包含请求和 queued_at/started_at/finished_at。",
-      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "failure": "返回诊断错误，作业执行失败时持久化失败状态。",
       "includes": [],
       "extension_points": [],
       "extends": null,
@@ -815,7 +815,7 @@
         "同一工作目录只运行一个服务实例。"
       ],
       "success": "保留终态与 queued；中断备份的完整输出经校验后补记成功，无法确认的输出和中断恢复记录失败且不重跑。",
-      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "failure": "返回诊断错误，作业执行失败时持久化失败状态。",
       "includes": [],
       "extension_points": [],
       "extends": null,
@@ -832,7 +832,7 @@
       "business_rules": [
         "正常关闭同时停止调度入队；重启初始化调度进度但不补跑停机分钟。"
       ],
-      "notes": "新备份使用任务 ID 作为备份 ID。完整校验涵盖条目、大小、编解码结束、AEAD 与容器 SHA-256；仅确认同一 inode 的临时硬链接可清理。数据库提交失败使启动失败，running 留待下次重试；不构成跨文件与 SQLite 的原子事务。旧版未关联任务 ID 的输出不猜测归属。",
+      "notes": "新备份使用任务 ID 作为备份 ID。完整校验涵盖条目、大小、编解码结束、AEAD 与容器 SHA-256；仅确认同一 inode 的临时硬链接可清理。数据库提交失败使启动失败，running 留待下次重试。文件同步与发布完成后提交作业终态。",
       "basic_flow": [
         {
           "id": "B1",

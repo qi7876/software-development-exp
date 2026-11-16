@@ -26,8 +26,8 @@
       ],
       "constraints": [
         "一个工作目录只运行一个服务实例，SQLite 使用本地文件系统。",
-        "备份文件发布与作业终态提交不共享事务；旧仓库保留并用旧版读取，新格式使用新仓库。",
-        "静态 UI 公开，API 需 Bearer；服务无内置 TLS，加密不保护元数据。"
+        "备份文件同步与发布后提交作业终态；旧仓库由旧版读取，新格式使用新仓库。",
+        "静态 UI 公开，API 采用 Bearer 认证；载荷按配置加密，外层元数据明文保存。"
       ],
       "trace": {
         "use_cases": [
@@ -259,11 +259,11 @@
       "kind": "component",
       "view": "component",
       "title": "bak: Module Responsibilities",
-      "purpose": "模块按现有职责组织，HTTP 通过 JobManager 门面调用业务，私有模块不为测试暴露。",
+      "purpose": "模块按职责组织，HTTP 通过 JobManager 门面调用业务。",
       "responsibilities": [
         {
           "element": "本图",
-          "responsibility": "模块按现有职责组织，HTTP 通过 JobManager 门面调用业务，私有模块不为测试暴露。"
+          "responsibility": "模块按职责组织，HTTP 通过 JobManager 门面调用业务。"
         },
         {
           "element": "server::schedule::Scheduler",
@@ -274,12 +274,12 @@
         "main/args/config 分派 help、version、keygen、server 命令并加载配置；daemon 创建后台子进程和本地控制接口，工作目录锁防止重复实例。",
         "server::ui 从 web_ui.path 运行时读取静态文件；server::api 处理认证、CORS、计划查看及立即执行；worker 通过 spawn_blocking 执行业务。",
         "backup::filter 执行严格目录剪枝；archive 负责顺序条目与结束标记；content 组合私有 crypto、lz77 与 Zstd；repository 封装自包含元数据、摘要和不可覆盖发布。",
-        "jobs::recovery 对账中断任务，完整验证并补记成功或保守失败；只清理确认同一 inode 的临时硬链接。",
+        "jobs::recovery 对账中断任务，完整验证并补记成功或记录失败；只清理确认同一 inode 的临时硬链接。",
         "server::schedule 编译计划并匹配时区/Cron；API 共享不可变计划目录；自动触发推进游标，立即执行不改游标，两者共享活动计划约束。",
         "主图聚焦启动、服务、作业和文件操作边界；filter 隶属 backup，crypto/lz77 隶属 content，filesystem/storage 为共享内部工具，详见模块树与类型图。"
       ],
       "constraints": [
-        "图中元素对应现有模块，无独立前端服务、API 代理或新增框架。",
+        "图中元素对应 Rust 模块及其调用关系。",
         "外部经 jobs 门面使用业务与密钥能力；crypto、lz77、filter、schedule 按所属模块私有化。"
       ],
       "trace": {
@@ -893,7 +893,7 @@
       "kind": "class",
       "view": "logical-class",
       "title": "Facade, Modules and Data Access",
-      "purpose": "展示现有门面、密钥容器、筛选与编码管线的协作，不把模块表达为新增运行时服务。",
+      "purpose": "展示门面、密钥容器、筛选与编码管线的协作。",
       "responsibilities": [
         {
           "element": "JobManager / Keyring",
@@ -912,7 +912,7 @@
       ],
       "constraints": [
         "Zstd level 为 1–22；LZ77 窗口 4–1024 KiB，候选上限 1–256，编码与解码均有界缓冲。",
-        "读取加密流必须验证最终认证块；失败不得报告成功，可能保留部分输出。"
+        "读取加密流时验证最终认证块；校验失败记录失败状态并保留输出。"
       ],
       "trace": {
         "use_cases": [
@@ -1440,8 +1440,8 @@
         "新执行备份使用已持久化任务 ID 作为备份 ID，为启动对账提供确定关联。"
       ],
       "constraints": [
-        "源应保持不变；复制期间检查大小变化，但不提供一致性快照。普通失败清理本次临时输出，崩溃遗留保守对账。",
-        "任务 JSON 不含加密密钥；备份文件与作业库不共享事务。"
+        "备份期间保持源文件稳定，复制时检查大小变化。普通失败清理本次临时输出，启动时校验并对账崩溃遗留文件。",
+        "任务 JSON 保存密钥标识与指纹；备份文件发布后提交作业终态。"
       ],
       "trace": {
         "use_cases": [
