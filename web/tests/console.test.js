@@ -118,7 +118,7 @@ async function startServer(
       },
     }),
   );
-  child = spawn(join(project, "target/debug/bak"), ["-d", directory], {
+  child = spawn(join(project, "target/debug/bak"), ["server", "start", "--foreground", "-d", directory], {
     stdio: ["ignore", "pipe", "pipe"],
   });
   const url = await new Promise((resolveReady, reject) => {

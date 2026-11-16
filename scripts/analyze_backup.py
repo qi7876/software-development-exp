@@ -83,7 +83,7 @@ class Server:
         self.log_path.write_text("")
         self.log = self.tool_log_path.open("w")
         self.trace = directory / "recording.trace"
-        self.command = [str(binary), "-d", str(directory)]
+        self.command = [str(binary), "server", "start", "--foreground", "-d", str(directory)]
         wrapper = (
             [
                 "xcrun",
