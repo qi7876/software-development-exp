@@ -20,6 +20,8 @@ const state = {
   selection: null,
   jobsRequest: 0,
   repositoryRequest: 0,
+  schedulesRequest: 0,
+  scheduleSubmission: false,
 };
 const statuses = {
   queued: "Queued",
@@ -31,6 +33,7 @@ const views = {
   backup: "Create backup",
   repository: "Backup repository",
   jobs: "Task records",
+  schedules: "Scheduled backups",
   connections: "Connections",
 };
 const storageKey = "bak.connections.v1";
@@ -45,6 +48,7 @@ function showView(focus = false) {
     else link.removeAttribute("aria-current");
   });
   document.title = `bak · ${views[view]}`;
+  if (view === "schedules" && state.connected) void refreshSchedules();
   if (focus) {
     $(`${view}-title`).focus({ preventScroll: true });
     scrollTo(0, 0);
@@ -161,6 +165,8 @@ function resetSession() {
   state.connected = false;
   state.jobsRequest++;
   state.repositoryRequest++;
+  state.schedulesRequest++;
+  state.scheduleSubmission = false;
   state.jobs = [];
   state.backups = [];
   state.repository = "";
@@ -199,7 +205,7 @@ function resetSession() {
   $("jobs-page").textContent = "Page 1";
   $("backup-job-link").hidden = true;
   $("restore-dialog").close();
-  ["connection", "backup", "repository", "jobs", "restore"].forEach((name) =>
+  ["connection", "backup", "repository", "jobs", "restore", "schedules"].forEach((name) =>
     message(`${name}-message`),
   );
   $("repository-label").textContent = "No repository loaded";
@@ -207,6 +213,8 @@ function resetSession() {
   $("job-list").replaceChildren(empty("Not connected."));
   delete $("job-list").dataset.snapshot;
   $("backup-list").replaceChildren(empty("No repository loaded."));
+  $("schedule-list").replaceChildren(empty("Not connected."));
+  $("schedules-timezone").textContent = "";
   renderConnections();
 }
 
@@ -374,6 +382,7 @@ async function connectProfile(connection, save = false) {
     renderConnections();
     message("connection-message", "Connected.");
     await refreshJobs();
+    if (location.hash === "#schedules" && attempt === state.connectionAttempt) void refreshSchedules();
   } catch (error) {
     if (attempt === state.connectionAttempt)
       report("connection-message", error);
@@ -749,6 +758,78 @@ $("restore-form").addEventListener("submit", async (event) => {
     $("restore-button").disabled = false;
   }
 });
+
+async function refreshSchedules() {
+  if (!state.connected) return;
+  const request = ++state.schedulesRequest;
+  $("refresh-schedules").disabled = true;
+  message("schedules-message", "Reading plans…");
+  try {
+    const result = await api("/api/schedules");
+    if (request !== state.schedulesRequest) return;
+    $("schedules-timezone").textContent = `Schedule timezone: ${result.timezone}`;
+    renderSchedules(result.plans);
+    message("schedules-message");
+  } catch (error) {
+    if (request === state.schedulesRequest) report("schedules-message", error);
+  } finally {
+    if (request === state.schedulesRequest && state.connected)
+      $("refresh-schedules").disabled = false;
+  }
+}
+
+function renderSchedules(plans) {
+  const list = $("schedule-list");
+  list.replaceChildren();
+  if (!plans.length) {
+    list.append(empty("No scheduled backup plans configured."));
+    return;
+  }
+  for (const plan of plans) {
+    const row = node("article", "job");
+    const heading = node("div", "job-heading");
+    heading.append(node("h2", "job-title", plan.id), node("span", "badge", plan.enabled ? "Automatic: enabled" : "Automatic: disabled"));
+    const fields = node("dl");
+    for (const [label, value] of [
+      ["Cron", plan.cron], ["Source", plan.source], ["Repository", plan.repository],
+      ["Storage", storageMode(plan)], ["Encryption key", plan.encryption?.key_id || "None"],
+    ]) fields.append(node("dt", "", label), node("dd", "", value));
+    const filters = node("details");
+    filters.append(node("summary", "", "Filters"), node("pre", "mono schedule-filter", JSON.stringify(plan.filter, null, 2)));
+    const actions = node("div", "job-actions");
+    const run = node("button", "primary", "Back up now");
+    run.type = "button";
+    run.dataset.runSchedule = plan.id;
+    run.disabled = state.scheduleSubmission || !state.connected;
+    run.addEventListener("click", () => void runSchedule(plan.id));
+    actions.append(filters, run);
+    row.append(heading, fields, actions);
+    list.append(row);
+  }
+}
+
+async function runSchedule(id) {
+  if (!state.connected || state.scheduleSubmission) return;
+  const session = state.session;
+  state.scheduleSubmission = true;
+  document.querySelectorAll("[data-run-schedule]").forEach((button) => { button.disabled = true; });
+  message("schedules-message", "Submitting backup task…");
+  try {
+    const job = await api(`/api/schedules/${encodeURIComponent(id)}/run`, { method: "POST" });
+    if (session.signal.aborted) return;
+    navigate("jobs");
+    await submitted(job, "jobs-message");
+  } catch (error) {
+    if (!session.signal.aborted) report("schedules-message", error);
+  } finally {
+    if (!session.signal.aborted) {
+      state.scheduleSubmission = false;
+      document.querySelectorAll("[data-run-schedule]").forEach((button) => { button.disabled = !state.connected; });
+    }
+  }
+}
+
+$("refresh-schedules").addEventListener("click", refreshSchedules);
 
 async function refreshJobs() {
   if (!state.connected) return;

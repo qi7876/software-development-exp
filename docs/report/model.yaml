@@ -632,7 +632,7 @@
         "BackupOptions.compression 为 Option<CompressionOptions>；None 禁用，Some 为 Zstd 或 LZ77 专属配置，API、任务与仓库元数据均使用带 algorithm 标签的对象。",
         "Encryption 包含 algorithm、key_id 与 fingerprint，不保存密钥材料；Filter 的规则也随请求持久化。",
         "ManifestEntry 是结构体，kind 才是区分 File/Directory/Symlink 的枚举。UnixMetadata 包含纳秒时间戳。",
-        "手动作业的 schedule_id/scheduled_for 均为空；定时作业保存稳定计划标识和匹配分钟的 UTC Unix 毫秒。"
+        "普通手动备份的 schedule_id/scheduled_for 均为空；自动触发保存计划标识和匹配分钟，立即运行计划保存计划标识与请求时刻；时间均为 UTC Unix 毫秒。"
       ],
       "constraints": [
         "仓库保存完整算法配置，XChaCha 载荷 v2 或 AES 载荷 v3 对配置进行认证；恢复自动使用记录的解码器。",

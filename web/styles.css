@@ -341,6 +341,7 @@ body:has(#connection-status[data-state="connected"]) .connect-notice {
 .backup-list,
 .connection-list,
 #job-list > .job,
+#schedule-list > .job,
 .pagination,
 #backup-form > fieldset > .form-grid {
   border: 1px solid var(--border-strong);
@@ -485,12 +486,14 @@ body:has(#connection-status[data-state="connected"]) .connect-notice {
 }
 
 /* Jobs */
-#job-list {
+#job-list,
+#schedule-list {
   display: grid;
   gap: 8px;
   margin-top: 12px;
 }
-#job-list > .empty-state {
+#job-list > .empty-state,
+#schedule-list > .empty-state {
   border: 1px dashed var(--border-strong);
 }
 .job {
@@ -735,3 +738,8 @@ dialog label {
   }
 }
 
+
+.schedule-filter {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EncryptionRequest {
     pub(crate) algorithm: EncryptionAlgorithm,

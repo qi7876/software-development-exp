@@ -14,7 +14,7 @@ pub(crate) struct ScheduleConfig {
     #[serde(default)]
     plans: Vec<PlanConfig>,
 }
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PlanConfig {
     id: String,
@@ -36,14 +36,45 @@ fn compression() -> Option<CompressionOptions> {
     BackupOptions::default().compression
 }
 
+impl PlanConfig {
+    fn request(&self, keys: &crate::jobs::Keyring) -> Result<JobRequest, JobError> {
+        let encryption = self
+            .encryption
+            .as_ref()
+            .map(|e| e.resolve(keys))
+            .transpose()
+            .map_err(|e| JobError::new(e.code, format!("schedule {}: {}", self.id, e.message)))?;
+        Ok(JobRequest::Backup {
+            source: self.source.clone(),
+            repository: self.repository.clone(),
+            filter: Box::new(self.filter.clone()),
+            options: BackupOptions {
+                compression: self.compression.clone(),
+                encryption,
+            },
+        })
+    }
+}
+
 pub(crate) struct Scheduler {
     timezone: Tz,
     plans: Vec<Plan>,
+    configured_plans: Vec<PlanConfig>,
 }
 struct Plan {
     id: String,
     cron: Cron,
     request: JobRequest,
+}
+
+impl Default for Scheduler {
+    fn default() -> Self {
+        Self {
+            timezone: chrono_tz::UTC,
+            plans: Vec::new(),
+            configured_plans: Vec::new(),
+        }
+    }
 }
 
 impl Scheduler {
@@ -52,10 +83,7 @@ impl Scheduler {
         keys: &crate::jobs::Keyring,
     ) -> Result<Self, JobError> {
         let Some(config) = config else {
-            return Ok(Self {
-                timezone: chrono_tz::UTC,
-                plans: Vec::new(),
-            });
+            return Ok(Self::default());
         };
         let timezone = config
             .timezone
@@ -63,7 +91,7 @@ impl Scheduler {
             .map_err(|e| JobError::internal(format!("scheduled_backups timezone: {e}")))?;
         let mut plans = Vec::new();
         let mut ids = BTreeSet::new();
-        for plan in config.plans {
+        for plan in &config.plans {
             let mut validate = || -> Result<Cron, JobError> {
                 if plan.id.trim().is_empty() || !ids.insert(plan.id.clone()) {
                     return Err(JobError::internal("plan id must be nonempty and unique"));
@@ -97,28 +125,36 @@ impl Scheduler {
             if !plan.enabled {
                 continue;
             }
-            let encryption = plan
-                .encryption
-                .as_ref()
-                .map(|e| e.resolve(keys))
-                .transpose()
-                .map_err(|e| JobError::internal(format!("schedule {}: {e}", plan.id)))?;
             plans.push(Plan {
-                id: plan.id,
+                id: plan.id.clone(),
                 cron,
-                request: JobRequest::Backup {
-                    source: plan.source,
-                    repository: plan.repository,
-                    filter: Box::new(plan.filter),
-                    options: BackupOptions {
-                        compression: plan.compression,
-                        encryption,
-                    },
-                },
+                request: plan.request(keys)?,
             });
         }
-        Ok(Self { timezone, plans })
+        Ok(Self {
+            timezone,
+            plans,
+            configured_plans: config.plans,
+        })
     }
+
+    pub(super) fn describe(&self) -> serde_json::Value {
+        serde_json::json!({"timezone": self.timezone.to_string(), "plans": self.configured_plans})
+    }
+
+    pub(super) fn request(
+        &self,
+        id: &str,
+        keys: &crate::jobs::Keyring,
+    ) -> Result<JobRequest, JobError> {
+        let plan = self
+            .configured_plans
+            .iter()
+            .find(|plan| plan.id == id)
+            .ok_or_else(|| JobError::new(http::StatusCode::NOT_FOUND, "schedule not found"))?;
+        plan.request(keys)
+    }
+
     pub(crate) async fn initialize(
         &self,
         jobs: &JobManager,
@@ -146,7 +182,7 @@ impl Scheduler {
         Ok(())
     }
     pub(crate) async fn run(
-        self,
+        &self,
         jobs: JobManager,
         mut stop: watch::Receiver<bool>,
     ) -> Result<(), JobError> {

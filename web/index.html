@@ -20,6 +20,9 @@
         <a href="#repository">
           <span>Backup repository</span>
         </a>
+        <a href="#schedules">
+          <span>Scheduled backups</span>
+        </a>
         <a href="#jobs">
           <span>Task records</span>
         </a>
@@ -389,6 +392,17 @@
             <div class="empty-state"><p>No repository loaded.</p></div>
           </div>
         </div>
+      </section>
+
+      <section id="schedules" class="view" aria-labelledby="schedules-title" hidden>
+        <div class="view-heading">
+          <h1 id="schedules-title" tabindex="-1">Scheduled backups</h1>
+          <button id="refresh-schedules" type="button" data-connected disabled>Refresh</button>
+        </div>
+        <p class="view-meta">Plans come from the service configuration. Back up now uses the saved settings without changing the automatic schedule.</p>
+        <p id="schedules-timezone" class="view-meta"></p>
+        <p id="schedules-message" class="message" role="status"></p>
+        <div id="schedule-list"><div class="empty-state"><p>Not connected.</p></div></div>
       </section>
 
       <section id="jobs" class="view" aria-labelledby="jobs-title" hidden>

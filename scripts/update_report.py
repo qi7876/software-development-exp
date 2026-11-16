@@ -510,6 +510,11 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
                 "返回编号、创建时间、压缩状态与密钥信息；时间降序、同时间编号升序。",
             ),
             (
+                "GET /api/schedules；POST /api/schedules/{id}/run",
+                "查看全部配置计划（含禁用项）；按保存配置立即入队，返回 202/Location。"
+                "同计划忙碌返回 409，不存在返回 404，缺少密钥返回 400；不改变 Cron 游标。",
+            ),
+            (
                 "POST /api/restores",
                 "JSON: repository、backup_id、destination；返回 202 和持久化作业。",
             ),
@@ -685,7 +690,8 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "任务保存配置快照以及 schedule_id、scheduled_for（匹配分钟的 UTC Unix 毫秒）；"
-        "手动任务这两个字段均为空。任务详情展示计划来源，无计划管理 API 或页面。"
+        "普通手动备份这两个字段均为空；立即运行计划使用计划 ID 与请求时刻。"
+        "控制台可查看全部计划并立即执行，编辑仍需修改配置后重启。"
         "调度器与 HTTP、worker 共同受监督；调度失败使服务失败退出，"
         "正常关闭停止新增任务并等待活动操作，已提交 queued 作业留给重启。"
         "作业库升级至 v5 不迁移，已有 v5 仓库仍可继续使用。",

@@ -71,6 +71,7 @@ async function startServer(
   apiSecret = secret,
   webUi = true,
   encryption = false,
+  scheduledBackups = undefined,
 ) {
   const directory = await mkdtemp(join(tmpdir(), "bak-browser-"));
   let child;
@@ -111,6 +112,7 @@ async function startServer(
       listen: "127.0.0.1:0",
       secret_key: apiSecret,
       web_ui: { enabled: webUi, path: join(project, "web") },
+      scheduled_backups: scheduledBackups,
       encryption: {
         keys: encryption
           ? { current: "current.key", previous: "previous.key" }
@@ -186,7 +188,7 @@ test(
     assert.equal(await page.locator("#backup-button").isDisabled(), true);
     assert.deepEqual(
       (await page.locator(".sidebar nav a").allTextContents()).map((text) => text.trim()),
-      ["Create backup", "Backup repository", "Task records", "Manage connections"],
+      ["Create backup", "Backup repository", "Scheduled backups", "Task records", "Manage connections"],
     );
     assert.equal(
       await page.getByRole("button", { name: "Disconnect", exact: true }).count(),
@@ -1270,5 +1272,115 @@ test(
     );
     assert.equal(await page.locator("#lz77-window").inputValue(), "64");
     assert.equal(await page.locator("#lz77-search-depth").inputValue(), "32");
+  },
+);
+
+test(
+  "scheduled plans show saved settings, run real backups, and clear on service switches",
+  { timeout: 60000 },
+  async (t) => {
+    const planId = "manual /<img src=x onerror=alert(1)>";
+    const plans = {
+      timezone: "Asia/Shanghai",
+      plans: [
+        { id: "automatic", cron: "0 0 29 2 *", source: "source", repository: "repo with space" },
+        {
+          id: planId, enabled: false, cron: "0 2 * * *", source: "source", repository: "repo with space",
+          filter: emptyFilter(), compression: { algorithm: "lz77", window_kib: 8, search_depth: 4 },
+          encryption: { algorithm: "aes-256-gcm", key_id: "current" },
+        },
+        {
+          id: "missing-key", enabled: false, cron: "0 2 * * *", source: "source", repository: "repo with space",
+          encryption: { algorithm: "aes-256-gcm", key_id: "missing" },
+        },
+      ],
+    };
+    const local = await startServer(t, secret, true, true, plans);
+    const remote = await startServer(t, "remote-schedule-key", false);
+    const browser = await chromium.launch({ channel: process.env.BAK_BROWSER_CHANNEL || undefined });
+    t.after(() => browser.close());
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto(local.url);
+    await page.locator('nav a[href="#schedules"]').click();
+    assert.equal(await page.locator("#refresh-schedules").isDisabled(), true);
+    assert.match(await page.locator("#schedule-list").textContent(), /Not connected/);
+    await page.locator("#open-connection").click();
+    await page.locator("#secret").fill(secret);
+    await page.locator("#connect-button").click();
+    await page.waitForFunction(() => !document.getElementById("refresh-jobs").disabled);
+    await page.locator('nav a[href="#schedules"]').click();
+    await page.waitForFunction(() => document.querySelectorAll("#schedule-list article").length === 3);
+    assert.match(await page.locator("#schedules-timezone").textContent(), /Asia\/Shanghai/);
+    const automatic = page.locator("#schedule-list article").nth(0);
+    const manual = page.locator("#schedule-list article").nth(1);
+    assert.match(await automatic.textContent(), /Automatic: enabled/);
+    assert.match(await manual.textContent(), /Automatic: disabled/);
+    assert.equal(await manual.locator("h2").textContent(), planId);
+    assert.equal(await page.locator("#schedule-list img, #schedule-list script").count(), 0);
+    assert.match(await manual.textContent(), /LZ77 · 8 KiB · 4 candidates/);
+    assert.match(await manual.textContent(), /AES-256-GCM/);
+    await manual.locator("summary").click();
+    assert.match(await manual.locator("pre").textContent(), /relative_path/);
+
+    await page.locator("#schedule-list article").nth(2).getByRole("button", { name: "Back up now" }).click();
+    await page.locator("#schedules-message.error").waitFor();
+    assert.match(await page.locator("#schedules-message").textContent(), /missing.*not configured/);
+    const accepted = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/run"));
+    await manual.getByRole("button", { name: "Back up now" }).click();
+    assert.equal((await accepted).status(), 202);
+    await page.locator("#jobs").waitFor();
+    await refreshUntil(page, () => Boolean(document.querySelector("#job-list .badge.succeeded")));
+    await page.locator("#job-list summary").click();
+    assert.match(await page.locator("#job-list").textContent(), /Schedule ID/);
+    assert.ok((await page.locator("#job-list").textContent()).includes(planId));
+    const historyResponse = await fetch(`${local.url}/api/jobs`, { headers: { Authorization: `Bearer ${secret}` } });
+    const job = (await historyResponse.json()).jobs[0];
+    assert.equal(job.schedule_id, planId);
+    assert.equal(job.request.compression.algorithm, "lz77");
+    assert.equal(job.request.encryption.key_id, "current");
+    const restored = await fetch(`${local.url}/api/restores`, {
+      method: "POST", headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ repository: "repo with space", backup_id: job.result.backup_id, destination: "restored" }),
+    });
+    assert.equal(restored.status, 202);
+    await refreshUntil(page, () => document.querySelectorAll("#job-list .badge.succeeded").length === 2);
+    assert.deepEqual(await tree(join(local.directory, "restored")), await tree(join(local.directory, "source")));
+
+    await page.locator('nav a[href="#schedules"]').click();
+    await page.waitForFunction(() => !document.getElementById("refresh-schedules").disabled);
+    await page.route("**/api/schedules", (route) => route.abort());
+    await page.locator("#refresh-schedules").click();
+    await page.locator("#schedules-message.error").waitFor();
+    assert.equal(await page.locator("#schedule-list article").count(), 3);
+    await page.unroute("**/api/schedules");
+    await page.locator("#refresh-schedules").click();
+    await page.waitForFunction(() => !document.getElementById("refresh-schedules").disabled && !document.getElementById("schedules-message").classList.contains("error"));
+
+    // Hold a response from the old service while switching; it must not repopulate its plans.
+    let release;
+    let intercepted;
+    const held = new Promise((resolveHeld) => { intercepted = resolveHeld; });
+    const gate = new Promise((resolveGate) => { release = resolveGate; });
+    await page.route(`${local.url}/api/schedules`, async (route) => {
+      const response = await route.fetch();
+      intercepted();
+      await gate;
+      await route.fulfill({ response }).catch(() => {});
+    });
+    await page.locator("#refresh-schedules").click();
+    await held;
+    await page.locator("#open-connection").click();
+    await page.locator("#api-url").fill(remote.url);
+    await page.locator("#secret").fill("remote-schedule-key");
+    await page.locator("#connect-button").click();
+    await page.waitForFunction(() => !document.getElementById("connect-button").disabled && !document.getElementById("refresh-jobs").disabled);
+    release();
+    await page.locator('nav a[href="#schedules"]').click();
+    await page.waitForFunction(() => document.getElementById("schedule-list").textContent.includes("No scheduled backup plans"));
+    assert.equal(await page.locator("#schedule-list article").count(), 0);
+    assert.match(await page.locator("#schedules-timezone").textContent(), /UTC/);
+    assert.deepEqual(errors, []);
   },
 );
