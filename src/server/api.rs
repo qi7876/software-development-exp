@@ -316,11 +316,8 @@ mod tests {
     async fn routing_auth_and_input_errors_follow_the_public_contract() -> Result<(), Box<dyn Error>>
     {
         let directory = TestDirectory::new()?;
-        let jobs = JobManager::open(
-            directory.path().to_owned(),
-            crate::jobs::crypto::Keyring::default(),
-        )
-        .await?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crate::jobs::Keyring::default()).await?;
         let app = router(
             jobs.clone(),
             "test-key".into(),
@@ -494,11 +491,8 @@ mod tests {
     #[tokio::test]
     async fn cross_origin_preflight_and_authentication() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
-        let jobs = JobManager::open(
-            directory.path().to_owned(),
-            crate::jobs::crypto::Keyring::default(),
-        )
-        .await?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crate::jobs::Keyring::default()).await?;
         let app = router(
             jobs.clone(),
             "test-key".into(),
@@ -553,11 +547,8 @@ mod tests {
     async fn external_console_is_optional_and_api_stays_authenticated() -> Result<(), Box<dyn Error>>
     {
         let directory = TestDirectory::new()?;
-        let jobs = JobManager::open(
-            directory.path().to_owned(),
-            crate::jobs::crypto::Keyring::default(),
-        )
-        .await?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crate::jobs::Keyring::default()).await?;
         let assets = directory.path().join("console");
         std::fs::create_dir(&assets)?;
         for name in ["index.html", "app.js", "styles.css", "favicon.svg"] {
@@ -657,11 +648,8 @@ mod tests {
     #[tokio::test]
     async fn oversized_json_and_head_requests() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
-        let jobs = JobManager::open(
-            directory.path().to_owned(),
-            crate::jobs::crypto::Keyring::default(),
-        )
-        .await?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crate::jobs::Keyring::default()).await?;
         let app = router(
             jobs.clone(),
             "test-key".into(),
@@ -720,11 +708,8 @@ mod tests {
     #[tokio::test]
     async fn database_admission_failure_returns_json_500() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
-        let jobs = JobManager::open(
-            directory.path().to_owned(),
-            crate::jobs::crypto::Keyring::default(),
-        )
-        .await?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crate::jobs::Keyring::default()).await?;
         jobs.close().await;
         let app = router(
             jobs,

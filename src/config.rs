@@ -13,7 +13,7 @@ pub(crate) struct Config {
     #[serde(default)]
     pub(crate) encryption: EncryptionConfig,
     #[serde(default)]
-    pub(crate) scheduled_backups: Option<crate::schedule::ScheduleConfig>,
+    pub(crate) scheduled_backups: Option<crate::server::ScheduleConfig>,
 }
 
 #[derive(serde::Deserialize, Debug, Default)]

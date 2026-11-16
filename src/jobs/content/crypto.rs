@@ -1,4 +1,4 @@
-use super::JobError;
+use crate::jobs::JobError;
 use aead::{
     Payload,
     stream::{DecryptorBE32, EncryptorBE32},
@@ -28,13 +28,13 @@ pub(crate) enum EncryptionAlgorithm {
     Aes256Gcm,
 }
 impl EncryptionAlgorithm {
-    pub(super) fn format(self) -> &'static str {
+    pub(in crate::jobs) fn format(self) -> &'static str {
         match self {
             Self::XChaCha20Poly1305 => "xchacha20poly1305-stream-be32-v2",
             Self::Aes256Gcm => "aes256gcm-stream-be32-v3",
         }
     }
-    pub(super) fn from_format(value: &str) -> Option<Self> {
+    pub(in crate::jobs) fn from_format(value: &str) -> Option<Self> {
         match value {
             "xchacha20poly1305-stream-be32-v2" => Some(Self::XChaCha20Poly1305),
             "aes256gcm-stream-be32-v3" => Some(Self::Aes256Gcm),
@@ -224,7 +224,7 @@ impl DecryptStream {
     }
 }
 
-pub(super) struct EncryptWriter<W> {
+pub(in crate::jobs) struct EncryptWriter<W> {
     inner: W,
     stream: EncryptStream,
     buffer: Zeroizing<Vec<u8>>,

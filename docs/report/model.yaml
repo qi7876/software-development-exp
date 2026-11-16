@@ -242,7 +242,7 @@
           "responsibility": "模块按现有职责组织，HTTP 通过 JobManager 门面调用业务，私有模块不为测试暴露。"
         },
         {
-          "element": "schedule::Scheduler",
+          "element": "server::schedule::Scheduler",
           "responsibility": "配置校验、分钟匹配、调用持久化入队；不直接读写备份载荷。"
         }
       ],
@@ -250,7 +250,7 @@
         "main/args/config 负责服务启动与 keygen 分支；启动加载 Keyring 后交给 JobManager。",
         "server::ui 提供编译时静态资源，server::api 处理认证、CORS、校验和响应；worker 以 spawn_blocking 执行业务。",
         "backup 使用 filter 严格目录剪枝；archive 顺序打包条目、数据和校验尾部；content 组合可选 Zstd/LZ77 和加密 IO；lz77 自行实现环形窗口与哈希匹配，crypto 管理密钥和 STREAM 帧，repository 原子保存完整编码配置。",
-        "schedule::Scheduler 编译计划、匹配时区与 Cron；JobManager 在一个事务中推进 UTC 游标并判断活动任务后入队，服务器监督调度器、worker 和 HTTP。"
+        "server::schedule::Scheduler 编译计划、匹配时区与 Cron；JobManager 在一个事务中推进 UTC 游标并判断活动任务后入队，服务器监督调度器、worker 和 HTTP。"
       ],
       "constraints": [
         "图中元素对应现有模块，无独立前端服务、API 代理或新增框架。",
@@ -372,7 +372,7 @@
         },
         {
           "id": "Filter",
-          "name": "jobs::filter",
+          "name": "jobs::backup::filter",
           "package": "Job subsystem",
           "type": "component",
           "stereotype": "regex / time / pruning"
@@ -386,21 +386,21 @@
         },
         {
           "id": "Crypto",
-          "name": "jobs::crypto",
+          "name": "jobs::content::crypto",
           "package": "Job subsystem",
           "type": "component",
           "stereotype": "keys / STREAM BE32"
         },
         {
           "id": "Lz77",
-          "name": "jobs::lz77",
+          "name": "jobs::content::lz77",
           "type": "component",
           "package": "Job subsystem",
           "stereotype": "hash-chain LZ77 codec"
         },
         {
           "id": "Scheduler",
-          "name": "schedule::Scheduler",
+          "name": "server::schedule::Scheduler",
           "type": "component",
           "package": "Server boundary",
           "stereotype": "Cron / IANA timezone"
@@ -521,15 +521,15 @@
         },
         {
           "source": "Main",
-          "target": "Crypto",
+          "target": "Jobs",
           "label": "Generate / load keys",
           "direction": "auto",
           "style": "solid"
         },
         {
           "source": "Jobs",
-          "target": "Crypto",
-          "label": "Share Keyring",
+          "target": "Content",
+          "label": "Expose key management",
           "direction": "auto",
           "style": "solid"
         },

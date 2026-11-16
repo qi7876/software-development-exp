@@ -1,20 +1,20 @@
-use super::{
-    JobError,
-    crypto::{DecryptReader, EncryptWriter, Encryption, EncryptionAlgorithm, Keyring},
-};
+mod crypto;
+mod lz77;
+
+use super::JobError;
+use crypto::{DecryptReader, EncryptWriter};
+pub(crate) use crypto::{Encryption, EncryptionAlgorithm, Keyring, generate as generate_key};
+pub(crate) use lz77::Lz77Options;
 use sha2::{Digest, Sha256};
 use std::{
     io::{self, BufReader, Read, Write},
     path::Path,
 };
 
-use super::lz77;
-pub(crate) use super::lz77::Lz77Options;
-
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EncryptionRequest {
-    pub(crate) algorithm: super::crypto::EncryptionAlgorithm,
+    pub(crate) algorithm: EncryptionAlgorithm,
     pub(crate) key_id: String,
 }
 impl EncryptionRequest {

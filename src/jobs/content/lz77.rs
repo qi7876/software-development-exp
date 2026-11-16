@@ -50,7 +50,7 @@ fn byte<R: Read>(reader: &mut R) -> io::Result<Option<u8>> {
     }
 }
 
-pub(super) struct Encoder<W: Write> {
+pub(in crate::jobs) struct Encoder<W: Write> {
     inner: BufWriter<W>,
     history: Vec<u8>,
     heads: Vec<u64>,
@@ -229,7 +229,7 @@ enum Token {
     Reference { distance: usize, remaining: usize },
     End,
 }
-pub(super) struct Decoder<R> {
+pub(in crate::jobs) struct Decoder<R> {
     inner: BufReader<R>,
     history: Vec<u8>,
     cursor: usize,

@@ -2,8 +2,7 @@ use crate::jobs::repository::ManifestEntryKind;
 
 use super::{
     JobError, archive,
-    content::{BackupOptions, Checksum, Content},
-    crypto::Keyring,
+    content::{BackupOptions, Checksum, Content, Keyring},
     filesystem::{get_absolute_directory_path, paths_overlap},
     repository::{Manifest, ManifestEntry},
 };

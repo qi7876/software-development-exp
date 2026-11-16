@@ -1,10 +1,13 @@
+mod filter;
+
+use filter::CompiledFilter;
+pub(crate) use filter::Filter;
+
 use super::{
     JobError, archive,
-    content::{BackupOptions, Checksum, Content},
-    crypto::Keyring,
+    content::{BackupOptions, Checksum, Content, Keyring},
     filesystem::{get_absolute_directory_path, paths_overlap, sync_directory},
-    filter::{CompiledFilter, Filter},
-    repository::{Manifest, ManifestEntry, ManifestEntryKind, UnixMetadata},
+    repository::{BackupStats, Manifest, ManifestEntry, ManifestEntryKind, UnixMetadata},
 };
 use chrono::{SecondsFormat, Utc};
 use http::StatusCode;
@@ -23,13 +26,6 @@ enum BackupEntryKind {
     File,
     Directory,
     Symlink,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub(super) struct BackupStats {
-    pub(super) entries_created: i64,
-    pub(super) skipped_unsupported: i64,
-    pub(super) skipped_filtered: i64,
 }
 
 fn walk_directory(

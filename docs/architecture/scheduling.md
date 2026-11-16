@@ -1,6 +1,6 @@
 # Scheduled backup lifecycle
 
-Optional config.json scheduled_backups owns an IANA timezone and stable named plans. The service validates and compiles enabled requests before binding HTTP or starting workers. Disabled plans still receive structural, Cron, compression and filter validation; their keys need not be present. Config changes require restart. The schedule parser uses croner's Chrono backend; chrono-tz supplies bundled IANA rules.
+The private `server::schedule` module implements the scheduler; `server` exports `ScheduleConfig` for configuration loading. Optional config.json scheduled_backups owns an IANA timezone and stable named plans. The service validates and compiles enabled requests before binding HTTP or starting workers. Disabled plans still receive structural, Cron, compression and filter validation; their keys need not be present. Config changes require restart. The schedule parser uses croner's Chrono backend; chrono-tz supplies bundled IANA rules.
 
 The scheduler checks UTC wall time once per second and matches only the current UTC minute converted to the configured timezone. It never scans elapsed minutes. Initialization advances persisted cursors to at least the startup minute, so startup and restart do not replay missed occurrences. Forward clock jumps and sleep skip elapsed minutes; backward jumps do not revisit minutes below the persisted high-water mark. Local times missing during daylight-saving transitions have no UTC occurrence; repeated local times can match twice, subject to the active-job guard.
 
