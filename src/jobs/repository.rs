@@ -325,6 +325,13 @@ impl PendingArchive {
 
     pub(super) fn publish(mut self, manifest: &Manifest) -> Result<(), JobError> {
         manifest.validate()?;
+        if self.destination.file_stem().and_then(|name| name.to_str())
+            != Some(manifest.backup_id.as_str())
+        {
+            return Err(JobError::internal(
+                "publication ID does not match backup metadata",
+            ));
+        }
         let bytes = serde_json::to_vec(manifest)?;
         if bytes.len() as u64 > MAX_METADATA_SIZE {
             return Err(JobError::internal("backup metadata exceeds 64 MiB"));
@@ -520,6 +527,12 @@ mod tests {
         let mut invalid = metadata("invalid", "2026-11-16T00:00:00Z");
         invalid.backup_stats.entries_created = 1;
         assert!(publish(directory.path(), &invalid).is_err());
+        let mismatch = PendingArchive::create(directory.path(), "wrong-id")?;
+        assert!(
+            mismatch
+                .publish(&metadata("other-id", "2026-11-16T00:00:00Z"))
+                .is_err()
+        );
         assert!(list(directory.path())?.is_empty());
         assert_eq!(std::fs::read_dir(directory.path())?.count(), 1);
         assert_eq!(std::fs::read(orphan)?, b"preserve");

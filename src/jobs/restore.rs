@@ -679,6 +679,33 @@ mod tests {
         }
     }
 
+    #[test]
+    fn copied_backup_restores_without_source_repository_or_async_runtime() -> TestResult {
+        let fixture = Fixture::new()?;
+        std::fs::write(fixture.source.join("file"), b"standalone contents")?;
+        std::fs::create_dir(fixture.source.join("empty"))?;
+        let expected = read_tree(&fixture.source)?;
+        backup::run(
+            &fixture.source,
+            &fixture.repository,
+            &crate::test_support::unfiltered()?,
+            BACKUP_ID,
+        )?;
+        let portable = fixture.directory.path().join("portable");
+        std::fs::create_dir(&portable)?;
+        std::fs::copy(
+            archive::path(&fixture.repository, BACKUP_ID),
+            archive::path(&portable, BACKUP_ID),
+        )?;
+        std::fs::remove_dir_all(&fixture.source)?;
+        std::fs::remove_dir_all(&fixture.repository)?;
+        assert_eq!(super::super::repository::list(&portable)?.len(), 1);
+        run(&portable, BACKUP_ID, &fixture.destination)?;
+        assert_eq!(read_tree(&fixture.destination)?, expected);
+        assert_eq!(std::fs::read_dir(portable)?.count(), 1);
+        Ok(())
+    }
+
     #[tokio::test]
     async fn empty_source_round_trip() -> TestResult {
         check_round_trip(BTreeMap::new(), BTreeSet::new()).await
