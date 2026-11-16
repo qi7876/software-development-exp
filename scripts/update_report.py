@@ -14,6 +14,7 @@ from docx import Document
 from docx.document import Document as DocumentType
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.opc.constants import RELATIONSHIP_TYPE
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
@@ -370,7 +371,7 @@ def _draw_workflow(path: Path) -> None:
         "Browser / API\n202 + job ID",
         "Durable FIFO\njob queue",
         "Filter / encode\nZstd / LZ77 / AEAD",
-        "Sync / publish\nmetadata v5",
+        "Sync + publish\nSelf-contained v9",
         "List published\nbackups",
         "Decode / verify\nUnix metadata",
     )
@@ -386,7 +387,7 @@ def _draw_workflow(path: Path) -> None:
             draw.line((x - 47, 160, x, 160), fill="#61708A", width=5)
     draw.text(
         (40, 310),
-        "Implemented local full-backup workflow; no scheduling or incremental reuse",
+        "Manual / Cron / Run now full backups; verified startup recovery; no incremental reuse",
         font=font,
         fill="#172033",
     )
@@ -432,9 +433,9 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
                 "实际验证平台为 macOS。非 Unix 操作返回 501。",
             ),
             ("存储", "已有源、仓库和恢复目标目录；SQLite 使用本地文件系统。"),
-            ("部署", "同一工作目录仅运行一个服务实例；HTTP 默认示例监听 loopback。"),
-            ("客户端", "curl 或自动化 HTTP 客户端；无独立业务 CLI 或图形控制台。"),
-            ("数据范围", "普通文件、目录和空目录；不支持源内符号链接、权限或修改时间恢复。"),
+            ("部署", "同一工作目录只运行一个服务；后台管理需 Unix，WebUI 从外部目录加载。"),
+            ("客户端", "独立静态 Web 控制台、curl/HTTP 自动化；CLI 管理服务与生成密钥。"),
+            ("数据范围", "普通文件、空目录、Unix 属性和符号链接；特殊文件跳过并统计。"),
         ),
         (2.8, 11.2),
     )
@@ -588,6 +589,14 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "示例配置含公开测试 key，实际使用应更换。"
         "启动错误输出诊断并非零退出；当前 config 允许其他未知字段，不应声称拒绝所有未知字段。",
     )
+    _paragraph(
+        document, anchor,
+        "后台 start 使用独立进程组，输入接空设备，输出追加至 server.log；"
+        "当前用户通过本地 Unix socket 查询状态和优雅停止。"
+        "用户级实例锁与工作目录锁防止重复启动，--foreground 由终端或监督器管理。"
+        "初始化包含启动对账；大备份校验可能较慢，命令显示 PID 和日志并等待就绪，"
+        "不以固定 30 秒强制结束。",
+    )
     _heading(document, anchor, "3.3 持久化与操作生命周期", 2)
     _paragraph(
         document,
@@ -609,11 +618,30 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "中断恢复保留输出且不重放，再继续 queued 作业。"
         "客户端断开不取消已提交作业，重试 POST 会产生新作业。",
     )
+    _paragraph(
+        document, anchor,
+        "自包含文件采用容器 magic、编码载荷、明文 manifest、长度、结束标记和末尾 32 字节摘要。"
+        "SHA-256 覆盖除摘要自身外的全部容器字节，元数据上限 64 MiB；"
+        "密钥标识和指纹写入文件，密钥材料仍在外部。单独复制同名 .bak 到空仓库即可列出与恢复。"
+        "列表只读取元数据而不扫描载荷，成本随文件数和元数据规模增长；"
+        "正式坏文件报错，.partial 被忽略。",
+    )
+    _paragraph(
+        document, anchor,
+        "启动对账只处理 running：新备份 ID 等于已持久化任务 ID，"
+        "校验 ID 和保存参数后完整解码、认证并核对摘要。"
+        "正式文件完整则同步后补记成功；不存在正式文件且仅一个临时文件完整时，不可覆盖地发布后补记成功。"
+        "缺失、损坏、候选不唯一或密钥不可用时失败并保留数据，中断恢复不重跑。"
+        "仅清理与已验证文件属于同一 inode 的临时硬链接；"
+        "数据库提交失败则启动失败，running 留待下次重试。"
+        "已完成历史和 queued 顺序不改；旧版未关联任务 ID 的中断输出不猜测归属。"
+        "这是幂等崩溃恢复，不构成文件系统与 SQLite 的共同事务。",
+    )
     _heading(document, anchor, "3.4 控制台、筛选与编码", 2)
     _paragraph(
         document,
         anchor,
-        "控制台包含创建备份、备份仓库、任务记录及连接管理。"
+        "控制台包含创建备份、备份仓库、定时计划、任务记录及连接管理五个视图。"
         "localStorage 按浏览器 origin "
         "保存规范化 API 地址和明文 API key；"
         "先验证候选服务再切换，成功后终止旧请求并清空服务相关输入与结果，"
@@ -655,7 +683,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         anchor,
         "命名密钥在启动时加载，排队任务固定 key_id 和 "
         "fingerprint 和 algorithm；重启后替换同名密钥不会静默改变任务。"
-        "加密只保护普通文件内容，文件名、大小、校验和、Unix "
+        "加密保护归档流内的条目头与文件数据；外层明文元数据中的文件名、大小、校验和、Unix "
         "元数据和链接目标仍可见。浏览器从不保存服务端加密密钥；"
         "API 认证 key 与加密密钥独立，服务端仍可读取明文。",
     )
@@ -664,7 +692,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         anchor,
         "XChaCha20-Poly1305 保留 v2 认证分块格式；AES-256-GCM 使用 v3 头部，"
         "包含 32 字节随机盐和 7 字节 STREAM nonce 前缀。HKDF-SHA256 从配置密钥派生"
-        "每文件独立的 32 字节密钥。两种算法均采用 128 KiB 分块、16 字节标签和必需的最终块；"
+        "每个归档独立的 32 字节密钥。两种算法均采用 128 KiB 分块、16 字节标签和必需的最终块；"
         "认证数据绑定头部、备份、路径、压缩配置与密钥指纹，AES 另绑定算法。",
     )
     _heading(document, anchor, "3.5 配置式定时备份", 2)
@@ -690,10 +718,11 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         anchor,
         "任务保存配置快照以及 schedule_id、scheduled_for（匹配分钟的 UTC Unix 毫秒）；"
         "普通手动备份这两个字段均为空；立即运行计划使用计划 ID 与请求时刻。"
-        "控制台可查看全部计划并立即执行，编辑仍需修改配置后重启。"
+        "Scheduled backups 页面查看全部启用/停用计划，Back up now 按服务端配置立即入队；"
+        "立即运行不改变 Cron 游标，同计划活动任务返回 409；编辑仍需修改配置后重启。"
         "调度器与 HTTP、worker 共同受监督；调度失败使服务失败退出，"
         "正常关闭停止新增任务并等待活动操作，已提交 queued 作业留给重启。"
-        "作业库升级至 v5 不迁移，已有 v5 仓库仍可继续使用。",
+        "已有 schema-v5 工作目录可继续使用；仓库采用自包含 v9，旧仓库由旧版读取。",
     )
     _heading(document, anchor, "4. 非功能约束")
     _table(
@@ -709,7 +738,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "SQLite 使用 WAL、synchronous=FULL、外键、5 秒 busy timeout 和最多 4 个连接。"
         "只有作业库使用 SQLite；备份文件发布与作业终态提交不共享事务。"
         "崩溃可留下被忽略的临时文件，失败恢复可留下部分输出。"
-        "不检测备份期间的源修改、不自动清理、不导入旧 JSON "
+        "复制时检查大小变化但不提供源快照；只清理确认拥有的临时链接，不导入旧 JSON "
         "manifest/JSONL。HTTP 没有内置 TLS。",
     )
     _heading(document, anchor, "5. 当前闭环与后续展望")
@@ -1023,6 +1052,11 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
                 "时区、日历和夏令时、忙碌跳过、重启去重、时钟跳变、入队失败回滚；"
                 "任务 API 和网页来源展示、调度停止及备份恢复闭环。",
             ),
+            (
+                "自包含与启动对账",
+                "九模式只复制 .bak 到空仓库即可列出/恢复；源和原仓库删除后仍可恢复。"
+                "完整临时文件发布、重复启动、候选歧义、缺少密钥和结果提交失败重试均有回归。",
+            ),
             ("SIGTERM", "停止调度；活动作业完成，queued 留给下一次启动；HTTP 在活动操作期间响应。"),
             (
                 "SIGKILL",
@@ -1041,7 +1075,7 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             anchor,
             f"当前记录日期：{current['recorded_at']}；被测代码提交：{current['production_revision']}；"
             "详见 current-verification.json。"
-            "功能与编解码小样本测量分别记录；未重跑历史端到端性能、稳定性或 "
+            "当前仅执行功能回归和文档检查；未重跑历史编码器、端到端性能、稳定性或 "
             "Instruments。",
         )
         _table(
@@ -1055,7 +1089,7 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
         _paragraph(document, anchor, "当前版本尚无功能回归记录，不能用历史测量代替。")
     if CODEC_MEASUREMENTS_PATH.exists():
         measurement = json.loads(CODEC_MEASUREMENTS_PATH.read_text())
-        _heading(document, anchor, "LZ77 与 Zstd 小样本编解码测量", 2)
+        _heading(document, anchor, "历史编码器小样本：LZ77 与 Zstd", 2)
         _paragraph(
             document,
             anchor,
@@ -1086,7 +1120,8 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
         _paragraph(
             document,
             anchor,
-            "这些是当前机器上的小样本，不是应用吞吐保证或合格线。自实现 "
+            "这些是记录日期和源码版本下的历史组件小样本，本轮未重测，"
+            "不能作为当前应用吞吐结论。自实现 "
             "LZ77 没有熵编码；随机数据可能略微膨胀，"
             "不能因往返正确就宣称速度或压缩率优于 Zstd。"
             "完整样本与命令见 lz77-measurements.json。",
@@ -1183,6 +1218,21 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
     )
 
 
+def _drop_unused_document_images(document: DocumentType) -> None:
+    # Replacing chapter XML leaves old picture relationships reachable in the ZIP.
+    # Header/footer parts own their relationships and remain untouched here.
+    namespace = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    referenced = {
+        value
+        for node in document.element.iter()
+        for name, value in node.attrib.items()
+        if name.startswith(namespace)
+    }
+    for relationship_id, relationship in list(document.part.rels.items()):
+        if relationship.reltype == RELATIONSHIP_TYPE.IMAGE and relationship_id not in referenced:
+            document.part.drop_rel(relationship_id)
+
+
 def synchronize_report(report_path: Path = REPORT_PATH) -> None:
     """Synchronize generated sections without changing protected front matter."""
     if not report_path.exists():
@@ -1219,6 +1269,7 @@ def synchronize_report(report_path: Path = REPORT_PATH) -> None:
     test_anchor = test_cell.add_paragraph()
     _populate_tests(document, test_anchor)
     test_anchor._element.getparent().remove(test_anchor._element)
+    _drop_unused_document_images(document)
     document.save(str(report_path))
 
 

@@ -74,7 +74,7 @@ class D2DiagramTests(unittest.TestCase):
                         name, separator, return_type = operation.rpartition(":")
                         if not separator:
                             name = operation
-                        self.assertIn(name.strip().removeprefix("+ "), text)
+                        self.assertIn(name.strip().removeprefix("+ ").removeprefix("- "), text)
                         if separator:
                             self.assertIn(return_type.strip(), text)
                 for relation in diagram["relations"]:

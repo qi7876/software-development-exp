@@ -16,7 +16,7 @@ diagram: "bak: Runtime and Local Storage" {
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    Browser: "<<HTML / CSS / JavaScript>>\nEmbedded web console" {
+    Browser: "<<external HTML / CSS /\nJavaScript>>\nWeb console" {
       shape: rectangle
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
@@ -26,11 +26,16 @@ diagram: "bak: Runtime and Local Storage" {
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
+    Launcher: "<<start / status / stop>>\nbak server commands" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
   }
   package_1: "Single server process" {
     style.font-size: 36
     style.fill: white
-    Server: "<<API / scheduler / FIFO\nworker>>\nbak: axum + Tokio + SQLx" {
+    Server: "<<API / recovery / scheduler\n/ FIFO>>\nbak: axum + Tokio + SQLx" {
       shape: rectangle
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
@@ -94,4 +99,6 @@ diagram: "bak: Runtime and Local Storage" {
   package_1.Server -> package_4.Repo: "Publish / list / read"
   package_1.Server -> package_4.Files: "Encode / decode payloads"
   package_1.Server -> package_3.Dest: "Restore / authenticate / sync"
+  package_0.Client -> package_0.Launcher: "Manage server process"
+  package_0.Launcher -> package_1.Server: "Spawn / local Unix socket control"
 }

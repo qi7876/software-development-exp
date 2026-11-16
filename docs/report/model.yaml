@@ -1,6 +1,6 @@
 {
-  "version": "5.0",
-  "updated": "2026-11-15",
+  "version": "6.0",
+  "updated": "2026-11-16",
   "title": "bak 当前实现系统设计",
   "diagrams": [
     {
@@ -8,18 +8,21 @@
       "kind": "component",
       "view": "container",
       "title": "bak: Runtime and Local Storage",
-      "purpose": "单一服务进程提供嵌入式 UI、认证 API 和 FIFO worker；浏览器、密钥文件、作业库与仓库各有独立状态边界。",
+      "purpose": "后台或前台 Rust 服务提供外部静态 WebUI、认证 API、启动对账和 FIFO worker；密钥、任务数据库及自包含备份具有独立持久化边界。",
       "responsibilities": [
         {
           "element": "浏览器 / bak / 本地存储",
-          "responsibility": "单一服务进程提供嵌入式 UI、认证 API 和 FIFO worker；浏览器、密钥文件、作业库与仓库各有独立状态边界。"
+          "responsibility": "后台或前台 Rust 服务提供外部静态 WebUI、认证 API、启动对账和 FIFO worker；密钥、任务数据库及自包含备份具有独立持久化边界。"
         }
       ],
       "details": [
         "浏览器可连接同一或另一台 bak API；地址和明文 API key 保存在浏览器 origin 的 localStorage。",
         "工作目录作业库 schema v5，自包含备份格式 v9；仓库不再使用数据库，加密密钥仍由外部配置提供。",
         "自实现顺序归档后选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 或 AES-256-GCM 加密，形成九种模式；元数据和文件名仍为明文。",
-        "配置式定时备份使用 IANA 时区与分钟级 Cron，复用 FIFO；停机不补跑，同一计划有未完成任务时跳过。"
+        "配置式定时备份使用 IANA 时区与分钟级 Cron，复用 FIFO；停机不补跑，同一计划有未完成任务时跳过。",
+        "bak server start 默认创建后台子进程并等待就绪；status/stop 通过当前用户的 Unix socket 管理实例。",
+        "静态 WebUI 独立部署并由 web_ui.path 指定目录，资源在请求时读取；任务库仍为 SQLite，仓库不使用数据库。",
+        "启动在 HTTP 和 worker 之前按持久化任务 ID 对账：验证已发布文件或发布唯一完整临时文件，再提交结果。"
       ],
       "constraints": [
         "一个工作目录只运行一个服务实例，SQLite 使用本地文件系统。",
@@ -81,10 +84,10 @@
         },
         {
           "id": "Browser",
-          "name": "Embedded web console",
+          "name": "Web console",
           "package": "Clients",
           "type": "component",
-          "stereotype": "HTML / CSS / JavaScript"
+          "stereotype": "external HTML / CSS / JavaScript"
         },
         {
           "id": "Profiles",
@@ -98,7 +101,7 @@
           "name": "bak: axum + Tokio + SQLx",
           "package": "Single server process",
           "type": "component",
-          "stereotype": "API / scheduler / FIFO worker"
+          "stereotype": "API / recovery / scheduler / FIFO"
         },
         {
           "id": "Config",
@@ -148,6 +151,13 @@
           "package": "Local filesystem",
           "type": "folder",
           "stereotype": "verified Unix output"
+        },
+        {
+          "id": "Launcher",
+          "name": "bak server commands",
+          "package": "Clients",
+          "type": "component",
+          "stereotype": "start / status / stop"
         }
       ],
       "relations": [
@@ -227,6 +237,20 @@
           "label": "Restore / authenticate / sync",
           "direction": "auto",
           "style": "solid"
+        },
+        {
+          "source": "Client",
+          "target": "Launcher",
+          "label": "Manage server process",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Launcher",
+          "target": "Server",
+          "label": "Spawn / local Unix socket control",
+          "direction": "auto",
+          "style": "solid"
         }
       ]
     },
@@ -247,14 +271,16 @@
         }
       ],
       "details": [
-        "main/args/config 负责服务启动与 keygen 分支；启动加载 Keyring 后交给 JobManager。",
-        "server::ui 提供编译时静态资源，server::api 处理认证、CORS、校验和响应；worker 以 spawn_blocking 执行业务。",
-        "backup 使用 filter 严格目录剪枝；archive 顺序打包条目、数据和校验尾部；content 组合可选 Zstd/LZ77 和加密 IO；lz77 自行实现环形窗口与哈希匹配，crypto 管理密钥和 STREAM 帧，repository 原子保存完整编码配置。",
-        "server::schedule::Scheduler 编译计划、匹配时区与 Cron；JobManager 在一个事务中推进 UTC 游标并判断活动任务后入队，服务器监督调度器、worker 和 HTTP。"
+        "main/args/config 分派 help、version、keygen、server 命令并加载配置；daemon 创建后台子进程和本地控制接口，工作目录锁防止重复实例。",
+        "server::ui 从 web_ui.path 运行时读取静态文件；server::api 处理认证、CORS、计划查看及立即执行；worker 通过 spawn_blocking 执行业务。",
+        "backup::filter 执行严格目录剪枝；archive 负责顺序条目与结束标记；content 组合私有 crypto、lz77 与 Zstd；repository 封装自包含元数据、摘要和不可覆盖发布。",
+        "jobs::recovery 对账中断任务，完整验证并补记成功或保守失败；只清理确认同一 inode 的临时硬链接。",
+        "server::schedule 编译计划并匹配时区/Cron；API 共享不可变计划目录；自动触发推进游标，立即执行不改游标，两者共享活动计划约束。",
+        "主图聚焦启动、服务、作业和文件操作边界；filter 隶属 backup，crypto/lz77 隶属 content，filesystem/storage 为共享内部工具，详见模块树与类型图。"
       ],
       "constraints": [
         "图中元素对应现有模块，无独立前端服务、API 代理或新增框架。",
-        "API 通过 JobManager 访问业务；main 同时使用 crypto 的密钥生成与加载入口。"
+        "外部经 jobs 门面使用业务与密钥能力；crypto、lz77、filter、schedule 按所属模块私有化。"
       ],
       "trace": {
         "use_cases": [
@@ -350,32 +376,11 @@
           "stereotype": "private metadata and listing"
         },
         {
-          "id": "FS",
-          "name": "jobs::filesystem",
-          "type": "component",
-          "package": "Job subsystem",
-          "stereotype": "private path and sync helpers"
-        },
-        {
-          "id": "Storage",
-          "name": "jobs::storage",
-          "type": "component",
-          "package": "Job subsystem",
-          "stereotype": "task SQLite setup"
-        },
-        {
           "id": "UI",
           "name": "server::ui",
           "package": "Server boundary",
           "type": "component",
-          "stereotype": "embedded assets"
-        },
-        {
-          "id": "Filter",
-          "name": "jobs::backup::filter",
-          "package": "Job subsystem",
-          "type": "component",
-          "stereotype": "regex / time / pruning"
+          "stereotype": "external filesystem assets"
         },
         {
           "id": "Content",
@@ -383,20 +388,6 @@
           "package": "Job subsystem",
           "type": "component",
           "stereotype": "optional Zstd / LZ77 / AEAD IO"
-        },
-        {
-          "id": "Crypto",
-          "name": "jobs::content::crypto",
-          "package": "Job subsystem",
-          "type": "component",
-          "stereotype": "keys / STREAM BE32"
-        },
-        {
-          "id": "Lz77",
-          "name": "jobs::content::lz77",
-          "type": "component",
-          "package": "Job subsystem",
-          "stereotype": "hash-chain LZ77 codec"
         },
         {
           "id": "Scheduler",
@@ -411,6 +402,20 @@
           "type": "component",
           "package": "Job subsystem",
           "stereotype": "sequential packing / verification"
+        },
+        {
+          "id": "Daemon",
+          "name": "daemon",
+          "package": "Server boundary",
+          "type": "component",
+          "stereotype": "background process / Unix control"
+        },
+        {
+          "id": "Recovery",
+          "name": "jobs::recovery",
+          "package": "Job subsystem",
+          "type": "component",
+          "stereotype": "startup verification / reconciliation"
         }
       ],
       "relations": [
@@ -485,27 +490,6 @@
           "style": "solid"
         },
         {
-          "source": "Backup",
-          "target": "FS",
-          "label": "Paths / directory sync",
-          "direction": "auto",
-          "style": "solid"
-        },
-        {
-          "source": "Restore",
-          "target": "FS",
-          "label": "Paths / directory sync",
-          "direction": "auto",
-          "style": "solid"
-        },
-        {
-          "source": "Jobs",
-          "target": "Storage",
-          "label": "Initialize job DB",
-          "direction": "auto",
-          "style": "solid"
-        },
-        {
           "source": "Server",
           "target": "UI",
           "label": "Optional static console",
@@ -528,13 +512,6 @@
         },
         {
           "source": "Backup",
-          "target": "Filter",
-          "label": "Compile and match",
-          "direction": "auto",
-          "style": "solid"
-        },
-        {
-          "source": "Backup",
           "target": "Content",
           "label": "Encode archive",
           "direction": "auto",
@@ -544,20 +521,6 @@
           "source": "Restore",
           "target": "Content",
           "label": "Decode archive",
-          "direction": "auto",
-          "style": "solid"
-        },
-        {
-          "source": "Content",
-          "target": "Crypto",
-          "label": "Authenticated stream wrappers",
-          "direction": "auto",
-          "style": "solid"
-        },
-        {
-          "source": "Content",
-          "target": "Lz77",
-          "label": "Streaming encoder / decoder",
           "direction": "auto",
           "style": "solid"
         },
@@ -576,20 +539,6 @@
           "style": "solid"
         },
         {
-          "source": "Scheduler",
-          "target": "Filter",
-          "label": "Validate configured filters",
-          "direction": "auto",
-          "style": "solid"
-        },
-        {
-          "source": "Scheduler",
-          "target": "Crypto",
-          "label": "Resolve configured key identity",
-          "direction": "auto",
-          "style": "solid"
-        },
-        {
           "source": "Backup",
           "target": "Archive",
           "label": "Pack entries into one stream",
@@ -600,6 +549,41 @@
           "source": "Restore",
           "target": "Archive",
           "label": "Verify and unpack entries",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Main",
+          "target": "Daemon",
+          "label": "Start / status / stop",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Server",
+          "target": "Daemon",
+          "label": "Supervise local control",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Jobs",
+          "target": "Recovery",
+          "label": "Reconcile before serving",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "Recovery",
+          "target": "Repo",
+          "label": "Verify / promote archives",
+          "direction": "auto",
+          "style": "solid"
+        },
+        {
+          "source": "API",
+          "target": "Scheduler",
+          "label": "List / resolve saved plans",
           "direction": "auto",
           "style": "solid"
         }
@@ -629,7 +613,7 @@
       ],
       "constraints": [
         "仓库保存完整算法配置，XChaCha 载荷 v2 或 AES 载荷 v3 对配置进行认证；恢复自动使用记录的解码器。",
-        "SHA-256 针对压缩加密后的整包字节，original_size 针对文件原文，跳过统计只计已遇到的条目。"
+        "SHA-256 覆盖除末尾摘要自身外的容器全部字节；archive_checksum 读取时由尾部派生，不序列化到自身校验范围；original_size 描述原文。"
       ],
       "trace": {
         "use_cases": [
@@ -924,7 +908,7 @@
         "JobManager 持有 Arc<Keyring>，提交时固定标识与指纹，worker 执行前再次匹配。",
         "archive 打包后由 Content 选择可选 CompressionOptions 和 Encryption；LZ77 通过 Encoder/Decoder 流式处理，组合顺序固定先压缩后加密。",
         "Filter::compile 在备份执行时校验正则和时间范围，CompiledFilter::matches 决定目录是否继续遍历。",
-        "Scheduler 使用 croner / chrono-tz；AES 使用 HKDF-SHA256 派生独立文件密钥，两个算法共用 STREAM BE32 读写和最终块验证。"
+        "Scheduler 使用 croner/chrono-tz 并保留全部计划的不可变目录；AES 使用 HKDF-SHA256 为每个归档派生密钥，两个算法共用 STREAM BE32 和最终块验证。"
       ],
       "constraints": [
         "Zstd level 为 1–22；LZ77 窗口 4–1024 KiB，候选上限 1–256，编码与解码均有界缓冲。",
@@ -981,7 +965,7 @@
           "stereotype": "module",
           "attributes": [],
           "operations": [
-            "+ router(jobs, key, web_ui_enabled): Router"
+            "+ router(jobs, key, web_ui, schedules): Router"
           ]
         },
         {
@@ -1001,7 +985,9 @@
             "+ list_backups(path): Vec<RepoBackupInfo>",
             "+ run_worker(stop): Result",
             "+ initialize_schedule(id, minute): Result",
-            "+ schedule_tick(id, minute, request): Result"
+            "+ schedule_tick(id, minute, request): Result",
+            "+ run_schedule_now(id, request): JobInfo",
+            "- recover_interrupted(): Result"
           ]
         },
         {
@@ -1069,7 +1055,8 @@
           "operations": [
             "+ ArchiveFile::read(path, id): ArchiveFile",
             "+ PendingArchive::publish(manifest): Result",
-            "+ list(path): Vec<RepoBackupInfo>"
+            "+ list(path): Vec<RepoBackupInfo>",
+            "+ ArchiveFile::verify(keys): Result"
           ]
         },
         {
@@ -1090,12 +1077,15 @@
           "stereotype": "struct",
           "attributes": [
             "- timezone: Tz",
-            "- plans: Vec<Plan>"
+            "- plans: Vec<Plan>",
+            "- configured_plans: Vec<PlanConfig>"
           ],
           "operations": [
             "+ prepare(config, keys): Scheduler",
             "+ initialize(jobs, now): Result",
-            "+ run(jobs, stop): Result"
+            "+ run(jobs, stop): Result",
+            "+ describe(): Value",
+            "+ request(id, keys): JobRequest"
           ]
         }
       ],
@@ -1214,7 +1204,9 @@
         "配置和命名密钥只在启动时加载；无效密钥或旧作业库版本导致启动失败。",
         "静态资源可公开访问；浏览器选择服务后通过认证状态接口获取版本与密钥指纹。",
         "keygen 是独立命令，不启动 HTTP 服务；此图只展示服务启动与正常关闭。",
-        "无效计划或调度任务异常使服务失败退出；正常关闭等待调度器和 worker 后再关闭数据库。"
+        "无效计划或调度任务异常使服务失败退出；正常关闭等待调度器和 worker 后再关闭数据库。",
+        "后台命令由 daemon 派生服务进程并等待就绪，前台模式由调用者监督；此图 Startup 表示实际服务初始化过程。",
+        "启动对账完整解码和校验已发布备份或唯一临时文件后提交结果；恢复中断不重跑，结果提交失败保留 running 并终止启动。"
       ],
       "constraints": [
         "配置不热加载，更换密钥配置后重启并重新连接。",
@@ -1443,11 +1435,12 @@
       "details": [
         "提交时校验等级并固定命名密钥指纹；正则/时间范围在执行时编译，失败发生在载荷写入前。",
         "目录剪枝同时作用于路径和元数据条件；符号链接只保存目标。",
-        "完成归档、编码与同步后一次提交头、条目、根元数据和统计，再单独提交作业终态。",
-        "LZ77 的候选搜索、历史窗口和 IO 均有限制；完成编解码终止标记后再完成加密最终认证块。"
+        "完成流式归档/编码后追加明文 manifest、长度、标记及 SHA-256，文件同步后硬链接发布并同步目录，再单独提交作业终态。",
+        "LZ77 的候选搜索、历史窗口和 IO 均有限制；完成编解码终止标记后再完成加密最终认证块。",
+        "新执行备份使用已持久化任务 ID 作为备份 ID，为启动对账提供确定关联。"
       ],
       "constraints": [
-        "备份源保持不变；无源一致性检测和失败自动清理。",
+        "源应保持不变；复制期间检查大小变化，但不提供一致性快照。普通失败清理本次临时输出，崩溃遗留保守对账。",
         "任务 JSON 不含加密密钥；备份文件与作业库不共享事务。"
       ],
       "trace": {
@@ -1833,11 +1826,12 @@
       "details": [
         "计划配置包含稳定标识、时区、五字段 Cron、路径、筛选和编码，启动后固定快照。",
         "同计划忙碌仍推进游标；失败不会阻塞下次计划，不自动重试。",
-        "UTC 高水位持久化；时钟前跳不补跑，后跳不重复；重启从下一分钟继续。"
+        "UTC 高水位持久化；时钟前跳不补跑，后跳不重复；重启从下一分钟继续。",
+        "计划页面包含启用与停用项；立即执行使用保存配置并共享活动计划约束，返回 202 或 busy/404/key 错误，不改变 UTC 游标。"
       ],
       "constraints": [
         "每个工作目录仅运行一个实例；调度器不单独执行文件操作。",
-        "游标与入队共享事务，仓库元数据与任务终态仍属于不同提交边界。"
+        "自动触发的游标与入队共享事务；文件发布与任务结果提交独立，启动通过验证和幂等对账修复中断窗口。"
       ],
       "trace": {
         "use_cases": [
