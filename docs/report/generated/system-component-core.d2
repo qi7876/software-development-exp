@@ -84,12 +84,12 @@ diagram: "bak: Module Responsibilities" {
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    Crypto: "<<keys / STREAM BE32>>\njobs::crypto" {
+    Crypto: "<<keys / STREAM BE32>>\njobs::content::crypto" {
       shape: rectangle
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    Lz77: "<<hash-chain LZ77 codec>>\njobs::lz77" {
+    Lz77: "<<hash-chain LZ77 codec>>\njobs::content::lz77" {
       shape: rectangle
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
@@ -115,8 +115,8 @@ diagram: "bak: Module Responsibilities" {
   package_2.Jobs -> package_2.Storage: "Initialize job DB"
   package_2.Repo -> package_2.Storage: "Open repository DB"
   package_1.Server -> package_1.UI: "Optional static console"
-  package_0.Main -> package_2.Crypto: "Generate / load keys"
-  package_2.Jobs -> package_2.Crypto: "Share Keyring"
+  package_0.Main -> package_2.Jobs: "Generate / load keys"
+  package_2.Jobs -> package_2.Content: "Expose key management"
   package_2.Backup -> package_2.Filter: "Compile and match"
   package_2.Backup -> package_2.Content: "Encode archive"
   package_2.Restore -> package_2.Content: "Decode archive"

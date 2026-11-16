@@ -59,6 +59,6 @@ uv run scripts/analyze_backup.py
 
 ## LZ77 小样本测量
 
-自实现 LZ77 的格式与限制见 [LZ77 设计](../architecture/lz77.md)。运行 `cargo test --profile profiling jobs::lz77::measurements::measure_samples -- --ignored --nocapture` 可重测当前机器上的内存编解码；预热一次后测三次，比较内容正确性，不要求优于 Zstd。该手动测量默认不在普通测试中运行，不能代替应用性能或稳定性测试。
+自实现 LZ77 的格式与限制见 [LZ77 设计](../architecture/lz77.md)。运行 `cargo test --profile profiling jobs::content::lz77::measurements::measure_samples -- --ignored --nocapture` 可重测当前机器上的内存编解码；预热一次后测三次，比较内容正确性，不要求优于 Zstd。该手动测量默认不在普通测试中运行，不能代替应用性能或稳定性测试。
 
 配置式定时备份已实现：IANA 时区、分钟级 Cron、同计划忙碌跳过与停机不补跑；使用方式见根 README，持久化语义见 [调度设计](../architecture/scheduling.md)。

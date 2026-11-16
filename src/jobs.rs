@@ -1,17 +1,17 @@
 mod archive;
 mod backup;
 mod content;
-pub(crate) mod crypto;
-#[cfg(test)]
-use content::ZstdOptions;
-pub(crate) use content::{BackupOptions, CompressionOptions, EncryptionRequest};
 mod filesystem;
 mod filter;
-mod lz77;
 mod repository;
 mod restore;
 mod storage;
 
+pub(crate) use content::{
+    BackupOptions, CompressionOptions, EncryptionRequest, Keyring, generate_key,
+};
+#[cfg(test)]
+use content::{EncryptionAlgorithm, ZstdOptions};
 pub(crate) use filter::Filter;
 use http::StatusCode;
 use serde_json::{Value, json};
@@ -60,14 +60,11 @@ pub(crate) struct JobManager {
     pool: SqlitePool,
     working_directory: PathBuf,
     wake: Arc<Notify>,
-    pub(crate) keys: Arc<crypto::Keyring>,
+    pub(crate) keys: Arc<Keyring>,
 }
 
 impl JobManager {
-    pub(crate) async fn open(
-        working_directory: PathBuf,
-        keys: crypto::Keyring,
-    ) -> Result<Self, JobError> {
+    pub(crate) async fn open(working_directory: PathBuf, keys: Keyring) -> Result<Self, JobError> {
         let pool =
             storage::open(&working_directory.join("jobs.sqlite3"), JOBS_SCHEMA, true).await?;
         // A running operation may have performed external effects. Never replay it.
@@ -296,11 +293,7 @@ impl JobManager {
     }
 }
 
-fn execute(
-    request: JobRequest,
-    directory: PathBuf,
-    keys: &crypto::Keyring,
-) -> Result<JobResult, JobError> {
+fn execute(request: JobRequest, directory: PathBuf, keys: &Keyring) -> Result<JobResult, JobError> {
     match request {
         JobRequest::Backup {
             source,
@@ -515,8 +508,7 @@ mod tests {
     async fn jobs_survive_restart_and_only_running_jobs_fail_recovery() -> Result<(), Box<dyn Error>>
     {
         let directory = TestDirectory::new()?;
-        let jobs =
-            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
+        let jobs = JobManager::open(directory.path().to_owned(), Keyring::default()).await?;
         assert!(jobs.get_job("unknown").await?.is_none());
         let first = jobs.submit(backup_request("one")?).await?;
         let second = jobs.submit(backup_request("two")?).await?;
@@ -543,8 +535,7 @@ mod tests {
             second.job_id
         );
         jobs.close().await;
-        let jobs =
-            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
+        let jobs = JobManager::open(directory.path().to_owned(), Keyring::default()).await?;
         assert!(matches!(
             jobs.get_job(&first.job_id)
                 .await?
@@ -573,14 +564,13 @@ mod tests {
             execute(
                 resumed.request,
                 directory.path().to_owned(),
-                &crypto::Keyring::default(),
+                &Keyring::default(),
             ),
         )
         .await?;
         assert!(jobs.claim().await?.is_none());
         jobs.close().await;
-        let jobs =
-            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
+        let jobs = JobManager::open(directory.path().to_owned(), Keyring::default()).await?;
         let failed = jobs
             .get_job(&third.job_id)
             .await?
@@ -604,7 +594,7 @@ mod tests {
     -> Result<(), Box<dyn Error>> {
         tokio::time::timeout(Duration::from_secs(10), async {
             let directory = TestDirectory::new()?;
-            let jobs = JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
+            let jobs = JobManager::open(directory.path().to_owned(), Keyring::default()).await?;
             let first = jobs.submit(backup_request("first")?).await?;
             let second = jobs.submit(backup_request("second")?).await?;
             let third = jobs.submit(backup_request("third")?).await?;
@@ -649,8 +639,7 @@ mod tests {
     #[tokio::test]
     async fn idle_worker_wakes_for_new_jobs() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
-        let jobs =
-            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
+        let jobs = JobManager::open(directory.path().to_owned(), Keyring::default()).await?;
         let (stop, receiver) = watch::channel(false);
         let worker_jobs = jobs.clone();
         let worker = tokio::spawn(async move { worker_jobs.run_worker(receiver).await });
@@ -681,8 +670,7 @@ mod tests {
     #[tokio::test]
     async fn admission_and_completion_failures_are_observable() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
-        let jobs =
-            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
+        let jobs = JobManager::open(directory.path().to_owned(), Keyring::default()).await?;
         let job = jobs.submit(backup_request("source")?).await?;
         sqlx::raw_sql("CREATE TRIGGER block_completion BEFORE UPDATE ON jobs WHEN NEW.state IN ('failed', 'succeeded') BEGIN SELECT RAISE(FAIL, 'completion blocked'); END;").execute(&jobs.pool).await?;
         let (_stop, receiver) = watch::channel(false);
@@ -710,8 +698,7 @@ mod tests {
             .err()
             .ok_or("accepted job with unavailable database")?;
         assert!(error.message.contains("cannot queue job"));
-        let jobs =
-            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
+        let jobs = JobManager::open(directory.path().to_owned(), Keyring::default()).await?;
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM jobs")
                 .fetch_one(&jobs.pool)
@@ -747,7 +734,7 @@ mod encryption_tests {
         let pool = storage::open(&path, schema, true).await?;
         pool.close().await;
         assert!(
-            JobManager::open(directory.path().to_owned(), crypto::Keyring::default())
+            JobManager::open(directory.path().to_owned(), Keyring::default())
                 .await
                 .is_err()
         );
@@ -765,8 +752,8 @@ mod encryption_tests {
     #[tokio::test]
     async fn queued_encryption_pins_key_across_restart() -> Result<(), Box<dyn std::error::Error>> {
         for algorithm in [
-            crypto::EncryptionAlgorithm::XChaCha20Poly1305,
-            crypto::EncryptionAlgorithm::Aes256Gcm,
+            EncryptionAlgorithm::XChaCha20Poly1305,
+            EncryptionAlgorithm::Aes256Gcm,
         ] {
             for scenario in ["same", "missing", "changed"] {
                 let directory = crate::test_support::TestDirectory::new()?;
@@ -776,7 +763,7 @@ mod encryption_tests {
                 std::fs::write(root.join("source/file"), b"secret data")?;
                 std::fs::write(root.join("key"), hex::encode([7; 32]))?;
                 let files = BTreeMap::from([("main".to_string(), PathBuf::from("key"))]);
-                let keys = crypto::Keyring::load(root, &files)?;
+                let keys = Keyring::load(root, &files)?;
                 let encryption = keys.select("main", algorithm)?;
                 let jobs = JobManager::open(root.to_owned(), keys).await?;
                 let job = jobs
@@ -795,9 +782,9 @@ mod encryption_tests {
                     std::fs::write(root.join("key"), hex::encode([8; 32]))?;
                 }
                 let keys = if scenario == "missing" {
-                    crypto::Keyring::default()
+                    Keyring::default()
                 } else {
-                    crypto::Keyring::load(root, &files)?
+                    Keyring::load(root, &files)?
                 };
                 let jobs = JobManager::open(root.to_owned(), keys).await?;
                 let (stop, stopped) = watch::channel(false);
@@ -853,8 +840,7 @@ mod schedule_tests {
     async fn schedule_admission_rolls_back_and_running_work_blocks_next_tick()
     -> Result<(), Box<dyn std::error::Error>> {
         let directory = crate::test_support::TestDirectory::new()?;
-        let jobs =
-            JobManager::open(directory.path().to_owned(), crypto::Keyring::default()).await?;
+        let jobs = JobManager::open(directory.path().to_owned(), Keyring::default()).await?;
         let request = JobRequest::Backup {
             source: "source".into(),
             repository: "repo".into(),

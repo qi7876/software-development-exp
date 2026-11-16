@@ -49,7 +49,7 @@ struct Plan {
 impl Scheduler {
     pub(crate) fn prepare(
         config: Option<ScheduleConfig>,
-        keys: &crate::jobs::crypto::Keyring,
+        keys: &crate::jobs::Keyring,
     ) -> Result<Self, JobError> {
         let Some(config) = config else {
             return Ok(Self {
@@ -179,7 +179,7 @@ mod tests {
     fn scheduler(value: Value) -> Result<Scheduler> {
         Ok(Scheduler::prepare(
             Some(serde_json::from_value(value)?),
-            &crate::jobs::crypto::Keyring::default(),
+            &crate::jobs::Keyring::default(),
         )?)
     }
     fn time(value: &str) -> Result<DateTime<Utc>> {
@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn configuration_and_calendar_matching() -> Result {
         assert!(
-            Scheduler::prepare(None, &crate::jobs::crypto::Keyring::default())?
+            Scheduler::prepare(None, &crate::jobs::Keyring::default())?
                 .plans
                 .is_empty()
         );
@@ -295,11 +295,8 @@ mod tests {
     #[tokio::test]
     async fn durable_ticks_skip_busy_work_and_restart_without_catchup() -> Result {
         let directory = crate::test_support::TestDirectory::new()?;
-        let jobs = JobManager::open(
-            directory.path().to_owned(),
-            crate::jobs::crypto::Keyring::default(),
-        )
-        .await?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crate::jobs::Keyring::default()).await?;
         let scheduler = scheduler(config("* * * * *", "UTC"))?;
         let now = time("2026-11-13T00:00:00Z")?;
         scheduler.initialize(&jobs, now).await?;
@@ -337,11 +334,8 @@ mod tests {
             "daily"
         );
         jobs.close().await;
-        let jobs = JobManager::open(
-            directory.path().to_owned(),
-            crate::jobs::crypto::Keyring::default(),
-        )
-        .await?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crate::jobs::Keyring::default()).await?;
         scheduler
             .initialize(&jobs, now + chrono::Duration::minutes(10))
             .await?;
@@ -418,11 +412,8 @@ mod tests {
         std::fs::create_dir(directory.path().join("repo"))?;
         std::fs::create_dir(directory.path().join("restored"))?;
         std::fs::write(directory.path().join("source/file"), b"scheduled contents")?;
-        let jobs = JobManager::open(
-            directory.path().to_owned(),
-            crate::jobs::crypto::Keyring::default(),
-        )
-        .await?;
+        let jobs =
+            JobManager::open(directory.path().to_owned(), crate::jobs::Keyring::default()).await?;
         let mut value = config("* * * * *", "UTC");
         let mut second = value["plans"][0].clone();
         second["id"] = json!("second");

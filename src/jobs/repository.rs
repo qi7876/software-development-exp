@@ -1,8 +1,7 @@
 use super::{
     JobError,
     backup::BackupStats,
-    content::CompressionOptions,
-    crypto::{Encryption, EncryptionAlgorithm},
+    content::{CompressionOptions, Encryption, EncryptionAlgorithm},
     filesystem::get_absolute_directory_path,
     storage,
 };

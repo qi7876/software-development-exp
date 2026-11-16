@@ -386,14 +386,14 @@
         },
         {
           "id": "Crypto",
-          "name": "jobs::crypto",
+          "name": "jobs::content::crypto",
           "package": "Job subsystem",
           "type": "component",
           "stereotype": "keys / STREAM BE32"
         },
         {
           "id": "Lz77",
-          "name": "jobs::lz77",
+          "name": "jobs::content::lz77",
           "type": "component",
           "package": "Job subsystem",
           "stereotype": "hash-chain LZ77 codec"
@@ -521,15 +521,15 @@
         },
         {
           "source": "Main",
-          "target": "Crypto",
+          "target": "Jobs",
           "label": "Generate / load keys",
           "direction": "auto",
           "style": "solid"
         },
         {
           "source": "Jobs",
-          "target": "Crypto",
-          "label": "Share Keyring",
+          "target": "Content",
+          "label": "Expose key management",
           "direction": "auto",
           "style": "solid"
         },

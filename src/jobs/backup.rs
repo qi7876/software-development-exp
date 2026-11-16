@@ -1,7 +1,6 @@
 use super::{
     JobError, archive,
-    content::{BackupOptions, Checksum, Content},
-    crypto::Keyring,
+    content::{BackupOptions, Checksum, Content, Keyring},
     filesystem::{get_absolute_directory_path, paths_overlap, sync_directory},
     filter::{CompiledFilter, Filter},
     repository::{Manifest, ManifestEntry, ManifestEntryKind, UnixMetadata},

@@ -347,8 +347,9 @@ src/
     archive.rs     Sequential archive framing and streaming file verification
     backup.rs      Full backup traversal, packing and synchronization
     content.rs     Optional compression/encryption pipelines and archive hashing
-    crypto.rs      Named keys and authenticated streaming encryption
-    lz77.rs        Project LZ77 matching, framing, streaming IO and codec tests
+    content/
+      crypto.rs    Named keys and authenticated streaming encryption
+      lz77.rs      Project LZ77 matching, framing, streaming IO and codec tests
     restore.rs     Restore path validation, decoding, and integrity verification
     repository.rs  Repository metadata types, transactional persistence, and listing
     filesystem.rs  Shared path resolution, overlap checks, and directory synchronization
