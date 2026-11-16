@@ -30,12 +30,17 @@ diagram: "bak: Module Responsibilities" {
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    UI: "<<embedded assets>>\nserver::ui" {
+    UI: "<<external filesystem\nassets>>\nserver::ui" {
       shape: rectangle
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
     Scheduler: "<<Cron / IANA timezone>>\nserver::schedule::Scheduler" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Daemon: "<<background process / Unix\ncontrol>>\ndaemon" {
       shape: rectangle
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
@@ -64,37 +69,17 @@ diagram: "bak: Module Responsibilities" {
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    FS: "<<private path and sync\nhelpers>>\njobs::filesystem" {
-      shape: rectangle
-      style.stroke: "#2563EB"
-      style.fill: "#EFF6FF"
-    }
-    Storage: "<<task SQLite setup>>\njobs::storage" {
-      shape: rectangle
-      style.stroke: "#2563EB"
-      style.fill: "#EFF6FF"
-    }
-    Filter: "<<regex / time / pruning>>\njobs::backup::filter" {
-      shape: rectangle
-      style.stroke: "#2563EB"
-      style.fill: "#EFF6FF"
-    }
     Content: "<<optional Zstd / LZ77 /\nAEAD IO>>\njobs::content" {
       shape: rectangle
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
     }
-    Crypto: "<<keys / STREAM BE32>>\njobs::content::crypto" {
-      shape: rectangle
-      style.stroke: "#2563EB"
-      style.fill: "#EFF6FF"
-    }
-    Lz77: "<<hash-chain LZ77 codec>>\njobs::content::lz77" {
-      shape: rectangle
-      style.stroke: "#2563EB"
-      style.fill: "#EFF6FF"
-    }
     Archive: "<<sequential packing /\nverification>>\njobs::archive" {
+      shape: rectangle
+      style.stroke: "#2563EB"
+      style.fill: "#EFF6FF"
+    }
+    Recovery: "<<startup verification /\nreconciliation>>\njobs::recovery" {
       shape: rectangle
       style.stroke: "#2563EB"
       style.fill: "#EFF6FF"
@@ -110,21 +95,18 @@ diagram: "bak: Module Responsibilities" {
   package_2.Jobs -> package_2.Repo: "List published backups"
   package_2.Backup -> package_2.Repo: "Publish complete archive"
   package_2.Restore -> package_2.Repo: "Read metadata"
-  package_2.Backup -> package_2.FS: "Paths / directory sync"
-  package_2.Restore -> package_2.FS: "Paths / directory sync"
-  package_2.Jobs -> package_2.Storage: "Initialize job DB"
   package_1.Server -> package_1.UI: "Optional static console"
   package_0.Main -> package_2.Jobs: "Generate / load keys"
   package_2.Jobs -> package_2.Content: "Expose key management"
-  package_2.Backup -> package_2.Filter: "Compile and match"
   package_2.Backup -> package_2.Content: "Encode archive"
   package_2.Restore -> package_2.Content: "Decode archive"
-  package_2.Content -> package_2.Crypto: "Authenticated stream wrappers"
-  package_2.Content -> package_2.Lz77: "Streaming encoder / decoder"
   package_1.Server -> package_1.Scheduler: "Prepare / initialize / supervise"
   package_1.Scheduler -> package_2.Jobs: "Atomic cursor / guarded admission"
-  package_1.Scheduler -> package_2.Filter: "Validate configured filters"
-  package_1.Scheduler -> package_2.Crypto: "Resolve configured key identity"
   package_2.Backup -> package_2.Archive: "Pack entries into one stream"
   package_2.Restore -> package_2.Archive: "Verify and unpack entries"
+  package_0.Main -> package_1.Daemon: "Start / status / stop"
+  package_1.Server -> package_1.Daemon: "Supervise local control"
+  package_2.Jobs -> package_2.Recovery: "Reconcile before serving"
+  package_2.Recovery -> package_2.Repo: "Verify / promote archives"
+  package_1.API -> package_1.Scheduler: "List / resolve saved plans"
 }

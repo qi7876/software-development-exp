@@ -1,7 +1,7 @@
 {
-  "recorded_at": "2026-11-13T11:04:44.631570+08:00",
-  "production_revision": "58e319c2ab68544a9b938189175c9848e50beb91",
-  "source_tree": "ead5d377cc7e810eb6888bbf59facc81572c2988",
+  "recorded_at": "2026-11-16T20:06:07.674088+08:00",
+  "production_revision": "e15a53492ee756544bd8cdcf6e24a1febc5e82f0",
+  "source_tree": "a1c1904a64407b80bbbc74272891c8fa2885db7e",
   "environment": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
   "checks": [
     {
@@ -16,7 +16,7 @@
     },
     {
       "command": "cargo test --all-targets",
-      "result": "78 项单元/组件测试和 13 项 HTTP 集成测试通过；1 项手动测量忽略",
+      "result": "88 项单元/组件测试、4 项 CLI 生命周期测试和 13 项 HTTP 集成测试通过；1 项手动测量忽略",
       "exit_code": 0
     },
     {
@@ -30,8 +30,8 @@
       "exit_code": 0
     },
     {
-      "command": "BAK_BROWSER_CHANNEL=chrome npm --prefix web test",
-      "result": "5 组浏览器流程通过，包含计划来源展示",
+      "command": "npm --prefix web test",
+      "result": "6 组真实浏览器流程通过，覆盖九模式备份恢复、连接切换及定时计划立即执行",
       "exit_code": 0
     },
     {
@@ -46,7 +46,7 @@
     },
     {
       "command": "uv run python -m unittest discover -s docs/report/tests",
-      "result": "9 项测试通过，无跳过；包含 Word 保留章节与渲染图表检查",
+      "result": "9 项报告保护、模型和渲染图表测试通过",
       "exit_code": 0
     },
     {
@@ -60,10 +60,48 @@
       "exit_code": 0
     }
   ],
-  "scope": "Current architecture report refresh: configured Cron scheduling, dual AEAD algorithms, manual browser refresh, report preservation and generated diagrams; historical performance, stability, Instruments and codec benchmarks were not rerun.",
+  "scope": "Current production revision regression and report refresh: external WebUI assets, background server commands, scheduled-plan inspection/immediate execution, self-contained backup v9, and startup reconciliation. Documentation inputs updated in the working tree; no production-code changes in this refresh.",
   "historical_evidence": "verification.json (2026-10-14)",
-  "entrypoint": "BAK_BROWSER_CHANNEL=chrome uv run scripts/check.py --report --web-ui",
+  "entrypoint": "uv run scripts/check.py --report --web-ui",
   "historical_measurements_rerun": false,
   "codec_measurements": "lz77-measurements.json",
-  "document_revision": "443850847409c1fcc646f14c6747d1261f6c2d9a"
+  "codec_measurements_rerun": false,
+  "document_base_revision": "e15a53492ee756544bd8cdcf6e24a1febc5e82f0",
+  "document_inputs": {
+    "version": "6.0",
+    "updated": "2026-11-16",
+    "models": [
+      "use-cases.yaml",
+      "model.yaml"
+    ],
+    "generator": "scripts/update_report.py"
+  },
+  "codec_measurements_recorded_at": "2026-10-31T15:47:32.993984+08:00",
+  "supplemental_checks": [
+    {
+      "command": "uv run ruff check .",
+      "result": "报告图片关系清理实现及回归用例更新后复核通过",
+      "exit_code": 0
+    },
+    {
+      "command": "uv run basedpyright",
+      "result": "0 errors / 0 warnings / 0 notes",
+      "exit_code": 0
+    },
+    {
+      "command": "uv run python -m unittest discover -s docs/report/tests",
+      "result": "9 项通过；包含手工内容保护、私有成员渲染和无引用图片清理",
+      "exit_code": 0
+    },
+    {
+      "command": "uv run scripts/update_use_cases.py --check",
+      "result": "无漂移",
+      "exit_code": 0
+    },
+    {
+      "command": "uv run scripts/update_system_design.py --check",
+      "result": "无漂移",
+      "exit_code": 0
+    }
+  ]
 }

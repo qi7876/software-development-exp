@@ -11,6 +11,7 @@ from shutil import copy2
 
 from docx import Document
 from docx.table import _Cell  # pyright: ignore[reportPrivateUsage]
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -65,12 +66,18 @@ class ReportPreservationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             temporary_report = Path(directory) / "report.docx"
             copy2(REPORT_PATH, temporary_report)
+            unused = Path(directory) / "unused.png"
+            Image.new("RGB", (2, 2), (17, 29, 53)).save(unused)
+            original = Document(str(temporary_report))
+            unused_id, _ = original.part.get_or_add_image(str(unused))
+            original.save(str(temporary_report))
             before = _protected_prefix(temporary_report)
             document_before = _protected_document(temporary_report)
             synchronize_report(temporary_report)
             self.assertEqual(_protected_prefix(temporary_report), before)
             self.assertEqual(_protected_document(temporary_report), document_before)
             document = Document(str(temporary_report))
+            self.assertNotIn(unused_id, document.part.rels)
             text = "\n".join(
                 node.text or "" for node in document.element.iter() if node.tag.endswith("}t")
             )
@@ -94,6 +101,12 @@ class ReportPreservationTests(unittest.TestCase):
                 "schedule_cursors",
                 "scheduled_for",
                 "HKDF-SHA256",
+                "web_ui.path",
+                "bak server start",
+                "自包含",
+                "启动对账",
+                "64 MiB",
+                "Back up now",
             ]:
                 self.assertIn(required, text)
             for outdated in [
@@ -103,6 +116,11 @@ class ReportPreservationTests(unittest.TestCase):
                 "当前不恢复权限",
                 "任务每 3 秒刷新",
                 "当前未实现计划调度",
+                "无独立业务 CLI 或图形控制台",
+                "不支持源内符号链接、权限或修改时间恢复",
+                "提供编译时嵌入的控制台",
+                "无计划管理 API 或页面",
+                "未建库目录返回空列表",
             ]:
                 self.assertNotIn(outdated, text)
 

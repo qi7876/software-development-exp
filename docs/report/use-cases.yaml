@@ -1,13 +1,13 @@
 {
-  "version": "5.0",
-  "updated": "2026-11-15",
+  "version": "6.0",
+  "updated": "2026-11-16",
   "author": "项目开发者",
   "system": "bak Local Backup Service",
   "functional_requirements": [
     {
       "id": "FR-01",
       "name": "服务启动与配置",
-      "description": "读取工作目录 config.json，支持帮助、版本和工作目录参数；加载可选 Web UI 配置、命名加密密钥及作业库，错误可见。"
+      "description": "根命令仅含 help、version、keygen、server 子命令；server start -d 后台启动，status/stop 管理当前用户实例，--foreground 前台运行；读取配置、命名密钥与作业库并先完成启动对账。"
     },
     {
       "id": "FR-02",
@@ -17,12 +17,12 @@
     {
       "id": "FR-03",
       "name": "全量备份",
-      "description": "备份已有且与仓库不重叠的源目录；保存普通文件、空目录、Unix 元数据和符号链接目标，SHA-256 描述压缩加密后的整包字节，原始大小描述文件原文。"
+      "description": "全量备份普通文件、空目录、Unix 元数据与符号链接目标；每个 .bak 自包含编码参数、条目、统计与校验，SHA-256 覆盖除末尾摘要自身外的全部容器字节。"
     },
     {
       "id": "FR-04",
       "name": "备份列表",
-      "description": "仅列出已发布备份的编号、创建时间、压缩状态和加密密钥信息；时间降序、同时间编号升序，未建库目录返回空列表且不建库。"
+      "description": "扫描正式 .bak 的元数据并按时间降序、同时间编号升序返回摘要；空仓库不创建数据库，临时文件被忽略，损坏的正式文件返回错误。"
     },
     {
       "id": "FR-05",
@@ -32,7 +32,7 @@
     {
       "id": "FR-06",
       "name": "持久化作业与历史",
-      "description": "请求先入库再返回 202/Location；单 worker FIFO 执行，单作业查询与游标分页历史显示请求、状态、结果、错误及执行时间。 任务保存可空的 schedule_id 与 scheduled_for，区分手动和定时来源。"
+      "description": "请求先入库再返回 202/Location；单 worker FIFO 执行，查询与游标分页展示请求、状态、结果和时间。普通手动备份无计划标识，自动及立即执行计划保存 schedule_id 与 scheduled_for。"
     },
     {
       "id": "FR-07",
@@ -42,7 +42,7 @@
     {
       "id": "FR-08",
       "name": "浏览器控制台与连接管理",
-      "description": "提供创建备份、仓库恢复、任务记录及连接管理；浏览器保存地址、API key 与选中连接，验证成功才切换服务。"
+      "description": "独立部署的静态控制台提供创建备份、仓库恢复、定时计划、任务记录及连接管理；配置 web_ui.path 后运行时读取资源，浏览器验证成功才切换服务并清空旧服务数据。"
     },
     {
       "id": "FR-09",
@@ -52,7 +52,7 @@
     {
       "id": "FR-10",
       "name": "Unix 元数据与统计",
-      "description": "原子记录根和条目的 UID/GID、权限、纳秒时间戳及符号链接目标，记录创建、过滤跳过和不支持类型跳过的互斥计数。"
+      "description": "将根和条目的 UID/GID、权限、纳秒时间戳、符号链接目标及互斥统计写入自包含备份；同步完整临时文件后，以不可覆盖硬链接发布并同步目录。"
     },
     {
       "id": "FR-11",
@@ -67,7 +67,7 @@
     {
       "id": "FR-13",
       "name": "配置式定时备份",
-      "description": "通过 scheduled_backups 配置 IANA 时区、五字段 Cron、源路径、仓库、筛选及编码参数；复用持久化队列，停机不补跑，同计划有未完成任务时跳过，来源与计划时间可查询。"
+      "description": "配置 IANA 时区与五字段 Cron；控制台或认证 API 可查看启用/停用计划，并按保存配置立即入队。自动触发与立即执行共享活动计划约束，立即执行不改变 Cron 游标；编辑仍需改配置后重启。"
     }
   ],
   "nonfunctional_requirements": [
@@ -93,18 +93,18 @@
     },
     {
       "id": "NFR-05",
-      "name": "持久化边界",
-      "description": "SQLite 使用 WAL、FULL 同步和事务；两个数据库与外部文件不共享事务，单工作目录只运行一个服务。"
+      "name": "持久化机制",
+      "description": "作业 SQLite 使用 WAL、FULL 同步和事务；文件发布与作业终态提交独立，通过幂等启动对账修复中断备份；单工作目录持有独占实例锁。"
     },
     {
       "id": "NFR-06",
-      "name": "安全边界",
-      "description": "API key 与加密密钥分离；加密覆盖归档流，但 SQLite 目录仍为明文，文件名、大小、校验和、Unix 元数据及链接目标仍可见。浏览器 API key 以明文存入 localStorage；服务无内置 TLS。"
+      "name": "安全机制",
+      "description": "API key 与加密密钥分离；AEAD 保护归档流并绑定编码参数，容器外层元数据明文保存并纳入 SHA-256 校验。浏览器 API key 存入 localStorage，服务通过 HTTP 提供 API。"
     },
     {
       "id": "NFR-07",
-      "name": "平台与验证边界",
-      "description": "当前备份和恢复执行支持 Unix，实测平台为 macOS；短时验证不等于长期稳定性或断电保证。"
+      "name": "运行平台",
+      "description": "备份和恢复在 Unix 平台执行，验证环境为 macOS。"
     }
   ],
   "actors": [
@@ -340,12 +340,12 @@
       "supporting_actors": [
         "KEYS"
       ],
-      "trigger": "执行 bak -d <目录>。",
+      "trigger": "执行 bak server start -d <目录>，或增加 --foreground 前台运行。",
       "preconditions": [
         "已有工作目录和 config.json。"
       ],
       "success": "服务监听配置地址，持久化作业库与 worker 就绪。",
-      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "failure": "返回诊断错误，作业执行失败时持久化失败状态。",
       "includes": [],
       "extension_points": [],
       "extends": null,
@@ -361,12 +361,12 @@
         "NFR-07"
       ],
       "business_rules": [],
-      "notes": "web_ui 可省略，默认关闭；enabled=true 提供编译时嵌入的控制台。旧 archive_url/directory 字段被忽略；logging 已废弃。配置可含 scheduled_backups（时区、Cron、源路径、仓库及备份参数）；作业 schema v5、仓库 schema/format v5，旧数据库拒绝且不迁移。",
+      "notes": "根命令只接受子命令。WebUI 独立于二进制部署，enabled=true 时必须用 path 指定静态资源目录；修改资源无需重编译。作业库 schema v5、自包含备份格式 v9；旧仓库保留并由旧版读取。后台实例通过用户级 Unix socket 管理，日志追加至工作目录 server.log。",
       "basic_flow": [
         {
           "id": "B1",
           "actor": "CLIENT",
-          "action": "准备配置并执行 bak -d <目录>。"
+          "action": "准备 config.json，执行 bak server start -d <目录>；命令等待后台进程初始化和对账完成后返回 PID、地址与日志路径。"
         },
         {
           "id": "B2",
@@ -384,7 +384,16 @@
           "action": "绑定监听地址，启动认证 API、可选静态 UI 和 FIFO worker。"
         }
       ],
-      "alternative_flows": [],
+      "alternative_flows": [
+        {
+          "id": "A1",
+          "from": "B1",
+          "condition": "由终端或进程监督器管理前台服务",
+          "steps": [
+            "执行 bak server start --foreground -d <目录>，通过 Ctrl-C 或 SIGTERM 停止；前台实例不纳入用户级后台 status/stop。"
+          ]
+        }
+      ],
       "exception_flows": [
         {
           "id": "E1",
@@ -417,7 +426,7 @@
         "服务已启动。"
       ],
       "success": "HTTP 200 返回 version 与 encryption_keys，不返回密钥内容。",
-      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "failure": "返回诊断错误，作业执行失败时持久化失败状态。",
       "includes": [],
       "extension_points": [],
       "extends": null,
@@ -430,7 +439,7 @@
         "NFR-06"
       ],
       "business_rules": [],
-      "notes": "GET / 根据 web_ui.enabled 返回公开控制台或运行提示；状态不代表特定作业成功。GET 路由支持 HEAD，CORS 预检不要求认证。",
+      "notes": "GET / 根据 web_ui.enabled 返回公开控制台或运行提示；作业结果通过任务查询接口获取。GET 路由支持 HEAD，CORS 预检不要求认证。",
       "basic_flow": [
         {
           "id": "B1",
@@ -483,8 +492,8 @@
       "preconditions": [
         "手动请求要求有效 Bearer key；已有源和仓库目录，规范化路径不重叠。"
       ],
-      "success": "同步载荷后原子发布头、条目、根元数据和统计；成功作业仅返回 backup_id。",
-      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "success": "同步自包含临时归档，以不可覆盖的硬链接发布正式 .bak 并同步目录，然后保存任务成功结果；backup_id 使用持久化任务 ID。",
+      "failure": "返回诊断错误，作业执行失败时持久化失败状态。",
       "includes": [
         "UC-06"
       ],
@@ -508,9 +517,9 @@
       ],
       "business_rules": [
         "备份编号不可覆盖；本版本仅全量备份。",
-        "备份期间需保持源文件不变，程序不检测并发源修改。",
+        "备份期间保持源文件稳定，复制时检测文件缩小或增长。",
         "正则字段 AND、包含规则 OR、排除优先；时间 from 含、before 不含。目录拒绝后不遍历或计数其后代。",
-        "Zstd 等级默认 3；LZ77 默认窗口 64 KiB、搜索上限 32，只影响备份编码；加密覆盖归档流，但 SQLite 目录仍为明文。统计目前不出现在作业结果中。"
+        "Zstd 默认等级 3；LZ77 默认窗口 64 KiB、搜索上限 32。加密保护归档流，容器外层元数据仍明文；统计保存在文件中，暂不出现在任务结果内。"
       ],
       "notes": "筛选适用于文件、目录和符号链接；源根本身不参与筛选。正则编译和时间区间校验在 worker 执行时发生，HTTP 202 后仍可能失败。 LZ77 为自实现哈希候选链和滑动窗口格式，非 DEFLATE/ZIP/LZ4。界面默认 Zstd，API 显式选择算法；旧布尔压缩请求不再接受。",
       "basic_flow": [
@@ -537,12 +546,12 @@
         {
           "id": "B5",
           "actor": "系统",
-          "action": "把条目头和文件数据流式打包为 <backup_id>.bak，整包选择无压缩、Zstd 或 LZ77，再按需加密并累计最终归档字节的 SHA-256；不计算逐文件哈希，不缓存整个文件。"
+          "action": "向唯一隐藏 .partial 写入条目头和数据，依次按需压缩、加密；追加 manifest、长度、结束标记及摘要，SHA-256 覆盖除摘要自身外的全部容器字节。"
         },
         {
           "id": "B6",
           "actor": "系统",
-          "action": "完成压缩与最终认证块，依次同步文件和目录，事务发布仓库元数据。"
+          "action": "完成编码与最终认证块，同步临时文件，硬链接发布 <backup_id>.bak 并同步目录，移除本次临时链接后再次同步。"
         },
         {
           "id": "B7",
@@ -566,7 +575,7 @@
           "condition": "路径/格式错误、规则无效、密钥变化或 IO/提交失败",
           "steps": [
             "作业失败并记录原因；无效规则和密钥在创建载荷前失败。",
-            "不发布未提交元数据；运行中失败可留下未发布目录。"
+            "普通失败清理本次拥有的临时输出；崩溃遗留在下次启动对账，文件发布与任务结果提交不共享事务。"
           ]
         }
       ]
@@ -586,7 +595,7 @@
         "有效 Bearer key；仓库目录存在。"
       ],
       "success": "返回 backups 数组，包含 backup_id、created_at、compression 与 encryption（密钥标识/指纹或 null）。",
-      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "failure": "返回诊断错误，作业执行失败时持久化失败状态。",
       "includes": [],
       "extension_points": [],
       "extends": null,
@@ -599,7 +608,7 @@
         "NFR-05"
       ],
       "business_rules": [],
-      "notes": "目录内没有 repository.sqlite3 时返回空列表且不初始化数据库；忽略未发布目录；列表不检查载荷完整性。",
+      "notes": "仓库无需数据库；列表读取每个正式 .bak 的有界元数据，不读取数据载荷、不验证完整摘要，也不需要加密密钥。忽略 .partial 和无关文件；列表成本随备份数量和元数据大小增长。",
       "basic_flow": [
         {
           "id": "B1",
@@ -614,7 +623,7 @@
         {
           "id": "B3",
           "actor": "系统",
-          "action": "系统读取已提交的元数据头并按时间降序、编号升序返回。"
+          "action": "扫描正式 .bak 并验证容器标记和元数据结构，按时间降序、编号升序返回摘要。"
         }
       ],
       "alternative_flows": [],
@@ -630,9 +639,9 @@
         {
           "id": "E2",
           "from": "B3",
-          "condition": "数据库损坏或 schema 不支持",
+          "condition": "正式 .bak 的容器格式或元数据损坏，或检测到旧仓库数据库",
           "steps": [
-            "返回数据库错误，不返回成功空列表。"
+            "明确返回格式或元数据错误；不修改旧仓库，不伪装为空列表。"
           ]
         }
       ]
@@ -652,7 +661,7 @@
         "有效 Bearer key；已有仓库和空目标目录，规范化路径不重叠。"
       ],
       "success": "文件原文大小、整包 SHA-256 和加密流认证均通过，恢复 Unix 元数据与符号链接并同步，返回 destination。",
-      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "failure": "返回诊断错误，作业执行失败时持久化失败状态。",
       "includes": [
         "UC-06"
       ],
@@ -740,7 +749,7 @@
         "有效 Bearer key；单作业查询需要编号，历史查询不要求预先持有编号。"
       ],
       "success": "返回单作业或 jobs/next_cursor；历史包含请求和 queued_at/started_at/finished_at。",
-      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "failure": "返回诊断错误，作业执行失败时持久化失败状态。",
       "includes": [],
       "extension_points": [],
       "extends": null,
@@ -801,12 +810,12 @@
       "goal": "正常关闭时保留排队工作，异常退出后安全恢复作业状态。",
       "primary_actor": "CLIENT",
       "supporting_actors": [],
-      "trigger": "Ctrl-C、SIGTERM 或服务退出后重启。",
+      "trigger": "执行 bak server stop、发送 Ctrl-C/SIGTERM，或异常退出后再次启动。",
       "preconditions": [
         "同一工作目录只运行一个服务实例。"
       ],
-      "success": "终态历史保留；queued 作业继续执行；中断 running 作业失败且不重放。",
-      "failure": "返回可诊断错误或持久化失败作业；不声明操作成功。",
+      "success": "保留终态与 queued；中断备份的完整输出经校验后补记成功，无法确认的输出和中断恢复记录失败且不重跑。",
+      "failure": "返回诊断错误，作业执行失败时持久化失败状态。",
       "includes": [],
       "extension_points": [],
       "extends": null,
@@ -823,12 +832,12 @@
       "business_rules": [
         "正常关闭同时停止调度入队；重启初始化调度进度但不补跑停机分钟。"
       ],
-      "notes": "SIGKILL 回归验证进程中断；不等于断电或文件系统崩溃验证。已中断操作不自动重试。",
+      "notes": "新备份使用任务 ID 作为备份 ID。完整校验涵盖条目、大小、编解码结束、AEAD 与容器 SHA-256；仅确认同一 inode 的临时硬链接可清理。数据库提交失败使启动失败，running 留待下次重试。文件同步与发布完成后提交作业终态。",
       "basic_flow": [
         {
           "id": "B1",
           "actor": "CLIENT",
-          "action": "操作方发送关闭信号或重启已退出服务。"
+          "action": "请求停止后台服务，或观察异常退出后重新执行 server start。"
         },
         {
           "id": "B2",
@@ -871,7 +880,7 @@
       "name": "Manage browser API connections",
       "kind": "main",
       "priority": "高",
-      "goal": "从内嵌控制台选择本机或远程服务并隔离不同服务的数据。",
+      "goal": "通过独立部署的控制台连接本机或远程 API，并隔离不同服务的数据。",
       "primary_actor": "CLIENT",
       "supporting_actors": [],
       "trigger": "打开连接管理并添加、编辑、选择或删除连接。",
@@ -895,7 +904,7 @@
         "NFR-06"
       ],
       "business_rules": [],
-      "notes": "localStorage 按浏览器 origin 保存地址和明文 API key；重新打开验证选中服务。断开保留连接但停止自动重连，删除移除密钥。无独立前端部署和 API 代理。",
+      "notes": "localStorage 按浏览器 origin 保存地址和明文 API key；重新打开时验证选中服务。成功切换或删除当前连接会终止旧请求，清空计划、任务和仓库数据；失败保留原服务。前端资源由 web_ui.path 指定目录运行时提供，无 API 代理。",
       "basic_flow": [
         {
           "id": "B1",
@@ -981,7 +990,7 @@
         {
           "id": "B3",
           "actor": "系统",
-          "action": "服务启动时读取 64 位十六进制密钥，生成指纹并加载不可变 Keyring。"
+          "action": "服务启动时读取包含 64 个十六进制字符的 256 位密钥文件，生成指纹并加载不可变 Keyring。"
         },
         {
           "id": "B4",
@@ -1011,20 +1020,20 @@
     },
     {
       "id": "UC-10",
-      "name": "Run configured scheduled backup",
+      "name": "View and run configured backup plans",
       "kind": "main",
       "priority": "高",
-      "goal": "按配置的时间与备份参数自动创建全量备份，避免重复触发和积压。",
+      "goal": "查看配置计划，按 Cron 自动备份或立即执行保存的参数，避免同计划重复活动任务。",
       "primary_actor": "CLIENT",
       "supporting_actors": [
         "SRC",
         "TGT"
       ],
-      "trigger": "服务在线时进入匹配 Cron 的 UTC 分钟。",
+      "trigger": "Cron 匹配分钟，或认证客户端打开计划列表并选择 Back up now。",
       "preconditions": [
-        "计划启用且已通过启动校验；单实例持有工作目录；源与仓库在执行时可访问。"
+        "自动触发要求计划启用且通过启动校验；立即执行允许停用自动调度的计划，但所需密钥必须可用。"
       ],
-      "success": "事务保存计划进度及任务，复用 FIFO 完成备份；任务历史可查询计划标识和 UTC 计划时间。",
+      "success": "计划参数可查看；自动触发事务推进游标并入队，立即执行只入队而不改变游标，任务保存计划来源与相应时间。",
       "failure": "忙碌或错过的时间点跳过；执行失败记录任务，调度数据库错误导致服务失败退出。",
       "includes": [
         "UC-03",
@@ -1054,7 +1063,7 @@
         "同一计划有 queued/running 作业时推进进度但不入队；不同计划和手动任务共用 FIFO。",
         "任务保存配置快照与密钥指纹；修改或删除计划不更改已有排队任务。"
       ],
-      "notes": "计划通过服务端配置管理，无计划管理 API 或页面。调度器与 HTTP、worker 共同受监督关闭。",
+      "notes": "GET /api/schedules 返回时区及全部配置计划；POST /api/schedules/{id}/run 使用服务端保存参数，返回 202/Location。忙碌 409、不存在 404、缺少密钥 400；编辑仍需修改配置并重启。",
       "basic_flow": [
         {
           "id": "B1",
@@ -1089,6 +1098,17 @@
           "condition": "同计划已有 queued/running 作业",
           "steps": [
             "本次不入队，仍提交分钟进度，等待下一次匹配。"
+          ]
+        },
+        {
+          "id": "A2",
+          "from": "B1",
+          "condition": "立即执行已配置计划",
+          "steps": [
+            "打开 Scheduled backups 或认证调用 GET /api/schedules，查看时区、Cron、启用状态、路径、编码和筛选。",
+            "选择 Back up now，POST /api/schedules/{id}/run 使用保存配置，不允许客户端覆盖计划参数。",
+            "通过单条条件 INSERT 与既有活动计划唯一约束入队；同计划 queued/running 返回 409，不推进 Cron 游标。",
+            "返回 202/Location，切到任务记录手动刷新；请求响应丢失时不自动重试。"
           ]
         }
       ],
