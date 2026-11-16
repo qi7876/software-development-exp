@@ -18,10 +18,10 @@ struct AppState {
     secret_key: String,
 }
 
-pub fn router(jobs: JobManager, secret_key: String, web_ui_enabled: bool) -> Router {
+pub fn router(jobs: JobManager, secret_key: String, web_ui: crate::config::WebUIConfig) -> Router {
     let state = AppState { jobs, secret_key };
     Router::new()
-        .merge(super::ui::router(web_ui_enabled))
+        .merge(super::ui::router(web_ui))
         .route(
             "/api/status",
             get(|State(state): State<AppState>| async move { Json(json!({"version": env!("CARGO_PKG_VERSION"), "encryption_keys": state.jobs.keys.available()})) }),
@@ -321,7 +321,11 @@ mod tests {
             crate::jobs::crypto::Keyring::default(),
         )
         .await?;
-        let app = router(jobs.clone(), "test-key".into(), false);
+        let app = router(
+            jobs.clone(),
+            "test-key".into(),
+            crate::config::WebUIConfig::default(),
+        );
         let cases = [
             ("GET", "/api/status", "", "", "", 401),
             ("GET", "/api/jobs", "", "", "", 401),
@@ -495,7 +499,11 @@ mod tests {
             crate::jobs::crypto::Keyring::default(),
         )
         .await?;
-        let app = router(jobs.clone(), "test-key".into(), false);
+        let app = router(
+            jobs.clone(),
+            "test-key".into(),
+            crate::config::WebUIConfig::default(),
+        );
         let preflight = Request::builder()
             .method("OPTIONS")
             .uri("/api/backups")
@@ -542,7 +550,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn embedded_console_is_optional_and_api_stays_authenticated() -> Result<(), Box<dyn Error>>
+    async fn external_console_is_optional_and_api_stays_authenticated() -> Result<(), Box<dyn Error>>
     {
         let directory = TestDirectory::new()?;
         let jobs = JobManager::open(
@@ -550,8 +558,20 @@ mod tests {
             crate::jobs::crypto::Keyring::default(),
         )
         .await?;
+        let assets = directory.path().join("console");
+        std::fs::create_dir(&assets)?;
+        for name in ["index.html", "app.js", "styles.css", "favicon.svg"] {
+            std::fs::write(assets.join(name), "external asset /ui/app.js")?;
+        }
         for enabled in [false, true] {
-            let app = router(jobs.clone(), "test-key".into(), enabled);
+            let app = router(
+                jobs.clone(),
+                "test-key".into(),
+                crate::config::WebUIConfig {
+                    enabled,
+                    path: Some(assets.clone()),
+                },
+            );
             let response = app
                 .clone()
                 .oneshot(request("GET", "/", "", "", vec![])?)
@@ -603,6 +623,28 @@ mod tests {
                     );
                 }
             }
+            if enabled {
+                std::fs::write(assets.join("app.js"), "updated without rebuilding")?;
+                let response = app
+                    .clone()
+                    .oneshot(request("GET", "/ui/app.js", "", "", vec![])?)
+                    .await?;
+                assert_eq!(
+                    to_bytes(response.into_body(), usize::MAX).await?.as_ref(),
+                    b"updated without rebuilding"
+                );
+                std::fs::remove_file(assets.join("app.js"))?;
+                let response = app
+                    .clone()
+                    .oneshot(request("GET", "/ui/app.js", "", "", vec![])?)
+                    .await?;
+                assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+                let response = app
+                    .clone()
+                    .oneshot(request("GET", "/ui/config.json", "", "", vec![])?)
+                    .await?;
+                assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            }
             let response = app
                 .oneshot(request("GET", "/api/jobs", "", "", vec![])?)
                 .await?;
@@ -620,7 +662,11 @@ mod tests {
             crate::jobs::crypto::Keyring::default(),
         )
         .await?;
-        let app = router(jobs.clone(), "test-key".into(), false);
+        let app = router(
+            jobs.clone(),
+            "test-key".into(),
+            crate::config::WebUIConfig::default(),
+        );
         let response = app
             .clone()
             .oneshot(request(
@@ -680,7 +726,11 @@ mod tests {
         )
         .await?;
         jobs.close().await;
-        let app = router(jobs, "test-key".into(), false);
+        let app = router(
+            jobs,
+            "test-key".into(),
+            crate::config::WebUIConfig::default(),
+        );
         let response = app
             .oneshot(request(
                 "POST",

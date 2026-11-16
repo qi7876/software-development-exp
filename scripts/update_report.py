@@ -415,7 +415,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         anchor,
         "产品发布单一 Rust 可执行文件 bak，读取工作目录中的 "
         "config.json，运行 axum/Tokio HTTP 服务。"
-        "用户通过嵌入式 Web 控制台或 curl 调用 Bearer 认证接口。"
+        "用户通过独立部署的 Web 控制台或 curl 调用 Bearer 认证接口。"
         "浏览器可选择本机或远程 API，后台 worker 顺序执行作业；"
         "当前支持配置式定时备份；未实现增量备份或元数据加密。"
         "本报告描述已实现行为，不把未来目标列为当前能力。",
@@ -491,7 +491,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         (
             (
                 "GET /；/ui/* 静态资源",
-                "web_ui.enabled=true 时提供公开嵌入式控制台，否则返回运行提示。",
+                "web_ui.enabled=true 时从 web_ui.path 读取公开控制台文件，否则返回运行提示。",
             ),
             (
                 "GET /api/status",
@@ -550,7 +550,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
             ("secret_key", "必需且非空；用于 API 认证，与备份加密无关。"),
             (
                 "web_ui",
-                "可省略，默认关闭；enabled=true 启用编译时静态资源。"
+                "可省略，默认关闭；enabled=true 时必须通过 path 指定静态资源目录，路径相对工作目录或为绝对路径。"
                 "旧 archive_url/directory 被忽略。",
             ),
             (

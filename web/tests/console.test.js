@@ -110,7 +110,7 @@ async function startServer(
     JSON.stringify({
       listen: "127.0.0.1:0",
       secret_key: apiSecret,
-      web_ui: { enabled: webUi },
+      web_ui: { enabled: webUi, path: join(project, "web") },
       encryption: {
         keys: encryption
           ? { current: "current.key", previous: "previous.key" }

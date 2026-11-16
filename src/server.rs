@@ -21,7 +21,7 @@ pub(crate) async fn serve(config: Config, jobs: JobManager) -> Result<(), Box<dy
         tokio::spawn(async move { scheduler.run(scheduler_jobs, scheduler_stop).await });
     let server = axum::serve(
         listener,
-        api::router(jobs.clone(), config.secret_key, config.web_ui.enabled),
+        api::router(jobs.clone(), config.secret_key, config.web_ui),
     )
     .with_graceful_shutdown(async move {
         // Sender closure also means the owner has stopped the service.
