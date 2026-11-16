@@ -2,6 +2,7 @@ mod archive;
 mod backup;
 mod content;
 mod filesystem;
+mod recovery;
 mod repository;
 mod restore;
 mod storage;
@@ -66,16 +67,17 @@ impl JobManager {
     pub(crate) async fn open(working_directory: PathBuf, keys: Keyring) -> Result<Self, JobError> {
         let pool =
             storage::open(&working_directory.join("jobs.sqlite3"), JOBS_SCHEMA, true).await?;
-        // A running operation may have performed external effects. Never replay it.
-        sqlx::query("UPDATE jobs SET state = 'failed', error_code = 500, error_message = 'operation interrupted by service exit', finished_at = ? WHERE state = 'running'")
-            .bind(timestamp()?).execute(&pool).await
-            .map_err(|error| JobError::internal(format!("cannot recover interrupted jobs: {error}")))?;
-        Ok(Self {
+        let jobs = Self {
             pool,
             working_directory,
             wake: Arc::new(Notify::new()),
             keys: Arc::new(keys),
-        })
+        };
+        if let Err(error) = jobs.recover_interrupted().await {
+            jobs.close().await;
+            return Err(error);
+        }
+        Ok(jobs)
     }
 
     pub(crate) async fn submit(&self, request: JobRequest) -> Result<JobInfo, JobError> {
@@ -272,15 +274,15 @@ impl JobManager {
 
     pub(crate) async fn run_worker(&self, stop: watch::Receiver<bool>) -> Result<(), JobError> {
         let keys = self.keys.clone();
-        self.worker(stop, move |request, directory| {
-            execute(request, directory, &keys)
+        self.worker(stop, move |request, directory, job_id| {
+            execute(request, directory, &keys, &job_id)
         })
         .await
     }
 
     async fn worker<F>(&self, mut stop: watch::Receiver<bool>, execute: F) -> Result<(), JobError>
     where
-        F: Fn(JobRequest, PathBuf) -> Result<JobResult, JobError> + Send + Sync + 'static,
+        F: Fn(JobRequest, PathBuf, String) -> Result<JobResult, JobError> + Send + Sync + 'static,
     {
         let execute = Arc::new(execute);
         loop {
@@ -294,13 +296,15 @@ impl JobManager {
             if let Some(job) = self.claim().await? {
                 let execute = execute.clone();
                 let directory = self.working_directory.clone();
-                let result = tokio::task::spawn_blocking(move || execute(job.request, directory))
-                    .await
-                    .unwrap_or_else(|error| {
-                        Err(JobError::internal(format!(
-                            "operation task failed: {error}"
-                        )))
-                    });
+                let job_id = job.job_id.clone();
+                let result =
+                    tokio::task::spawn_blocking(move || execute(job.request, directory, job_id))
+                        .await
+                        .unwrap_or_else(|error| {
+                            Err(JobError::internal(format!(
+                                "operation task failed: {error}"
+                            )))
+                        });
                 self.finish(&job.job_id, result).await?;
                 continue;
             }
@@ -318,7 +322,12 @@ impl JobManager {
     }
 }
 
-fn execute(request: JobRequest, directory: PathBuf, keys: &Keyring) -> Result<JobResult, JobError> {
+fn execute(
+    request: JobRequest,
+    directory: PathBuf,
+    keys: &Keyring,
+    job_id: &str,
+) -> Result<JobResult, JobError> {
     match request {
         JobRequest::Backup {
             source,
@@ -326,7 +335,7 @@ fn execute(request: JobRequest, directory: PathBuf, keys: &Keyring) -> Result<Jo
             filter,
             options,
         } => {
-            let backup_id = Uuid::new_v4().to_string();
+            let backup_id = job_id.to_owned();
             backup::run_with_options(
                 &directory.join(source),
                 &directory.join(repository),
@@ -595,6 +604,7 @@ mod tests {
                 resumed.request,
                 directory.path().to_owned(),
                 &Keyring::default(),
+                &resumed.job_id,
             ),
         )
         .await?;
@@ -632,11 +642,11 @@ mod tests {
             let (stop, receiver) = watch::channel(false);
             let worker_jobs = jobs.clone();
             let worker = tokio::spawn(async move {
-                worker_jobs.worker(receiver, move |request, directory| {
+                worker_jobs.worker(receiver, move |request, directory, job_id| {
                     let (release, wait) = std::sync::mpsc::channel();
                     started.send((request, directory, release)).map_err(|error| JobError::internal(format!("cannot report operation start: {error}")))?;
                     wait.recv().map_err(|error| JobError::internal(format!("cannot wait for operation release: {error}")))?;
-                    Ok(JobResult::Backup { backup_id: Uuid::new_v4().to_string() })
+                    Ok(JobResult::Backup { backup_id: job_id })
                 }).await
             });
             let (request, working_directory, release_first) = starts.recv().await.ok_or("worker did not start")?;

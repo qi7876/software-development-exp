@@ -9,9 +9,9 @@ The current format is self-contained v9: one encoded archive with its codec sett
 | Priority | Gap and consequence | Next deliverable |
 | --- | --- | --- |
 | 1 | Source files can change while being read; success does not establish a consistent snapshot. | Detect common file changes and fail visibly; document that metadata checks alone do not provide a multi-file snapshot. |
-| 1 | Interrupted backups can leave ignored temporary files; failed restores can leave partial output. | Define ownership of temporary output, reconcile interrupted work, and safely clean only operation-owned contents. |
+| 1 | Interrupted backups can leave ignored temporary files; failed restores can leave partial output. | Startup reconciliation now verifies known interrupted backups and completes recoverable output. Add an explicit inspection/cleanup workflow for unconfirmed leftovers and interrupted restores. |
 | 1 | Listing scans per-file metadata instead of an index, so cost grows with repository size. | Measure representative large repositories before introducing any optional, rebuildable index. |
-| 2 | Integrity is checked during restore only. | Add a read-only repository verification operation that identifies damaged/missing files without a restore destination. |
+| 2 | Integrity is checked during restore and interrupted-backup reconciliation, but there is no whole-repository audit. | Add a read-only repository verification operation that identifies damaged/missing files without a restore destination. |
 
 ## Usability after the core loop
 

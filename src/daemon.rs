@@ -33,7 +33,7 @@ mod unix {
         io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
         net::{UnixListener, UnixStream},
         sync::watch,
-        time::{Instant, sleep, timeout},
+        time::{sleep, timeout},
     };
 
     #[derive(serde::Serialize, serde::Deserialize)]
@@ -152,7 +152,11 @@ mod unix {
             .stderr(Stdio::from(log))
             .process_group(0)
             .spawn()?;
-        let deadline = Instant::now() + Duration::from_secs(30);
+        println!(
+            "Starting server (PID {}); waiting for initialization and recovery. Log: {}",
+            child.id(),
+            log_path.display()
+        );
         loop {
             if let Some(exit) = child.try_wait()? {
                 return Err(format!(
@@ -173,11 +177,6 @@ mod unix {
                     let _ = child.wait();
                     return Err(error);
                 }
-            }
-            if Instant::now() >= deadline {
-                child.kill()?;
-                child.wait()?;
-                return Err(format!("server startup timed out; see {}", log_path.display()).into());
             }
             sleep(Duration::from_millis(50)).await;
         }

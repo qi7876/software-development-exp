@@ -732,7 +732,7 @@ proptest! {
 }
 
 #[tokio::test]
-async fn abrupt_exit_fails_the_active_job_and_resumes_queued_work() -> TestResult {
+async fn abrupt_exit_recovers_published_backup_and_resumes_queued_work() -> TestResult {
     let mut server = TestServer::start().await?;
     add_active_workload(&server.path("source"))?;
     std::fs::write(server.path("source/payload"), b"keep source contents")?;
@@ -763,6 +763,15 @@ async fn abrupt_exit_fails_the_active_job_and_resumes_queued_work() -> TestResul
     sqlx::query("BEGIN IMMEDIATE")
         .execute(&mut connection)
         .await?;
+    let active_archive = server.path("repo with space").join(format!("{active}.bak"));
+    // Force the publication/outcome gap with a real DB write lock, then kill the process.
+    timeout(Duration::from_secs(3), async {
+        while !active_archive.exists() {
+            sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await?;
+    let published = std::fs::read(&active_archive)?;
     server
         .child
         .as_mut()
@@ -779,15 +788,15 @@ async fn abrupt_exit_fails_the_active_job_and_resumes_queued_work() -> TestResul
     server.spawn()?;
     server.wait_ready().await?;
     let interrupted = server.wait_job(&active, false).await?;
-    assert_eq!(interrupted["state"], "failed", "{interrupted}");
+    assert_eq!(interrupted["state"], "succeeded", "{interrupted}");
     assert_eq!(interrupted["kind"], "backup");
-    assert!(interrupted["result"].is_null());
-    assert_eq!(interrupted["error"]["code"], 500);
+    assert_eq!(interrupted["result"]["backup_id"], active);
+    assert!(interrupted["error"].is_null());
+    assert_eq!(std::fs::read(&active_archive)?, published);
     assert!(
-        interrupted["error"]["message"]
-            .as_str()
-            .ok_or("missing interruption message")?
-            .contains("interrupted")
+        server
+            .logs()
+            .contains(&format!("Recovered backup job {active}"))
     );
     let resumed = server.wait_job(&queued, false).await?;
     assert_eq!(resumed["state"], "succeeded", "{resumed}");
@@ -802,9 +811,10 @@ async fn abrupt_exit_fails_the_active_job_and_resumes_queued_work() -> TestResul
     );
     let listed = server.get(LIST_PATH).await?;
     let summaries = listed["backups"].as_array().ok_or("missing summaries")?;
-    assert!(summaries.len() >= 2);
+    assert_eq!(summaries.len(), 3);
     for id in [
         backup_id,
+        &active,
         resumed["result"]["backup_id"]
             .as_str()
             .ok_or("missing resumed backup ID")?,

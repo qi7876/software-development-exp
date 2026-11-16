@@ -1,6 +1,6 @@
 use super::{
     JobError, archive,
-    content::{Checksum, CompressionOptions, Encryption},
+    content::{BackupOptions, Checksum, CompressionOptions, Content, Encryption, Keyring},
     filesystem::{get_absolute_directory_path, sync_directory},
 };
 use http::StatusCode;
@@ -218,6 +218,15 @@ impl ArchiveFile {
     }
 
     pub(super) fn open(path: &Path) -> Result<Self, JobError> {
+        let id = path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| JobError::internal("invalid backup filename"))?;
+        Self::open_expected(path, id)
+    }
+
+    pub(super) fn open_expected(path: &Path, backup_id: &str) -> Result<Self, JobError> {
+        validate_id(backup_id)?;
         if !path.try_exists()? {
             return Err(JobError::new(StatusCode::NOT_FOUND, "backup not found"));
         }
@@ -260,7 +269,7 @@ impl ArchiveFile {
             let mut manifest: Manifest = serde_json::from_slice(&metadata)?;
             manifest.archive_checksum = hex::encode(digest);
             manifest.validate()?;
-            if path.file_stem().and_then(|s| s.to_str()) != Some(manifest.backup_id.as_str()) {
+            if manifest.backup_id != backup_id {
                 return Err(JobError::internal(
                     "backup filename does not match its stored ID",
                 ));
@@ -280,6 +289,42 @@ impl ArchiveFile {
                 error.message
             ))
         })
+    }
+    pub(super) fn finish_checksum(&self, mut input: Checksum<File>) -> Result<(), JobError> {
+        let length = self.metadata_len + 16;
+        if io::copy(&mut (&mut input).take(length), &mut io::sink())? != length {
+            return Err(JobError::internal("truncated backup metadata"));
+        }
+        if input.finish().1 != self.manifest.archive_checksum {
+            return Err(JobError::internal("archive payload checksum mismatch"));
+        }
+        Ok(())
+    }
+
+    // Recovery validates the same framing, entry sizes, AEAD, and digest as restore,
+    // but consumes file data into a sink without creating destination files.
+    pub(super) fn verify(&self, keys: &Keyring) -> Result<(), JobError> {
+        let options = BackupOptions {
+            compression: self.manifest.compression.clone(),
+            encryption: self.manifest.encryption.clone(),
+        };
+        let content = Content::new(&options, keys, &self.manifest.backup_id)?;
+        let mut file = self.file.try_clone()?;
+        file.rewind()?;
+        let mut input = Checksum::new(file);
+        let mut magic = [0; 8];
+        input.read_exact(&mut magic)?;
+        let name = archive::file_name(&self.manifest.backup_id);
+        let decoder = content.reader((&mut input).take(self.payload_len), Path::new(&name))?;
+        let mut reader = archive::Reader::new(decoder)?;
+        for entry in &self.manifest.entries {
+            reader.expect_entry(entry)?;
+            if let ManifestEntryKind::File { original_size } = entry.kind {
+                reader.read_file(&mut io::sink(), original_size)?;
+            }
+        }
+        reader.finish()?.finish()?;
+        self.finish_checksum(input)
     }
 }
 

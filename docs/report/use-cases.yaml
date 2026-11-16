@@ -37,7 +37,7 @@
     {
       "id": "FR-07",
       "name": "关闭与重启恢复",
-      "description": "正常关闭等待活动作业完成、保留 queued；重启将中断 running 标为失败且不重放，继续 queued 并保留终态历史。"
+      "description": "正常关闭等待活动作业完成、保留 queued；重启校验中断备份并对账，完整输出补记成功，否则失败且不重放；继续 queued 并保留终态历史。"
     },
     {
       "id": "FR-08",
@@ -376,7 +376,7 @@
         {
           "id": "B3",
           "actor": "系统",
-          "action": "打开 jobs.sqlite3，将中断 running 作业标为失败。"
+          "action": "打开 jobs.sqlite3，对账中断备份；完整且可验证的输出补记成功，其他中断作业失败且不重放。"
         },
         {
           "id": "B4",
@@ -838,7 +838,7 @@
         {
           "id": "B3",
           "actor": "系统",
-          "action": "重启时系统把遗留 running 作业标为 failed，错误码 500 和中断说明。"
+          "action": "重启时校验遗留 running 备份：完整输出补记 succeeded，否则 failed/500；中断恢复不重放并保留输出。"
         },
         {
           "id": "B4",

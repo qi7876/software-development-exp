@@ -225,16 +225,7 @@ fn restore_all_files(
             ))
         })?;
 
-    let length = backup.metadata_len + 16;
-    if io::copy(&mut (&mut input).take(length), &mut io::sink())? != length {
-        return Err(JobError::internal("truncated backup metadata"));
-    }
-    if input.finish().1 != backup.manifest.archive_checksum {
-        return Err(JobError::internal(format!(
-            "archive payload checksum mismatch: {}",
-            archive_path.display()
-        )));
-    }
+    backup.finish_checksum(input)?;
 
     for manifest_entry in manifest_entries.iter().rev() {
         if let ManifestEntry {
