@@ -605,8 +605,9 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "create_new 写入并自动解密/解压，验证最终认证块、原文大小和 SHA-256，"
         "重建符号链接、应用 Unix 元数据并同步。"
         "正常关闭停止接收请求与领取作业，完成活动操作并留下 "
-        "queued 作业。重启将遗留 running 标为失败，"
-        "不自动重放，再继续 queued 作业。客户端断开不取消已提交作业，重试 POST 会产生新作业。",
+        "queued 作业。重启按持久化任务 ID 对账中断备份，完整输出补记成功，无法确认则标记失败；"
+        "中断恢复保留输出且不重放，再继续 queued 作业。"
+        "客户端断开不取消已提交作业，重试 POST 会产生新作业。",
     )
     _heading(document, anchor, "3.4 控制台、筛选与编码", 2)
     _paragraph(
@@ -1025,8 +1026,8 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             ("SIGTERM", "停止调度；活动作业完成，queued 留给下一次启动；HTTP 在活动操作期间响应。"),
             (
                 "SIGKILL",
-                "重启将 interrupted running 标为 "
-                "failed/500，queued 继续、已完成结果不变、中断作业不重放。",
+                "重启完整校验已发布备份或唯一完整临时文件并补记成功；无法确认则 failed/500，"
+                "queued 继续、终态历史不变、中断恢复不重放。",
             ),
         ),
         (4.2, 9.8),

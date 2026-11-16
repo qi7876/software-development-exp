@@ -16,22 +16,25 @@ diagram: "Service Startup, Shutdown and Recovery" {
   DB: "jobs.sqlite3" {shape: cylinder}
   Server: "<<boundary>>\nserver" {shape: rectangle}
   Scheduler: "<<control>>\nScheduler" {shape: rectangle}
-  User -> Main: "bak -d working-directory"
+  Repo: "<<entity>>\nSelf-contained backup\nfiles" {shape: rectangle}
+  User -> Main: "bak server start -d working-directory"
   Main -> Main: "Parse flags / read config.json"
   Main -> Keys: "Load named keys and fingerprints"
   Main -> Jobs: "Open JobManager with shared Keyring"
-  Jobs -> DB: "Initialize schema / fail interrupted\nrunning jobs"
+  Jobs -> DB: "Initialize schema / read interrupted\nrunning jobs"
   DB -> Jobs: "Terminal history and queued jobs\nretained" {style.stroke-dash: 5}
+  Jobs -> Repo: "Verify job-ID archive / safely publish\ncomplete temporary"
+  Jobs -> DB: "Commit verified success or interrupted\nfailure; never replay"
   Main -> Server: "Prepare scheduler, then bind HTTP"
   Server -> Scheduler: "Validate plans / resolve keys"
   Scheduler -> Jobs: "Initialize UTC cursors; no catch-up"
   Jobs -> DB: "Advance persisted startup minute"
   Server -> Jobs: "Run FIFO worker"
-  fragment_11: "opt [Embedded console enabled]" {
+  fragment_13: "opt [Embedded console enabled]" {
     User -> Server: "Load public UI / verify selected API"
     Server -> User: "Authenticated version and key\nfingerprints" {style.stroke-dash: 5}
   }
-  fragment_15: "opt [Ctrl-C or SIGTERM]" {
+  fragment_17: "opt [Ctrl-C or SIGTERM]" {
     User -> Server: "Request graceful shutdown"
     Server -> Scheduler: "Stop admitting scheduled work"
     Server -> Jobs: "Stop claiming; finish active operation"

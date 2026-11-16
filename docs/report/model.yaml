@@ -1282,6 +1282,11 @@
           "id": "Scheduler",
           "name": "Scheduler",
           "type": "control"
+        },
+        {
+          "id": "Repo",
+          "name": "Self-contained backup files",
+          "type": "entity"
         }
       ],
       "steps": [
@@ -1289,7 +1294,7 @@
           "type": "message",
           "source": "User",
           "target": "Main",
-          "text": "bak -d working-directory"
+          "text": "bak server start -d working-directory"
         },
         {
           "type": "message",
@@ -1313,13 +1318,25 @@
           "type": "message",
           "source": "Jobs",
           "target": "DB",
-          "text": "Initialize schema / fail interrupted running jobs"
+          "text": "Initialize schema / read interrupted running jobs"
         },
         {
           "type": "return",
           "source": "DB",
           "target": "Jobs",
           "text": "Terminal history and queued jobs retained"
+        },
+        {
+          "type": "message",
+          "source": "Jobs",
+          "target": "Repo",
+          "text": "Verify job-ID archive / safely publish complete temporary"
+        },
+        {
+          "type": "message",
+          "source": "Jobs",
+          "target": "DB",
+          "text": "Commit verified success or interrupted failure; never replay"
         },
         {
           "type": "message",

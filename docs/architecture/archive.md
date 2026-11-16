@@ -69,11 +69,14 @@ Synchronize the repository directory, remove the temporary link, and synchronize
 it again. The repository filesystem must support hard links and directory sync.
 
 Ordinary failures remove only the writer's own temporary file. A process crash
-can leave `.partial` files, which listing ignores and does not automatically
-delete. Final `.bak` names refer to complete inodes. A directory-sync failure
+can leave `.partial` files, which listing ignores. [Startup reconciliation](recovery.md)
+can publish one verified complete temporary for its interrupted task; unrelated or
+unverifiable files are retained. Final `.bak` names refer to complete inodes. A directory-sync failure
 after linking can leave a visible final backup despite a failed job. File
 publication and the subsequent job-history commit are separate durability
 boundaries; a complete backup may exist even if task completion was interrupted.
+New job executions use the persisted job UUID as the backup ID, enabling verified
+startup repair of that gap without changing this container format.
 
 ## Listing and restoration
 
