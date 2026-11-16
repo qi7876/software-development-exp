@@ -1,4 +1,8 @@
-use std::{error::Error, net::SocketAddr, path::Path};
+use std::{
+    error::Error,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+};
 
 #[derive(serde::Deserialize, Debug)]
 pub(crate) struct Config {
@@ -16,6 +20,8 @@ pub(crate) struct Config {
 pub(crate) struct WebUIConfig {
     #[serde(default)]
     pub(crate) enabled: bool,
+    #[serde(default)]
+    pub(crate) path: Option<PathBuf>,
 }
 
 #[derive(serde::Deserialize, Debug, Default)]
@@ -34,11 +40,30 @@ impl Config {
         if value.get("logging").is_some() {
             return Err(format!("config {} contains obsolete logging settings; remove logging: job history is now stored in jobs.sqlite3", config_path.display()).into());
         }
-        let config = serde_json::from_value::<Config>(value)
+        let mut config = serde_json::from_value::<Config>(value)
             .map_err(|error| format!("cannot parse config {}: {error}", config_path.display()))?;
 
         if config.secret_key.is_empty() {
             return Err("secret_key must not be empty".into());
+        }
+
+        if config.web_ui.enabled {
+            let path = config
+                .web_ui
+                .path
+                .as_mut()
+                .filter(|path| !path.as_os_str().is_empty())
+                .ok_or("web_ui.path must not be empty when web_ui.enabled is true")?;
+            *path = working_directory.join(&*path);
+            for name in ["index.html", "app.js", "styles.css", "favicon.svg"] {
+                let asset = path.join(name);
+                let file = std::fs::File::open(&asset).map_err(|error| {
+                    format!("cannot open web UI asset {}: {error}", asset.display())
+                })?;
+                if !file.metadata()?.is_file() {
+                    return Err(format!("web UI asset {} must be a file", asset.display()).into());
+                }
+            }
         }
 
         Ok(config)
@@ -51,27 +76,45 @@ mod tests {
     use crate::test_support::TestDirectory;
 
     #[test]
-    fn web_console_configuration_is_optional_and_embedded() -> Result<(), Box<dyn Error>> {
+    fn web_console_loads_external_paths_only_when_enabled() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
-        for (web_ui, expected) in [
-            (None, false),
-            (Some(serde_json::json!({"enabled": true})), true),
-            (
-                Some(
-                    serde_json::json!({"enabled": true, "archive_url": "obsolete", "directory": ""}),
-                ),
-                true,
-            ),
+        let assets = directory.path().join("console");
+        std::fs::create_dir(&assets)?;
+        for name in ["index.html", "app.js", "styles.css", "favicon.svg"] {
+            std::fs::write(assets.join(name), "test")?;
+        }
+        for web_ui in [
+            serde_json::json!({}),
+            serde_json::json!({"enabled": false, "path": "missing"}),
+            serde_json::json!({"enabled": true, "path": "console"}),
+            serde_json::json!({"enabled": true, "path": assets}),
         ] {
-            let mut config = serde_json::json!({"listen": "127.0.0.1:0", "secret_key": "test-key"});
-            if let Some(web_ui) = web_ui {
-                config["web_ui"] = web_ui;
-            }
+            let config = serde_json::json!({
+                "listen": "127.0.0.1:0", "secret_key": "test-key", "web_ui": web_ui
+            });
             std::fs::write(
                 directory.path().join("config.json"),
                 serde_json::to_vec(&config)?,
             )?;
-            assert_eq!(Config::load(directory.path())?.web_ui.enabled, expected);
+            let loaded = Config::load(directory.path())?;
+            if loaded.web_ui.enabled {
+                assert_eq!(loaded.web_ui.path.as_ref(), Some(&assets));
+            }
+        }
+        for web_ui in [
+            serde_json::json!({"enabled": true}),
+            serde_json::json!({"enabled": true, "path": ""}),
+            serde_json::json!({"enabled": true, "path": "missing"}),
+            serde_json::json!({"enabled": true, "path": "console/index.html"}),
+        ] {
+            let config = serde_json::json!({
+                "listen": "127.0.0.1:0", "secret_key": "test-key", "web_ui": web_ui
+            });
+            std::fs::write(
+                directory.path().join("config.json"),
+                serde_json::to_vec(&config)?,
+            )?;
+            assert!(Config::load(directory.path()).is_err());
         }
         Ok(())
     }
@@ -81,6 +124,7 @@ mod tests {
         let directory = TestDirectory::new()?;
         let mut config: serde_json::Value =
             serde_json::from_str(include_str!("../working-directory-example/config.json"))?;
+        config["web_ui"] = serde_json::json!({"enabled": false});
         std::fs::write(
             directory.path().join("config.json"),
             serde_json::to_vec(&config)?,

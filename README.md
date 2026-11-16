@@ -44,10 +44,11 @@ All paths refer to the machine running bak, even if you open the console from an
 | `listen` | yes | Address and port, for example `127.0.0.1:8080`. Use `0.0.0.0:8080` to accept connections from other machines. |
 | `secret_key` | yes | Non-empty API key. Clients send it as `Authorization: Bearer <secret_key>`. |
 | `web_ui.enabled` | no | Serve the browser console. Defaults to false. |
+| `web_ui.path` | when enabled | Directory containing `index.html`, `app.js`, `styles.css`, and `favicon.svg`. Absolute or relative to the working directory (`-d`). |
 | `encryption.keys` | no | Map of key IDs to key file paths. See [Encryption keys](#encryption-keys). |
 | `scheduled_backups` | no | Cron-based backup plans. See [Scheduled backups](#scheduled-backups). |
 
-The service refuses to start, with a message, if `config.json` is missing or invalid, `secret_key` is empty, or a configured key file cannot be read. Restart the service after any change to `config.json`. The obsolete `web_ui.archive_url` and `web_ui.directory` fields are accepted but ignored. The former `logging` section must be removed.
+The service refuses to start, with a message, if `config.json` is missing or invalid, `secret_key` is empty, a configured key file cannot be read, or an enabled WebUI has no path or missing/unreadable assets. Restart the service after any change to `config.json`. The obsolete `web_ui.archive_url` and `web_ui.directory` fields are accepted but ignored. The former `logging` section must be removed.
 
 Treat `secret_key` as a password. Anyone who has it can read and write any path the service can reach. bak has no built-in TLS, so keep `listen` on loopback or put a reverse proxy with HTTPS in front when exposing it.
 
@@ -176,7 +177,16 @@ All paths refer to the device running bak, including when the browser is on anot
 
 The console supports desktop and tablet windows (768 CSS pixels and wider). Page content follows the available width up to 1040 CSS pixels, with flexible margins. Form fields wrap to one column when space is limited; wide tables scroll within their lists. System fonts, a black-white-gray palette, square-cornered bordered boxes, and no icons or shadows provide visual hierarchy; task states are distinguished by border style and fill, and only errors and failed tasks use red. The console text is in English. Form controls retain native interaction, focus indicators, and disabled states with a consistent monospace font and font size for inputs, selects, and textareas. Single-line inputs and selects share a common height; select arrows have inset spacing. The two-column layout places navigation in the left sidebar and page content on the right in bordered boxes. The Create backup button is at the upper right of the backup page. The four sidebar entries open separate views, preserve form inputs when switching views within one service, and support browser back/forward navigation. Task records load once after connecting or submitting a task; further status updates use the Refresh button, with no background polling. They show server-side errors and paginate through persisted history. Task IDs and execution timestamps expand under Details. A connection failure is also shown in the sidebar and can be retried with Refresh; an invalid key opens connection management for correction. The UI shows task states rather than byte progress. Requests that lose their response are not automatically resubmitted: inspect history before retrying. The service uses one shared key rather than separate user accounts.
 
-Browser assets live in `web/` and are embedded at Rust compile time; rebuild after editing them. Node.js 20 or later is needed only for the optional browser checks:
+Browser assets live in `web/` and are distributed separately from the `bak` binary. Copy that directory to the deployment machine and configure its location:
+
+```json
+"web_ui": {
+  "enabled": true,
+  "path": "/opt/bak/web"
+}
+```
+
+The example configuration uses `"path": "../web"`, relative to `working-directory-example/`. Assets are read from disk on each request; updating them does not require rebuilding or restarting `bak`. Only the four console files above are exposed, at `/` and `/ui/*`. With `enabled=false`, no WebUI files are required. Node.js 20 or later is needed only for the optional browser checks:
 
 ```shell
 npm --prefix web ci
@@ -314,7 +324,7 @@ src/
   server.rs        HTTP listener, worker supervision, and graceful shutdown
   server/
     api.rs         Private HTTP routing, authentication, validation, and JSON responses
-    ui.rs          Optional embedded console assets and browser security headers
+    ui.rs          Optional external console assets and browser security headers
   jobs.rs          Job manager facade, durable FIFO lifecycle, and the background worker
   jobs/
     archive.rs     Sequential archive framing and streaming file verification
@@ -329,13 +339,13 @@ src/
   test_support.rs  Temporary directories for tests
 tests/
   server.rs        Application integration tests through the compiled binary and HTTP
-web/               Embedded HTML, CSS, and JavaScript; optional Playwright browser checks
+web/               Separately deployed HTML, CSS, and JavaScript; optional Playwright browser checks
 ```
 
 ## Current status and acceptance criteria
 
 Command-line parsing, configuration, authenticated HTTP routing, JSON error responses, durable background jobs,
-restart recovery, repository metadata storage and listing, Unix full backup and restore execution, and an embedded browser console with paginated task history are implemented.
+restart recovery, repository metadata storage and listing, Unix full backup and restore execution, and an independently deployed browser console with paginated task history are implemented.
 
 Backup jobs require existing source and repository directories. Equal or nested paths are rejected after resolving symlinks.
 Recursive source discovery is implemented, including empty directories. Symbolic links are preserved; unsupported entry types are skipped and counted.
@@ -355,7 +365,7 @@ The current milestone is a minimal end-to-end workflow for local full backups an
 - Return a durable job ID immediately, execute one operation at a time, and retain queryable outcomes across restart.
 - Publish complete repository metadata transactionally after the referenced file contents are durable.
 - Restore into a separate empty directory and compare relative paths, entry types, and contents. Report clear failures and interruptions while preserving source files and existing successful backups.
-- Complete backup, repository browsing, restore, and task-history queries from the embedded console, with visible failures and browser-persisted API connection profiles.
+- Complete backup, repository browsing, restore, and task-history queries from the browser console, with visible failures and browser-persisted API connection profiles.
 
 This closes the local MVP workflow. The next reliability priorities are source-file consistency and cleanup after failed or interrupted operations. See the [MVP follow-up assessment](docs/mvp.md) for priorities and current boundaries.
 
