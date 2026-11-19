@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::HashSet, fs, os::unix::fs::FileTypeExt, path::Path};
 
 use crate::jobs::JobError;
 use crate::jobs::repository::{FileTimestamp, UnixMetadata};
@@ -7,12 +7,39 @@ use http::StatusCode;
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Filter {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file_types: Option<Vec<FileType>>,
     relative_path: RegexFilter,
     uid: RegexFilter,
     gid: RegexFilter,
     mode: RegexFilter,
     atime: TimeFilter,
     mtime: TimeFilter,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum FileType {
+    RegularFile,
+    Directory,
+    SymbolicLink,
+    Fifo,
+    CharacterDevice,
+    BlockDevice,
+}
+
+impl FileType {
+    pub(super) fn from_filesystem(kind: fs::FileType) -> Option<Self> {
+        match kind {
+            kind if kind.is_file() => Some(Self::RegularFile),
+            kind if kind.is_dir() => Some(Self::Directory),
+            kind if kind.is_symlink() => Some(Self::SymbolicLink),
+            kind if kind.is_fifo() => Some(Self::Fifo),
+            kind if kind.is_char_device() => Some(Self::CharacterDevice),
+            kind if kind.is_block_device() => Some(Self::BlockDevice),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -35,6 +62,10 @@ impl Filter {
         self.mtime.validate()?;
 
         Ok(CompiledFilter {
+            file_types: self
+                .file_types
+                .as_ref()
+                .map(|types| types.iter().copied().collect()),
             relative_path: self.relative_path.compile()?,
             uid: self.uid.compile()?,
             gid: self.gid.compile()?,
@@ -99,6 +130,7 @@ impl TimeFilter {
 }
 
 pub(crate) struct CompiledFilter {
+    file_types: Option<HashSet<FileType>>,
     relative_path: CompiledRegexFilter,
     uid: CompiledRegexFilter,
     gid: CompiledRegexFilter,
@@ -108,6 +140,12 @@ pub(crate) struct CompiledFilter {
 }
 
 impl CompiledFilter {
+    pub(super) fn includes_type(&self, kind: FileType) -> bool {
+        self.file_types
+            .as_ref()
+            .is_none_or(|types| types.contains(&kind))
+    }
+
     pub(super) fn matches(
         &self,
         relative_path: &Path,
