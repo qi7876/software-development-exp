@@ -1,10 +1,9 @@
 use crate::jobs::JobError;
-use aead::{
-    Payload,
-    stream::{DecryptorBE32, EncryptorBE32},
+use aead_stream::{
+    DecryptorBE32, EncryptorBE32,
+    aead::{self, Payload},
 };
-use chacha20poly1305::{KeyInit, XChaCha20Poly1305};
-use rand_core::{OsRng, RngCore};
+use chacha20poly1305::XChaCha20Poly1305;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -131,9 +130,7 @@ fn fingerprint(key: &[u8; 32]) -> String {
 
 pub(crate) fn generate(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let mut key = Zeroizing::new([0; 32]);
-    OsRng
-        .try_fill_bytes(key.as_mut())
-        .map_err(|_| "cannot generate encryption key")?;
+    getrandom::fill(key.as_mut()).map_err(|_| "cannot generate encryption key")?;
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -232,21 +229,18 @@ impl<W: Write> EncryptWriter<W> {
             EncryptionAlgorithm::Aes256Gcm => 39,
         };
         header.resize(8 + random_len, 0);
-        OsRng
-            .try_fill_bytes(&mut header[8..])
+        getrandom::fill(&mut header[8..])
             .map_err(|_| io::Error::other("cannot generate encryption nonce"))?;
         let stream = match algorithm {
-            EncryptionAlgorithm::XChaCha20Poly1305 => {
-                EncryptStream::XChaCha(EncryptorBE32::from_aead(
-                    XChaCha20Poly1305::new(key.into()),
-                    aead::generic_array::GenericArray::from_slice(&header[8..]),
-                ))
-            }
+            EncryptionAlgorithm::XChaCha20Poly1305 => EncryptStream::XChaCha(EncryptorBE32::new(
+                key.into(),
+                header[8..].try_into().map_err(|_| invalid())?,
+            )),
             EncryptionAlgorithm::Aes256Gcm => {
                 let derived = file_key(key, &header[8..40])?;
-                EncryptStream::Aes(Box::new(EncryptorBE32::from_aead(
-                    aes_gcm::Aes256Gcm::new(derived.as_ref().into()),
-                    aead::generic_array::GenericArray::from_slice(&header[40..]),
+                EncryptStream::Aes(Box::new(EncryptorBE32::new(
+                    (&*derived).into(),
+                    header[40..].try_into().map_err(|_| invalid())?,
                 )))
             }
         };
@@ -321,17 +315,15 @@ impl<R: Read> DecryptReader<R> {
             return Err(invalid());
         }
         let stream = match algorithm {
-            EncryptionAlgorithm::XChaCha20Poly1305 => {
-                DecryptStream::XChaCha(DecryptorBE32::from_aead(
-                    XChaCha20Poly1305::new(key.into()),
-                    aead::generic_array::GenericArray::from_slice(&header[8..]),
-                ))
-            }
+            EncryptionAlgorithm::XChaCha20Poly1305 => DecryptStream::XChaCha(DecryptorBE32::new(
+                key.into(),
+                header[8..].try_into().map_err(|_| invalid())?,
+            )),
             EncryptionAlgorithm::Aes256Gcm => {
                 let derived = file_key(key, &header[8..40])?;
-                DecryptStream::Aes(Box::new(DecryptorBE32::from_aead(
-                    aes_gcm::Aes256Gcm::new(derived.as_ref().into()),
-                    aead::generic_array::GenericArray::from_slice(&header[40..]),
+                DecryptStream::Aes(Box::new(DecryptorBE32::new(
+                    (&*derived).into(),
+                    header[40..].try_into().map_err(|_| invalid())?,
                 )))
             }
         };

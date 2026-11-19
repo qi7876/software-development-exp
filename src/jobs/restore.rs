@@ -4,9 +4,8 @@ use super::{
     JobError, archive,
     content::{BackupOptions, Checksum, Content, Keyring},
     filesystem::{encode_device, get_absolute_directory_path, paths_overlap},
-    repository::{ArchiveFile, ManifestEntry, UnixMetadata},
+    repository::{ArchiveFile, FileTimestamp, ManifestEntry, UnixMetadata},
 };
-use filetime::FileTime;
 use http::StatusCode;
 use nix::{
     fcntl::{AT_FDCWD, AtFlags},
@@ -14,9 +13,11 @@ use nix::{
     unistd::{linkat, mkfifo},
 };
 use std::{
+    fs::{FileTimes, set_times_nofollow},
     io::{self, Read},
     os::unix::fs::{PermissionsExt, lchown},
     path::{Component, Path},
+    time::{Duration, UNIX_EPOCH},
 };
 
 fn validate_entry_path(path: &Path) -> Result<(), JobError> {
@@ -69,6 +70,27 @@ fn restore_one_file(
     Ok(())
 }
 
+fn file_times(path: &Path, metadata: &UnixMetadata) -> Result<FileTimes, JobError> {
+    let convert = |timestamp: &FileTimestamp| {
+        let seconds = Duration::from_secs(timestamp.seconds.unsigned_abs());
+        let nanoseconds = Duration::from_nanos(timestamp.nanoseconds.into());
+        let time = if timestamp.seconds < 0 {
+            // The manifest stores floor seconds and a positive fractional offset.
+            seconds
+                .checked_sub(nanoseconds)
+                .and_then(|offset| UNIX_EPOCH.checked_sub(offset))
+        } else {
+            UNIX_EPOCH.checked_add(seconds + nanoseconds)
+        };
+        time.ok_or_else(|| {
+            JobError::internal(format!("timestamp out of range for {}", path.display()))
+        })
+    };
+    Ok(FileTimes::new()
+        .set_accessed(convert(&metadata.atime)?)
+        .set_modified(convert(&metadata.mtime)?))
+}
+
 fn restore_special_node(
     path: &Path,
     metadata: &UnixMetadata,
@@ -94,9 +116,7 @@ fn restore_special_node(
             ))
         },
     )?;
-    let atime = FileTime::from_unix_time(metadata.atime.seconds, metadata.atime.nanoseconds);
-    let mtime = FileTime::from_unix_time(metadata.mtime.seconds, metadata.mtime.nanoseconds);
-    filetime::set_symlink_file_times(path, atime, mtime).map_err(|error| {
+    set_times_nofollow(path, file_times(path, metadata)?).map_err(|error| {
         JobError::internal(format!(
             "failed to set timestamps of {}: {error}",
             path.display()
@@ -188,19 +208,13 @@ fn restore_all_files(
                         ))
                     })?;
 
-                let atime =
-                    FileTime::from_unix_time(metadata.atime.seconds, metadata.atime.nanoseconds);
-                let mtime =
-                    FileTime::from_unix_time(metadata.mtime.seconds, metadata.mtime.nanoseconds);
-
-                filetime::set_file_handle_times(&file, Some(atime), Some(mtime)).map_err(
-                    |error| {
+                file.set_times(file_times(&absolute_destination_file_path, metadata)?)
+                    .map_err(|error| {
                         JobError::internal(format!(
                             "failed to set file atime or mtime {}: {error}",
                             absolute_destination_file_path.display()
                         ))
-                    },
-                )?;
+                    })?;
                 file.sync_all().map_err(|error| {
                     JobError::internal(format!(
                         "failed to sync file {}: {error}",
@@ -241,17 +255,16 @@ fn restore_all_files(
                     ))
                 })?;
 
-                let atime =
-                    FileTime::from_unix_time(metadata.atime.seconds, metadata.atime.nanoseconds);
-                let mtime =
-                    FileTime::from_unix_time(metadata.mtime.seconds, metadata.mtime.nanoseconds);
-                filetime::set_symlink_file_times(&absolute_destination_symlink_path, atime, mtime)
-                    .map_err(|error| {
-                        JobError::internal(format!(
-                            "failed to set symlink atime or mtime {}: {error}",
-                            absolute_destination_symlink_path.display()
-                        ))
-                    })?;
+                set_times_nofollow(
+                    &absolute_destination_symlink_path,
+                    file_times(&absolute_destination_symlink_path, metadata)?,
+                )
+                .map_err(|error| {
+                    JobError::internal(format!(
+                        "failed to set symlink atime or mtime {}: {error}",
+                        absolute_destination_symlink_path.display()
+                    ))
+                })?;
             }
             ManifestEntryKind::Fifo => {
                 let path = absolute_destination_path.join(relative_path);
@@ -338,19 +351,14 @@ fn restore_all_files(
                     ))
                 })?;
 
-            let atime =
-                FileTime::from_unix_time(metadata.atime.seconds, metadata.atime.nanoseconds);
-            let mtime =
-                FileTime::from_unix_time(metadata.mtime.seconds, metadata.mtime.nanoseconds);
-
-            filetime::set_file_handle_times(&directory, Some(atime), Some(mtime)).map_err(
-                |error| {
+            directory
+                .set_times(file_times(absolute_destination_directory_path, metadata)?)
+                .map_err(|error| {
                     JobError::internal(format!(
                         "failed to set directory atime or mtime {}: {error}",
                         absolute_destination_directory_path.display()
                     ))
-                },
-            )?;
+                })?;
             directory.sync_all().map_err(|error| {
                 JobError::internal(format!(
                     "failed to sync directory {}: {error}",
@@ -459,21 +467,17 @@ pub(super) fn run_with_keys(
             ))
         })?;
 
-    let atime = FileTime::from_unix_time(
-        manifest.root_metadata.atime.seconds,
-        manifest.root_metadata.atime.nanoseconds,
-    );
-    let mtime = FileTime::from_unix_time(
-        manifest.root_metadata.mtime.seconds,
-        manifest.root_metadata.mtime.nanoseconds,
-    );
-
-    filetime::set_file_handle_times(&directory, Some(atime), Some(mtime)).map_err(|error| {
-        JobError::internal(format!(
-            "failed to set directory atime or mtime {}: {error}",
-            absolute_destination_path.display()
-        ))
-    })?;
+    directory
+        .set_times(file_times(
+            &absolute_destination_path,
+            &manifest.root_metadata,
+        )?)
+        .map_err(|error| {
+            JobError::internal(format!(
+                "failed to set directory atime or mtime {}: {error}",
+                absolute_destination_path.display()
+            ))
+        })?;
 
     directory.sync_all().map_err(|error| {
         JobError::internal(format!(
@@ -786,8 +790,11 @@ mod tests {
         symlink("missing", source.join("link"))?;
         mkfifo(&source.join("pipe"), Mode::S_IRUSR | Mode::S_IWUSR)?;
         std::fs::set_permissions(source.join("pipe"), std::fs::Permissions::from_mode(0o640))?;
-        let timestamp = FileTime::from_unix_time(1_600_000_000, 123_456_789);
-        filetime::set_symlink_file_times(source.join("pipe"), timestamp, timestamp)?;
+        let timestamp = UNIX_EPOCH + Duration::new(1_600_000_000, 123_456_789);
+        let times = FileTimes::new()
+            .set_accessed(timestamp)
+            .set_modified(timestamp);
+        set_times_nofollow(source.join("pipe"), times)?;
         for name in ["file", "link", "pipe"] {
             linkat(
                 AT_FDCWD,
@@ -1044,11 +1051,15 @@ mod tests {
         ] {
             std::os::unix::fs::symlink(target, fixture.source.join(name))?;
         }
-        let timestamp = FileTime::from_unix_time(1_600_000_000, 123_456_789);
+        let accessed = UNIX_EPOCH + Duration::new(1_600_000_000, 123_456_789);
+        let modified = UNIX_EPOCH - Duration::new(1, 234_567_890);
+        let times = FileTimes::new()
+            .set_accessed(accessed)
+            .set_modified(modified);
         for (name, mode) in [("", 0o750), ("nested", 0o750), ("nested/file", 0o400)] {
             let path = fixture.source.join(name);
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))?;
-            filetime::set_file_times(path, timestamp, timestamp)?;
+            std::fs::set_times(path, times)?;
         }
         fixture.backup().await?;
         let manifest = Manifest::read(&fixture.repository, BACKUP_ID)?;
