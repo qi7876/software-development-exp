@@ -633,18 +633,6 @@ function patterns(value) {
   return value.split(/\r?\n/).filter((line) => line.trim() !== "");
 }
 
-function updateFilterSummary() {
-  const count = [...regexFilterFields, ...timeFilterFields].filter((field) =>
-    filterInputs.some(
-      (input) =>
-        input.id.startsWith(`filter-${field}-`) && input.value.trim() !== "",
-    ),
-  ).length + Number(fileTypeInputs.some((input) => !input.checked));
-  $("filter-summary").textContent = count
-    ? `Filters · ${count}`
-    : "Filters";
-}
-
 function clearFilter() {
   filterInputs.forEach((input) => {
     input.value = "";
@@ -652,7 +640,6 @@ function clearFilter() {
   fileTypeInputs.forEach((input) => {
     input.checked = input.defaultChecked;
   });
-  updateFilterSummary();
 }
 
 function backupFilter() {
@@ -705,8 +692,6 @@ function backupFilter() {
   }
   return filter;
 }
-
-$("backup-filter").addEventListener("input", updateFilterSummary);
 
 $("backup-form").addEventListener("submit", async (event) => {
   event.preventDefault();

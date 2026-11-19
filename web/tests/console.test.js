@@ -764,7 +764,7 @@ test(
     await page.locator("#filter-atime-before").fill("2100-01-01T08:00");
     assert.equal(
       await page.locator("#filter-summary").textContent(),
-      "Filters · 7",
+      "Filters",
     );
     assert.equal(
       await page.evaluate(
