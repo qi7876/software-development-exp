@@ -1,15 +1,32 @@
 # Scheduled backup lifecycle
 
-The private `server::schedule` module implements the scheduler; `server` exports `ScheduleConfig` for configuration loading. Optional config.json scheduled_backups owns an IANA timezone and stable named plans. The service validates and compiles enabled requests before binding HTTP or starting workers. Disabled plans still receive structural, Cron, compression and filter validation; their keys need not be present. Config changes require restart. The schedule parser uses croner's Chrono backend; chrono-tz supplies bundled IANA rules.
+The scheduler loads `scheduled_backups` from configuration. It validates plan
+structure, Cron, filters, and compression at startup, and resolves encryption
+keys for enabled plans. The plan catalog can be queried through the HTTP API.
+Restart the service to apply edits.
 
-The scheduler checks UTC wall time once per second and matches only the current UTC minute converted to the configured timezone. It never scans elapsed minutes. Initialization advances persisted cursors to at least the startup minute, so startup and restart do not replay missed occurrences. Forward clock jumps and sleep skip elapsed minutes; backward jumps do not revisit minutes below the persisted high-water mark. Local times missing during daylight-saving transitions have no UTC occurrence; repeated local times can match twice, subject to the active-job guard.
+The scheduler checks UTC wall time once per second and evaluates the current
+minute in the configured IANA timezone. Startup initializes cursors at least to
+the current minute. Forward jumps skip elapsed minutes and backward jumps
+respect the persisted high-water mark. Repeated local times during a daylight
+saving transition can trigger twice, subject to the one-active-job limit.
 
-Job schema v5 adds paired nullable schedule_id/scheduled_for columns and schedule_cursors(schedule_id, minute). Each minute, each enabled plan advances its cursor and conditionally inserts its request in one SQLite write transaction. Updating the cursor acquires the writer lock before checking queued/running jobs. A partial unique index additionally permits only one active task per schedule. Skipped busy occurrences still advance the cursor. Job notification occurs after commit. Minute values are UTC Unix minutes; scheduled_for exposes the same occurrence in Unix milliseconds.
+## Admission and persistence
 
-Queued tasks contain a request snapshot and key fingerprint, so editing or disabling a plan does not change admitted tasks. Removing a plan does not cancel its tasks or delete its cursor/history. Retain a stable id for the same plan; use another id for independent work. Ordinary backups submitted through `/api/backups` have no schedule identity and remain independently admissible. Failed jobs do not block the next scheduled occurrence.
+Job schema v5 stores per-plan cursors as UTC Unix minutes and records
+`schedule_id` and `scheduled_for` on scheduled jobs. An automatic trigger advances
+the cursor and conditionally queues the job in one SQLite transaction, even when
+the plan is busy. A partial unique index enforces one queued or running job per
+plan. Notification follows commit.
 
-The scheduler and worker share the service stop signal. The scheduler stops admitting work before database closure, while existing worker shutdown semantics remain unchanged. A tick racing shutdown may commit a queued job; committed work is retained. Scheduler database/clock-matching errors and task panics terminate the service with diagnostics rather than leaving HTTP running without scheduling. At most one service instance may own a working directory. Job schema v4 is rejected without migration; the current backup format is self-contained v9, independently of the scheduler.
+`POST /api/schedules/{id}/run` queues the saved request, including for disabled
+automatic plans. It uses the request time for `scheduled_for`, shares the
+active-job constraint, and leaves the Cron cursor in place. Responses are
+202 with Location for admission, 409 for busy plans, 404 for unknown IDs, and
+400 for an unavailable encryption key. The API represents `scheduled_for` in
+UTC Unix milliseconds.
 
-The scheduler retains an immutable catalog of all startup-loaded plan configurations alongside compiled enabled plans. HTTP and the scheduler share this catalog through `Arc<Scheduler>`. Authenticated `GET /api/schedules` returns the timezone and complete plan settings, including disabled plans; it exposes encryption algorithm/key ID, never key material. The browser loads the list on view entry or explicit Refresh and clears it on a service switch.
-
-Authenticated `POST /api/schedules/{id}/run` resolves a plan from that catalog and loads its encryption selection from the in-memory keyring. It can run disabled automatic plans without enabling their Cron trigger. `JobManager::run_schedule_now` uses one conditional SQLite INSERT to admit at most one queued/running task for the plan, sharing the existing unique active-plan constraint with automatic ticks. It does not initialize or advance schedule cursors. The job persists the saved request, schedule ID, and current request timestamp as `scheduled_for`, enters the normal FIFO, and returns 202/Location. Busy plans return 409, missing plans 404, and unavailable encryption keys 400. Plan editing remains a config-and-restart operation. No schema change is required.
+Queued requests retain a snapshot of the settings and key fingerprint. Plan
+edits affect future submissions. Committed jobs survive shutdown in the shared
+FIFO queue. The service supervisor reports scheduler errors and stops the
+process.
