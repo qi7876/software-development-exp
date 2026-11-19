@@ -1,5 +1,5 @@
 use clap::{Arg, ArgAction, Command, ValueHint, value_parser};
-use clap_complete::{aot::Fish, generate};
+use clap_complete::{Shell, generate};
 use std::{
     error::Error,
     io::{self, Write},
@@ -16,7 +16,7 @@ pub(crate) enum Action {
     Stop,
     Version,
     Keygen(PathBuf),
-    FishCompletions,
+    Completions(Shell),
 }
 
 fn command(include_background_child: bool) -> Command {
@@ -37,7 +37,7 @@ fn command(include_background_child: bool) -> Command {
                 .help("Run attached to this terminal")
                 .action(ArgAction::SetTrue),
         );
-    // The Fish generator includes hidden flags, so add the internal flag only for parsing.
+    // Completion generators can include hidden flags, so add the internal flag only for parsing.
     if include_background_child {
         start = start.arg(
             Arg::new("background-child")
@@ -55,7 +55,9 @@ fn command(include_background_child: bool) -> Command {
             Command::new("completions")
                 .about("Generate a shell completion script")
                 .subcommand_required(true)
-                .subcommand(Command::new("fish").about("Generate Fish completions")),
+                .subcommand(Command::new("bash").about("Generate Bash completions"))
+                .subcommand(Command::new("fish").about("Generate Fish completions"))
+                .subcommand(Command::new("zsh").about("Generate Zsh completions")),
         )
         .subcommand(
             Command::new("keygen")
@@ -81,9 +83,9 @@ fn command(include_background_child: bool) -> Command {
         )
 }
 
-pub(crate) fn write_fish_completions() -> io::Result<()> {
+pub(crate) fn write_completions(shell: Shell) -> io::Result<()> {
     let mut script = Vec::new();
-    generate(Fish, &mut command(false), "bak", &mut script);
+    generate(shell, &mut command(false), "bak", &mut script);
 
     let mut stdout = io::stdout().lock();
     stdout.write_all(&script)?;
@@ -95,7 +97,7 @@ pub(crate) fn parse() -> Result<Action, Box<dyn Error>> {
     match matches.subcommand() {
         Some(("version", _)) => Ok(Action::Version),
         Some(("completions", args)) => match args.subcommand() {
-            Some(("fish", _)) => Ok(Action::FishCompletions),
+            Some((shell, _)) => Ok(Action::Completions(shell.parse()?)),
             _ => Err("missing completion shell".into()),
         },
         Some(("keygen", args)) => Ok(Action::Keygen(

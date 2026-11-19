@@ -70,7 +70,9 @@ fn command_structure_and_help() -> TestResult {
         vec!["help", "server"],
         vec!["help", "server", "start"],
         vec!["help", "completions"],
+        vec!["completions", "bash", "--help"],
         vec!["completions", "fish", "--help"],
+        vec!["completions", "zsh", "--help"],
         vec!["version"],
         vec!["server", "start", "--help"],
         vec!["keygen", "--help"],
@@ -84,7 +86,7 @@ fn command_structure_and_help() -> TestResult {
         vec!["server", "start"],
         vec!["server", "-d", "."],
         vec!["completions"],
-        vec!["completions", "bash"],
+        vec!["completions", "powershell"],
     ] {
         assert!(!fixture.command(&args)?.status.success());
     }
@@ -94,33 +96,42 @@ fn command_structure_and_help() -> TestResult {
 }
 
 #[test]
-fn fish_completion_script_includes_public_commands_and_options() -> TestResult {
+fn completion_scripts_include_public_commands_and_options() -> TestResult {
     let fixture = BackgroundServer::new()?;
-    let output = fixture.command(&["completions", "fish"])?;
-    success(&output);
-    assert!(output.stderr.is_empty());
-
-    let script = std::str::from_utf8(&output.stdout)?;
-    for candidate in [
-        "-a \"completions\"",
-        "-a \"fish\"",
-        "-a \"server\"",
-        "-a \"start\"",
-        "-a \"status\"",
-        "-a \"stop\"",
-        "-a \"keygen\"",
-        "-a \"version\"",
-        "-a \"help\"",
-        "-s d -l working-directory",
-        "-l foreground",
-        "-l output",
+    for (shell, registration) in [
+        ("bash", "complete -F _bak"),
+        ("fish", "complete -c bak"),
+        ("zsh", "#compdef bak"),
     ] {
-        assert!(
-            script.contains(candidate),
-            "missing completion for {candidate}"
-        );
+        let output = fixture.command(&["completions", shell])?;
+        success(&output);
+        assert!(output.stderr.is_empty());
+
+        let script = std::str::from_utf8(&output.stdout)?;
+        assert!(script.contains(registration), "invalid {shell} script");
+        for candidate in [
+            "completions",
+            "bash",
+            "fish",
+            "zsh",
+            "server",
+            "start",
+            "status",
+            "stop",
+            "keygen",
+            "version",
+            "help",
+            "working-directory",
+            "foreground",
+            "output",
+        ] {
+            assert!(
+                script.contains(candidate),
+                "missing {shell} completion for {candidate}"
+            );
+        }
+        assert!(!script.contains("background-child"));
     }
-    assert!(!script.contains("background-child"));
     Ok(())
 }
 

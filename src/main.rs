@@ -38,7 +38,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
             return Ok(());
         }
         args::Action::Keygen(path) => return jobs::generate_key(&path),
-        args::Action::FishCompletions => return Ok(args::write_fish_completions()?),
+        args::Action::Completions(shell) => return Ok(args::write_completions(shell)?),
     };
     let working_directory = std::fs::canonicalize(&directory).map_err(|error| {
         format!(
