@@ -1,46 +1,46 @@
 # Content encryption and encoding contract
 
-Compression and encryption are runtime choices per backup, not Cargo feature switches. Compression is absent or a tagged `CompressionOptions` variant: Zstd (level 1–22, default 3) or project LZ77 (window 4–1024 KiB, default 64; candidate search limit 1–256, default 32). The UI defaults to Zstd without encryption, while an omitted/null API compression configuration disables it. Complete parameters persist in task requests and repository metadata. Restore automatically selects the saved codec.
-
-Original sizes describe plaintext file data; one SHA-256 covers the self-contained container, including encoded payload, plaintext metadata and framing, excluding only the final digest itself. No per-file digests are computed. Combining features means source entries → archive → selected compression → encryption inside a self-contained container; the container digest is accumulated during IO. Each writer finishes compression, then encryption, then appends the metadata/footer/digest and synchronizes its output before atomic publication. Readers must consume the encoded stream completely, including codec end markers and the authenticated final block, before success. See [project LZ77](lz77.md) for its separate framing and matching contract.
+Backup encodes entries, applies the selected compression, then encrypts the
+archive stream. The manifest records both settings for restore. The plaintext
+manifest and encoded stream are covered by the container SHA-256. See the
+[archive contract](archive.md) for framing and [LZ77](lz77.md) for codec details.
 
 ## Key lifecycle
 
-The server loads a mapping of stable identifiers to 32-byte symmetric key files at startup. Key files contain exactly 64 hexadecimal digits, with surrounding whitespace permitted. `bak keygen --output PATH` generates keys using the operating system random source, creates with `0600` on Unix, and refuses to overwrite. Keys are held in zeroizing containers and never serialized. Configuration contains paths, not secrets.
+The server loads named 32-byte symmetric keys at startup. Key files contain 64
+hexadecimal digits with optional surrounding whitespace. `bak keygen --output
+PATH` creates a new file with mode `0600` using system randomness. Configuration
+stores file paths, and the service holds loaded keys in zeroizing containers.
 
-The fingerprint is lowercase hexadecimal SHA-256 of `b"bak-key-v1\0" || key`. Admission resolves the named key and persists its identifier and fingerprint; workers validate both again when executing queued work. Restore resolves the same pair from repository metadata. Restart uses the newly loaded keyring, so changing or removing a key cannot silently change queued encryption or decrypt with a different key. Old named keys must remain configured for old backups. The service does not scan all keys looking for a substitute.
-
-No encryption configuration is required for unencrypted backups/restores. Configured keys that cannot be read or parsed fail startup without including their contents in errors. A missing or mismatched key fails the job before creating payloads or restored entries. Retain independent copies of keys outside the source/repository; no key recovery is implemented.
+The fingerprint is lowercase hexadecimal SHA-256 of `b"bak-key-v1\0" || key`.
+Admission stores the key ID and fingerprint. Backup execution and restore each
+resolve and validate that pair. A missing or mismatched key fails the job before
+writing entries. Keep the original key files available for queued jobs and
+encrypted archives.
 
 ## XChaCha20-Poly1305 encrypted payload version 2
 
-Algorithm identifier: `xchacha20poly1305-stream-be32-v2`. Use RustCrypto's XChaCha20-Poly1305 with its STREAM BE32 implementation; its counter/final flag form the remaining five bytes of the 24-byte AEAD nonce.
+The `xchacha20poly1305-stream-be32-v2` payload uses RustCrypto XChaCha20-Poly1305 and STREAM BE32. The counter and final flag supply the last five bytes of the 24-byte nonce.
 
-The fixed 27-byte header consists of:
+The header is 27 bytes.
 
 | Bytes | Meaning |
 | --- | --- |
 | 0–7 | `b"BAKENC\0\x02"` magic and payload version |
 | 8–26 | Fresh random 19-byte STREAM nonce prefix, generated independently for each archive |
 
-The encryption input is split into 131072-byte full blocks, each written with `encrypt_next`, followed by a shorter final block written with `encrypt_last`. Each ciphertext block adds a 16-byte tag. A final block is mandatory even when its plaintext is empty, including exact multiples of the block size. There are no length prefixes: full ciphertext blocks have length 131088, and the shorter final block occupies the remainder at EOF. Reads fill a block across short input reads; input read boundaries carry no framing meaning.
+Write each 131072-byte plaintext block with `encrypt_next` and the final 0–131071 bytes with `encrypt_last`. A 16-byte tag makes each full ciphertext block 131088 bytes. The shorter final block occupies the remainder at EOF. Readers assemble each block across short reads.
 
-For every block, AAD is the fixed header followed by compact serde JSON for the tuple `(backup_id, relative_path, compression_configuration, key_fingerprint)`. Tuple order, JSON encoding, path representation, algorithm tags, parameters, and null encoding are part of this format. The path is `<backup_id>.bak` in backup format v9. This binds the complete archive to its backup, mode, key and encryption header. Key identifier names are routing metadata; key fingerprints identify material.
+For every block, AAD is the fixed header followed by compact serde JSON for the tuple `(backup_id, relative_path, compression_configuration, key_fingerprint)`. Tuple order, JSON encoding, path representation, algorithm tags, parameters, and null encoding are part of this format. The path is `<backup_id>.bak` in v9 and v10 archives. The key ID selects a key and the fingerprint identifies its bytes.
 
-A reader accepts EOF only after successful final-block authentication. Missing/partial headers, invalid magic, incomplete blocks, missing final tags, changed/reordered/duplicated blocks, extra trailing bytes, wrong keys, and changed associated data fail decoding. The STREAM counter limit fails explicitly rather than wrapping. Memory is bounded by a few blocks plus codec buffers, including the bounded LZ77 history and index; neither backup nor restore buffers a complete file.
+The reader requires a valid header, authenticated blocks in order, and EOF after the authenticated final block. Exceeding the STREAM counter limit returns an error. Memory use is bounded by block and codec buffers.
 
 ## AES-256-GCM encrypted payload version 3
 
-Algorithm identifier: `aes256gcm-stream-be32-v3`. Uses RustCrypto AES-256-GCM and STREAM BE32, with the same chunk sizes, tags, mandatory final block, error handling and bounded buffering as XChaCha above.
+The `aes256gcm-stream-be32-v3` payload uses RustCrypto AES-256-GCM and STREAM BE32 with the same block framing as v2.
 
-The 47-byte header contains `b"BAKENC\0\x03"` (bytes 0–7), a fresh OS-random 32-byte salt (8–39), and an independently random 7-byte STREAM nonce prefix (40–46). STREAM adds its four-byte counter and final flag to form the 12-byte AES-GCM nonce. Derive each archive's 32-byte key with HKDF-SHA256: IKM is the configured key, salt is the header salt, and info is `b"bak-aes-256-gcm-stream-be32-v3"`. This avoids relying on a short random nonce prefix for uniqueness across archives. Temporary archive keys use zeroizing containers.
+The 47-byte header contains `b"BAKENC\0\x03"` (bytes 0–7), a fresh OS-random 32-byte salt (8–39), and an independently random 7-byte STREAM nonce prefix (40–46). STREAM adds its four-byte counter and final flag to form the 12-byte AES-GCM nonce. Derive each archive's 32-byte key with HKDF-SHA256: IKM is the configured key, salt is the header salt, and info is `b"bak-aes-256-gcm-stream-be32-v3"`. The salt provides key separation between archives. Temporary archive keys use zeroizing containers.
 
-AAD is the complete header followed by compact serde JSON for `(backup_id, relative_path, compression_configuration, key_fingerprint, algorithm)`, where algorithm is `"aes-256-gcm"`. Metadata chooses the decoder, which requires the matching header; there is no fallback to another algorithm. XChaCha retains its v2 header and AAD unchanged. The same configured key may serve both algorithms; only AES derives a per-archive key.
+AAD is the complete header followed by compact serde JSON for `(backup_id, relative_path, compression_configuration, key_fingerprint, algorithm)`, where algorithm is `"aes-256-gcm"`. The manifest selects the decoder and the reader checks the corresponding header. A configured key can serve both algorithms.
 
-API encryption is null/omitted or `{algorithm, key_id}`. Both fields are required in a non-null object. Task and listing encryption records additionally contain the server-resolved fingerprint. Status key records remain `{key_id, fingerprint}` and do not select an algorithm.
-
-## Limits and compatibility
-
-Encryption protects the complete archive stream. The plaintext manifest in each self-contained file still exposes filenames, directory layout, source paths, Unix metadata, original sizes, the archive SHA-256, and symbolic link targets. Metadata is still trusted; this is not full-repository authentication or protection from a malicious API server. The service sees plaintext and keys. Failed or interrupted restores can leave partial output, as with existing checksum failures.
-
-Backup format v9 stores compression, encryption algorithm, key identifier, and fingerprint in the same file as entries and statistics. The digest covers payload and outer manifest; only the encoded payload is AEAD-protected. Job schema v5 is unchanged by archive packing. Older repository schemas are rejected without migration or deletion. Use the prior binary with prior directories to operate old data.
+The API takes `{algorithm, key_id}` for encryption. Task and listing records add the resolved fingerprint. Status lists the available key IDs and fingerprints.

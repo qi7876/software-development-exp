@@ -1,19 +1,20 @@
 # C1 System Context
 
-`bak` is a cross-platform file backup manager for individual users, intended to create reliable local backups and restore them into a separate directory.
-
-Individual users access an optional browser console deployed separately and served from `web_ui.path`; automation scripts use clients such as curl. Both access the same HTTP API, authenticated by a Bearer secret key. Users submit backup and restore requests, receive a durable job ID immediately, and query outcomes while background execution proceeds. The console supports repository listing, restore selection, paginated task history, and switching between local or remote API services. Browser-origin storage persists connection addresses, names, and plain-text keys; the selected service is verified when reopening the page. Each service keeps its own jobs and repositories. Paths always belong to the selected server device.
-
-The service reads local configuration and persists its job queue and history in a SQLite database in the working directory. Full backups store the information needed for identification, verification, and restoration inside each self-contained `.bak` file; repositories have no database. Contents, optionally compressed with Zstd or project LZ77 and/or encrypted with XChaCha20-Poly1305 or AES-256-GCM, are packed into one sequential archive per backup. Users can list published backup summaries from repository metadata. Backup and restore execution currently support Unix platforms.
+`bak` provides local backups and restores on Linux and macOS. Individual users
+work in the browser console, and scripts use the same Bearer-authenticated HTTP
+API. Clients submit tasks and read their results by job ID.
 
 ```text
-Users / automation scripts <-- HTTP --> bak <---> local configuration
-                                         |
-                                         +----> SQLite job queue and history
-                                         |
-                                         +----> local repositories and restore destinations
-                                                (full backups and restores
-                                                 implemented on Unix)
+Users and scripts <-- HTTP --> bak
+                                |
+                                +--> Configuration and key files
+                                +--> SQLite task queue and history
+                                +--> Source, backup and restore directories
 ```
 
-SQLite transactions preserve job admission and outcomes; backup-file publication has its own durability boundary. Deployment currently assumes one service instance per working directory and local filesystems for its task database.
+Paths refer to the selected server. Each service owns its configuration, queue,
+and filesystem paths. Deploy one instance per working directory and place the
+task database on a local filesystem. Each backup is a portable `.bak` file.
+Encrypted backups also require their configured key.
+
+See [C2 Containers](containers.md) for the runtime and storage boundaries.
