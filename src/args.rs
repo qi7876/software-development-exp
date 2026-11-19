@@ -25,7 +25,6 @@ fn subcommand(name: &'static str) -> Command {
 
 fn command() -> Command {
     Command::new("bak")
-        .disable_help_flag(true)
         .subcommand_required(true)
         .subcommand(subcommand("version").about("Print the version"))
         .subcommand(
@@ -71,7 +70,6 @@ fn command() -> Command {
                 .subcommand(subcommand("status").about("Show the current user's background server"))
                 .subcommand(subcommand("stop").about("Stop the background server gracefully")),
         )
-        .after_help("Configuration: README.md")
 }
 
 pub(crate) fn parse() -> Result<Action, Box<dyn Error>> {
