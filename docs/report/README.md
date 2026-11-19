@@ -7,7 +7,7 @@
 | `use-cases.yaml` | 需求、用例和追踪关系 |
 | `model.yaml` | 构件、类型和时序视图 |
 | `generated/` | 由模型生成的 D2、PNG 和流程图 |
-| `current-verification.json` | 按 `production_revision` 标注的功能回归记录与运行环境 |
+| `current-verification.json` | 功能回归记录与运行环境，结果对应 `production_revision` 指定的提交 |
 | `verification.json` | 2026-10-14 的性能、稳定性和内存测量 |
 | `lz77-measurements.json` | 2026-10-31 的 Zstd 和 LZ77 内存编解码数据 |
 

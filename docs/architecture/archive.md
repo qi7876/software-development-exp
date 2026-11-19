@@ -13,7 +13,7 @@ All lengths are unsigned little-endian. There is no padding.
 | --- | --- |
 | Container magic/version | 8 bytes `b"BAKFILE\x01"` |
 | Encoded payload | Sequential archive v2, optionally compressed and encrypted |
-| Metadata | Compact UTF-8 JSON `Manifest`, `format_version: 10` for new backups |
+| Metadata | Compact UTF-8 JSON `Manifest`, `format_version: 10` |
 | Metadata length | u64, 1 through 67,108,864 bytes (64 MiB) |
 | Footer marker | 8 bytes `b"BAKEND\0\x01"` |
 | Digest | 32 raw SHA-256 bytes covering every preceding byte |
@@ -93,10 +93,3 @@ The plaintext manifest exposes paths, sizes, Unix attributes, link targets, and
 device numbers. The container SHA-256 detects corruption. Encryption
 authenticates the encoded stream and binds the backup ID, filename, compression
 settings, and key fingerprint. Trust in the manifest depends on repository access.
-
-## Compatibility
-
-The service uses job schema v5. New backups always use manifest v10. Existing v9
-archives use the same container and stream framing and can be listed, verified,
-and restored alongside v10 archives. Formats through v8 require their original
-database and prior binary.

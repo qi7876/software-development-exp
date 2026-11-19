@@ -31,7 +31,7 @@ The header is 27 bytes.
 
 Write each 131072-byte plaintext block with `encrypt_next` and the final 0–131071 bytes with `encrypt_last`. A 16-byte tag makes each full ciphertext block 131088 bytes. The shorter final block occupies the remainder at EOF. Readers assemble each block across short reads.
 
-For every block, AAD is the fixed header followed by compact serde JSON for the tuple `(backup_id, relative_path, compression_configuration, key_fingerprint)`. Tuple order, JSON encoding, path representation, algorithm tags, parameters, and null encoding are part of this format. The path is `<backup_id>.bak` in v9 and v10 archives. The key ID selects a key and the fingerprint identifies its bytes.
+For every block, AAD is the fixed header followed by compact serde JSON for the tuple `(backup_id, relative_path, compression_configuration, key_fingerprint)`. Tuple order, JSON encoding, path representation, algorithm tags, parameters, and null encoding are part of this format. The path is `<backup_id>.bak`. The key ID selects a key and the fingerprint identifies its bytes.
 
 The reader requires a valid header, authenticated blocks in order, and EOF after the authenticated final block. Exceeding the STREAM counter limit returns an error. Memory use is bounded by block and codec buffers.
 

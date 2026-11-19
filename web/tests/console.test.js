@@ -521,6 +521,21 @@ test(
     }
 
     await manager();
+    await page.route(`${local.url}/api/status`, async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      delete body.encryption_keys;
+      await route.fulfill({ response, json: body });
+    });
+    await save(local.url, secret);
+    await page.locator("#connection-message.error").waitFor();
+    assert.match(
+      await page.locator("#connection-message").textContent(),
+      /did not return a valid bak API status/,
+    );
+    assert.equal(await stored(), null);
+    await page.unroute(`${local.url}/api/status`);
+
     await save(local.url.replace("http://", ""), secret);
     await connected(local.url);
     await page.locator('nav a[href="#backup"]').click();

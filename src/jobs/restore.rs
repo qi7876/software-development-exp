@@ -912,38 +912,36 @@ mod tests {
     }
 
     #[test]
-    fn v9_and_v10_backups_can_share_a_repository() -> TestResult {
+    fn unsupported_backup_version_is_rejected_by_listing_and_restore() -> TestResult {
         let fixture = Fixture::new()?;
-        let filter = crate::test_support::unfiltered()?;
-        std::fs::write(fixture.source.join("file"), b"v9 contents")?;
-        symlink("file", fixture.source.join("link"))?;
-        backup::run(&fixture.source, &fixture.repository, &filter, "v9")?;
-        crate::test_support::rewrite_backup_metadata(
-            &archive::path(&fixture.repository, "v9"),
-            |manifest| {
-                manifest["format_version"] = serde_json::json!(9);
-            },
+        std::fs::write(fixture.source.join("file"), b"backup contents")?;
+        backup::run(
+            &fixture.source,
+            &fixture.repository,
+            &crate::test_support::unfiltered()?,
+            BACKUP_ID,
         )?;
-        mkfifo(&fixture.source.join("pipe"), Mode::S_IRUSR)?;
-        backup::run(&fixture.source, &fixture.repository, &filter, "v10")?;
-        assert_eq!(
-            super::super::repository::list(&fixture.repository)?.len(),
-            2
-        );
-        for (id, version) in [("v9", 9), ("v10", 10)] {
-            let archive = ArchiveFile::read(&fixture.repository, id)?;
-            assert_eq!(archive.manifest.format_version, version);
-            archive.verify(&Keyring::default())?;
+        let path = archive::path(&fixture.repository, BACKUP_ID);
+        crate::test_support::rewrite_backup_metadata(&path, |manifest| {
+            manifest["format_version"] = serde_json::json!(9);
+        })?;
+        let original = std::fs::read(&path)?;
+
+        let list_error = super::super::repository::list(&fixture.repository)
+            .err()
+            .ok_or("listed a backup with an unsupported version")?;
+        let restore_error = run(&fixture.repository, BACKUP_ID, &fixture.destination)
+            .err()
+            .ok_or("restored a backup with an unsupported version")?;
+        for error in [list_error, restore_error] {
+            assert!(
+                error
+                    .message
+                    .contains("unsupported backup format version 9")
+            );
         }
-        run(&fixture.repository, "v9", &fixture.destination)?;
-        assert_eq!(
-            std::fs::read(fixture.destination.join("file"))?,
-            b"v9 contents"
-        );
-        assert_eq!(
-            std::fs::read_link(fixture.destination.join("link"))?,
-            Path::new("file")
-        );
+        assert!(read_tree(&fixture.destination)?.is_empty());
+        assert_eq!(std::fs::read(path)?, original);
         Ok(())
     }
 
@@ -962,15 +960,14 @@ mod tests {
         let original = std::fs::read(&path)?;
         let outside = fixture.directory.path().join("outside");
         std::fs::write(&outside, b"outside")?;
-        for (target, mismatch, version) in [
-            (outside.as_path(), false, 10),
-            (Path::new("../outside"), false, 10),
-            (Path::new("missing"), false, 10),
-            (Path::new("later"), false, 10),
-            (Path::new("directory"), false, 10),
-            (Path::new("alias"), false, 10),
-            (Path::new("file"), true, 10),
-            (Path::new("file"), false, 9),
+        for (target, mismatch) in [
+            (outside.as_path(), false),
+            (Path::new("../outside"), false),
+            (Path::new("missing"), false),
+            (Path::new("later"), false),
+            (Path::new("directory"), false),
+            (Path::new("alias"), false),
+            (Path::new("file"), true),
         ] {
             std::fs::write(&path, &original)?;
             crate::test_support::rewrite_backup_metadata(&path, |manifest| {
@@ -998,17 +995,14 @@ mod tests {
                 later["relative_path"] = serde_json::json!("later");
                 entries.push(later);
                 manifest["backup_stats"]["entries_created"] = serde_json::json!(entries.len());
-                manifest["format_version"] = serde_json::json!(version);
             })?;
             let error = run(&fixture.repository, BACKUP_ID, &fixture.destination)
                 .err()
                 .ok_or("accepted an invalid hard link")?;
-            let expected = if version == 9 {
-                "format v9"
-            } else {
-                "invalid hard link target"
-            };
-            assert!(error.message.contains(expected), "{error}");
+            assert!(
+                error.message.contains("invalid hard link target"),
+                "{error}"
+            );
             assert!(read_tree(&fixture.destination)?.is_empty());
         }
         assert_eq!(std::fs::read(outside)?, b"outside");

@@ -17,7 +17,7 @@
       ],
       "details": [
         "浏览器可连接同一或另一台 bak API；地址和明文 API key 保存在浏览器 origin 的 localStorage。",
-        "工作目录使用 schema v5 作业库。仓库存放自包含备份，新建文件使用 v10，服务兼容 v9。加密密钥来自配置指定的文件。",
+        "工作目录使用 schema v5 作业库。仓库存放自包含 v10 备份。加密密钥来自配置指定的文件。",
         "自实现顺序归档后选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 或 AES-256-GCM 加密，形成九种模式；元数据和文件名仍为明文。",
         "配置式定时备份使用 IANA 时区与分钟级 Cron，复用 FIFO；停机不补跑，同一计划有未完成任务时跳过。",
         "bak server start 默认创建后台子进程并等待就绪；status/stop 通过当前用户的 Unix socket 管理实例。",
@@ -26,7 +26,7 @@
       ],
       "constraints": [
         "一个工作目录只运行一个服务实例，SQLite 使用本地文件系统。",
-        "备份文件同步与发布后提交作业终态；旧仓库由旧版读取，新格式使用新仓库。",
+        "同步并发布备份文件后提交作业终态。",
         "静态 UI 公开，API 采用 Bearer 认证；载荷按配置加密，外层元数据明文保存。"
       ],
       "trace": {
@@ -136,7 +136,7 @@
           "name": "Repository directory",
           "package": "Local repository",
           "type": "folder",
-          "stereotype": "self-contained v10 / v9 backups"
+          "stereotype": "self-contained v10 backups"
         },
         {
           "id": "Files",
@@ -1753,7 +1753,7 @@
           "type": "message",
           "source": "Restore",
           "target": "Repo",
-          "text": "Read v10 or v9 footer / match key and fingerprint"
+          "text": "Read v10 footer / match key and fingerprint"
         },
         {
           "type": "message",

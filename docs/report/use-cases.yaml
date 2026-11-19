@@ -361,7 +361,7 @@
         "NFR-07"
       ],
       "business_rules": [],
-      "notes": "启用控制台时用 web_ui.path 指定静态资源目录，服务在请求时读取资源。作业库使用 schema v5，新备份使用 v10，并兼容 v9。后台实例通过当前用户的 Unix socket 管理，日志追加至工作目录的 server.log。",
+      "notes": "启用控制台时用 web_ui.path 指定静态资源目录，服务在请求时读取资源。作业库使用 schema v5，归档使用 v10。后台实例通过当前用户的 Unix socket 管理，日志追加至工作目录的 server.log。",
       "basic_flow": [
         {
           "id": "B1",
@@ -639,9 +639,9 @@
         {
           "id": "E2",
           "from": "B3",
-          "condition": "正式 .bak 的容器格式或元数据损坏，或检测到旧仓库数据库",
+          "condition": "正式 .bak 的容器格式或元数据无效",
           "steps": [
-            "明确返回格式或元数据错误；不修改旧仓库，不伪装为空列表。"
+            "返回归档格式或元数据错误。"
           ]
         }
       ]
