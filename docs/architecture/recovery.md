@@ -8,9 +8,10 @@ it does not create a transaction spanning SQLite and the filesystem.
 
 New backup executions use the already persisted job UUID as their backup ID.
 This establishes the expected `<job_id>.bak` before any file work, without adding
-a database table or changing job schema v5 or backup format v9. API callers should
-continue treating IDs as opaque. Previously completed jobs keep their saved result
-IDs. Queued jobs admitted by older versions acquire the new identity when executed.
+a database table or changing job schema v5. Recovery verifies v9 and v10 archives.
+API callers should continue treating IDs as opaque. Previously completed jobs keep
+their saved result IDs. Queued jobs admitted by older versions acquire the new
+identity when executed.
 
 The working-directory process lock is held before configuration/key loading and
 `JobManager::open`. Before binding HTTP, starting workers, or initializing Cron

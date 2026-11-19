@@ -227,6 +227,9 @@ mod tests {
         let id = produce(&jobs, BackupOptions::default()).await?;
         let queued = jobs.submit(request(BackupOptions::default())?).await?;
         let path = archive::path(&directory.path().join("repo"), &id);
+        crate::test_support::rewrite_backup_metadata(&path, |manifest| {
+            manifest["format_version"] = json!(9);
+        })?;
         let original = std::fs::read(&path)?;
         let original_request = jobs.list_jobs(20, None).await?["jobs"][1]["request"].clone();
         let same = partial(directory.path(), &id);
@@ -279,6 +282,9 @@ mod tests {
                 Some(EncryptionAlgorithm::Aes256Gcm),
             ] {
                 let directory = fixture()?;
+                let source = directory.path().join("source");
+                std::fs::hard_link(source.join("file"), source.join("alias"))?;
+                nix::unistd::mkfifo(&source.join("pipe"), nix::sys::stat::Mode::S_IRUSR)?;
                 std::fs::write(directory.path().join("key"), hex::encode([7; 32]))?;
                 let files = BTreeMap::from([("current".to_owned(), PathBuf::from("key"))]);
                 let keys = Keyring::load(directory.path(), &files)?;

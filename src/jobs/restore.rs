@@ -3,11 +3,16 @@ use crate::jobs::repository::ManifestEntryKind;
 use super::{
     JobError, archive,
     content::{BackupOptions, Checksum, Content, Keyring},
-    filesystem::{get_absolute_directory_path, paths_overlap},
-    repository::{ArchiveFile, ManifestEntry},
+    filesystem::{encode_device, get_absolute_directory_path, paths_overlap},
+    repository::{ArchiveFile, ManifestEntry, UnixMetadata},
 };
 use filetime::FileTime;
 use http::StatusCode;
+use nix::{
+    fcntl::{AT_FDCWD, AtFlags},
+    sys::stat::{Mode, SFlag, mknod},
+    unistd::{linkat, mkfifo},
+};
 use std::{
     io::{self, Read},
     os::unix::fs::{PermissionsExt, lchown},
@@ -64,6 +69,41 @@ fn restore_one_file(
     Ok(())
 }
 
+fn restore_special_node(
+    path: &Path,
+    metadata: &UnixMetadata,
+    creation: io::Result<()>,
+) -> Result<(), JobError> {
+    creation.map_err(|error| {
+        JobError::internal(format!(
+            "cannot create special file {}: {error}",
+            path.display()
+        ))
+    })?;
+    lchown(path, Some(metadata.uid), Some(metadata.gid)).map_err(|error| {
+        JobError::internal(format!(
+            "failed to set owner of {}: {error}",
+            path.display()
+        ))
+    })?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(metadata.mode)).map_err(
+        |error| {
+            JobError::internal(format!(
+                "failed to set permissions of {}: {error}",
+                path.display()
+            ))
+        },
+    )?;
+    let atime = FileTime::from_unix_time(metadata.atime.seconds, metadata.atime.nanoseconds);
+    let mtime = FileTime::from_unix_time(metadata.mtime.seconds, metadata.mtime.nanoseconds);
+    filetime::set_symlink_file_times(path, atime, mtime).map_err(|error| {
+        JobError::internal(format!(
+            "failed to set timestamps of {}: {error}",
+            path.display()
+        ))
+    })
+}
+
 /// restore all
 fn restore_all_files(
     manifest_entries: &[ManifestEntry],
@@ -111,6 +151,7 @@ fn restore_all_files(
                 relative_path.display()
             ))
         })?;
+        let private_mode = Mode::S_IRUSR | Mode::S_IWUSR;
         match kind {
             ManifestEntryKind::File { original_size } => {
                 let absolute_destination_file_path = absolute_destination_path.join(relative_path);
@@ -211,6 +252,40 @@ fn restore_all_files(
                             absolute_destination_symlink_path.display()
                         ))
                     })?;
+            }
+            ManifestEntryKind::Fifo => {
+                let path = absolute_destination_path.join(relative_path);
+                restore_special_node(
+                    &path,
+                    metadata,
+                    mkfifo(&path, private_mode).map_err(Into::into),
+                )?;
+            }
+            ManifestEntryKind::CharacterDevice { major, minor }
+            | ManifestEntryKind::BlockDevice { major, minor } => {
+                let path = absolute_destination_path.join(relative_path);
+                let device_type = if matches!(kind, ManifestEntryKind::CharacterDevice { .. }) {
+                    SFlag::S_IFCHR
+                } else {
+                    SFlag::S_IFBLK
+                };
+                let creation = encode_device(*major, *minor).and_then(|device| {
+                    mknod(&path, device_type, private_mode, device).map_err(Into::into)
+                });
+                restore_special_node(&path, metadata, creation)?;
+            }
+            ManifestEntryKind::HardLink { target } => {
+                let original = absolute_destination_path.join(target);
+                let alias = absolute_destination_path.join(relative_path);
+                linkat(AT_FDCWD, &original, AT_FDCWD, &alias, AtFlags::empty()).map_err(
+                    |error| {
+                        JobError::internal(format!(
+                            "cannot create hard link {} to {}: {error}",
+                            alias.display(),
+                            original.display(),
+                        ))
+                    },
+                )?;
             }
         }
     }
@@ -433,6 +508,10 @@ mod tests {
         error::Error,
         future::Future,
         io,
+        os::unix::{
+            fs::{FileTypeExt, MetadataExt, symlink},
+            net::UnixListener,
+        },
         path::PathBuf,
     };
 
@@ -458,7 +537,7 @@ mod tests {
     impl Fixture {
         fn new() -> Result<Self, Box<dyn Error>> {
             let directory = TestDirectory::new()?;
-            let source = directory.path().join("source");
+            let source = directory.path().join("s");
             let repository = directory.path().join("repository");
             let destination = directory.path().join("restored");
             for path in [&source, &repository, &destination] {
@@ -694,6 +773,238 @@ mod tests {
         run(&portable, BACKUP_ID, &fixture.destination)?;
         assert_eq!(read_tree(&fixture.destination)?, expected);
         assert_eq!(std::fs::read_dir(portable)?.count(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn fifo_and_cross_directory_hard_links_round_trip() -> TestResult {
+        let fixture = Fixture::new()?;
+        let source = &fixture.source;
+        std::fs::create_dir(source.join("nested"))?;
+        std::fs::write(source.join("file"), b"shared payload")?;
+        std::fs::write(source.join("independent"), b"shared payload")?;
+        symlink("missing", source.join("link"))?;
+        mkfifo(&source.join("pipe"), Mode::S_IRUSR | Mode::S_IWUSR)?;
+        std::fs::set_permissions(source.join("pipe"), std::fs::Permissions::from_mode(0o640))?;
+        let timestamp = FileTime::from_unix_time(1_600_000_000, 123_456_789);
+        filetime::set_symlink_file_times(source.join("pipe"), timestamp, timestamp)?;
+        for name in ["file", "link", "pipe"] {
+            linkat(
+                AT_FDCWD,
+                &source.join(name),
+                AT_FDCWD,
+                &source.join("nested").join(name),
+                AtFlags::empty(),
+            )?;
+        }
+        std::fs::hard_link(source.join("file"), source.join("excluded"))?;
+        let _socket = UnixListener::bind(source.join("sock"))?;
+
+        let mut config = crate::test_support::unfiltered_config();
+        config["relative_path"]["exclude"] = serde_json::json!(["^excluded$"]);
+        backup::run(
+            source,
+            &fixture.repository,
+            &serde_json::from_value(config)?,
+            BACKUP_ID,
+        )?;
+        let archive = ArchiveFile::read(&fixture.repository, BACKUP_ID)?;
+        archive.verify(&Keyring::default())?;
+        assert_eq!(archive.manifest.backup_stats.skipped_unsupported, 1);
+        assert_eq!(archive.manifest.backup_stats.skipped_filtered, 1);
+        assert_eq!(archive.manifest.backup_stats.entries_created, 8);
+        let (mut files, mut hard_links, mut fifos) = (0, 0, 0);
+        for entry in &archive.manifest.entries {
+            match entry.kind {
+                ManifestEntryKind::File { original_size } => {
+                    assert_eq!(original_size, b"shared payload".len() as u64);
+                    files += 1;
+                }
+                ManifestEntryKind::HardLink { .. } => hard_links += 1,
+                ManifestEntryKind::Fifo => fifos += 1,
+                _ => {}
+            }
+        }
+        assert_eq!((files, hard_links, fifos), (2, 3, 1));
+
+        run(&fixture.repository, BACKUP_ID, &fixture.destination)?;
+        let restored = &fixture.destination;
+        for name in ["file", "link", "pipe"] {
+            let original = std::fs::symlink_metadata(restored.join(name))?;
+            let alias = std::fs::symlink_metadata(restored.join("nested").join(name))?;
+            assert_eq!((original.dev(), original.ino()), (alias.dev(), alias.ino()));
+            assert_eq!(original.nlink(), 2);
+        }
+        assert!(
+            std::fs::symlink_metadata(restored.join("pipe"))?
+                .file_type()
+                .is_fifo()
+        );
+        assert_eq!(
+            UnixMetadata::read(&restored.join("pipe"))?,
+            UnixMetadata::read(&source.join("pipe"))?
+        );
+        assert_eq!(
+            std::fs::read_link(restored.join("nested/link"))?,
+            Path::new("missing")
+        );
+        assert_eq!(std::fs::read(restored.join("file"))?, b"shared payload");
+        std::fs::write(restored.join("nested/file"), b"updated")?;
+        assert_eq!(std::fs::read(restored.join("file"))?, b"updated");
+        assert_eq!(
+            std::fs::read(restored.join("independent"))?,
+            b"shared payload"
+        );
+        for name in ["sock", "excluded"] {
+            assert_eq!(
+                std::fs::symlink_metadata(restored.join(name))
+                    .err()
+                    .ok_or("unexpected entry")?
+                    .kind(),
+                io::ErrorKind::NotFound
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires permission to create character and block device nodes"]
+    fn device_nodes_and_hard_links_round_trip() -> TestResult {
+        let fixture = Fixture::new()?;
+        for (name, kind, major, minor) in [
+            ("character", SFlag::S_IFCHR, 1, 3),
+            ("block", SFlag::S_IFBLK, 7, 0),
+        ] {
+            let path = fixture.source.join(name);
+            mknod(&path, kind, Mode::S_IRUSR, encode_device(major, minor)?)?;
+            std::fs::hard_link(path, fixture.source.join(format!("{name}-alias")))?;
+        }
+        backup::run(
+            &fixture.source,
+            &fixture.repository,
+            &crate::test_support::unfiltered()?,
+            BACKUP_ID,
+        )?;
+        run(&fixture.repository, BACKUP_ID, &fixture.destination)?;
+        for name in ["character", "block"] {
+            let path = fixture.destination.join(name);
+            let source_path = fixture.source.join(name);
+            let original = std::fs::symlink_metadata(&source_path)?;
+            let restored = std::fs::symlink_metadata(&path)?;
+            let alias =
+                std::fs::symlink_metadata(fixture.destination.join(format!("{name}-alias")))?;
+            assert_eq!(restored.file_type(), original.file_type());
+            assert_eq!(restored.rdev(), original.rdev());
+            assert_eq!(
+                UnixMetadata::read(&path)?,
+                UnixMetadata::read(&source_path)?
+            );
+            assert_eq!((restored.dev(), restored.ino()), (alias.dev(), alias.ino()));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn v9_and_v10_backups_can_share_a_repository() -> TestResult {
+        let fixture = Fixture::new()?;
+        let filter = crate::test_support::unfiltered()?;
+        std::fs::write(fixture.source.join("file"), b"v9 contents")?;
+        symlink("file", fixture.source.join("link"))?;
+        backup::run(&fixture.source, &fixture.repository, &filter, "v9")?;
+        crate::test_support::rewrite_backup_metadata(
+            &archive::path(&fixture.repository, "v9"),
+            |manifest| {
+                manifest["format_version"] = serde_json::json!(9);
+            },
+        )?;
+        mkfifo(&fixture.source.join("pipe"), Mode::S_IRUSR)?;
+        backup::run(&fixture.source, &fixture.repository, &filter, "v10")?;
+        assert_eq!(
+            super::super::repository::list(&fixture.repository)?.len(),
+            2
+        );
+        for (id, version) in [("v9", 9), ("v10", 10)] {
+            let archive = ArchiveFile::read(&fixture.repository, id)?;
+            assert_eq!(archive.manifest.format_version, version);
+            archive.verify(&Keyring::default())?;
+        }
+        run(&fixture.repository, "v9", &fixture.destination)?;
+        assert_eq!(
+            std::fs::read(fixture.destination.join("file"))?,
+            b"v9 contents"
+        );
+        assert_eq!(
+            std::fs::read_link(fixture.destination.join("link"))?,
+            Path::new("file")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_hard_link_targets_are_rejected_before_writes() -> TestResult {
+        let fixture = Fixture::new()?;
+        std::fs::create_dir(fixture.source.join("directory"))?;
+        std::fs::write(fixture.source.join("file"), b"contents")?;
+        backup::run(
+            &fixture.source,
+            &fixture.repository,
+            &crate::test_support::unfiltered()?,
+            BACKUP_ID,
+        )?;
+        let path = archive::path(&fixture.repository, BACKUP_ID);
+        let original = std::fs::read(&path)?;
+        let outside = fixture.directory.path().join("outside");
+        std::fs::write(&outside, b"outside")?;
+        for (target, mismatch, version) in [
+            (outside.as_path(), false, 10),
+            (Path::new("../outside"), false, 10),
+            (Path::new("missing"), false, 10),
+            (Path::new("later"), false, 10),
+            (Path::new("directory"), false, 10),
+            (Path::new("alias"), false, 10),
+            (Path::new("file"), true, 10),
+            (Path::new("file"), false, 9),
+        ] {
+            std::fs::write(&path, &original)?;
+            crate::test_support::rewrite_backup_metadata(&path, |manifest| {
+                let Some(entries) = manifest["entries"].as_array_mut() else {
+                    return;
+                };
+                let Some(file) = entries
+                    .iter()
+                    .find(|entry| entry["relative_path"] == "file")
+                    .cloned()
+                else {
+                    return;
+                };
+                let mut alias = file.clone();
+                alias["relative_path"] = serde_json::json!("alias");
+                alias["kind"] = serde_json::json!({"type":"HardLink", "target":"file"});
+                entries.push(alias.clone());
+                alias["relative_path"] = serde_json::json!("second-alias");
+                alias["kind"]["target"] = serde_json::json!(target);
+                if mismatch {
+                    alias["metadata"]["mode"] = serde_json::json!(0);
+                }
+                entries.push(alias);
+                let mut later = file;
+                later["relative_path"] = serde_json::json!("later");
+                entries.push(later);
+                manifest["backup_stats"]["entries_created"] = serde_json::json!(entries.len());
+                manifest["format_version"] = serde_json::json!(version);
+            })?;
+            let error = run(&fixture.repository, BACKUP_ID, &fixture.destination)
+                .err()
+                .ok_or("accepted an invalid hard link")?;
+            let expected = if version == 9 {
+                "format v9"
+            } else {
+                "invalid hard link target"
+            };
+            assert!(error.message.contains(expected), "{error}");
+            assert!(read_tree(&fixture.destination)?.is_empty());
+        }
+        assert_eq!(std::fs::read(outside)?, b"outside");
         Ok(())
     }
 
