@@ -1,7 +1,7 @@
 {
-  "recorded_at": "2026-11-16T20:06:07.674088+08:00",
-  "production_revision": "e15a53492ee756544bd8cdcf6e24a1febc5e82f0",
-  "source_tree": "a1c1904a64407b80bbbc74272891c8fa2885db7e",
+  "recorded_at": "2026-11-19T21:54:55+08:00",
+  "production_revision": "e7c65f33f9b46ea86ff33584671a79b1987cc67c",
+  "source_tree": "6269dbb66532d4a88c6a72ba1cb80c2a7c1c2f7a",
   "environment": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
   "checks": [
     {
@@ -16,7 +16,7 @@
     },
     {
       "command": "cargo test --all-targets",
-      "result": "88 项单元/组件测试、4 项 CLI 生命周期测试和 13 项 HTTP 集成测试通过；1 项手动测量忽略",
+      "result": "96 项单元或组件测试、5 项 CLI 测试和 13 项 HTTP 集成测试通过。2 项手动测试默认跳过。",
       "exit_code": 0
     },
     {
@@ -31,7 +31,7 @@
     },
     {
       "command": "npm --prefix web test",
-      "result": "6 组真实浏览器流程通过，覆盖九模式备份恢复、连接切换及定时计划立即执行",
+      "result": "6 项 Chrome 浏览器回归通过。",
       "exit_code": 0
     },
     {
@@ -46,30 +46,30 @@
     },
     {
       "command": "uv run python -m unittest discover -s docs/report/tests",
-      "result": "9 项报告保护、模型和渲染图表测试通过",
+      "result": "9 项报告保护、模型和图表测试通过。",
       "exit_code": 0
     },
     {
       "command": "uv run scripts/update_use_cases.py --check",
-      "result": "用例 D2/PNG 无漂移",
+      "result": "用例 D2 与 PNG 一致。",
       "exit_code": 0
     },
     {
       "command": "uv run scripts/update_system_design.py --check",
-      "result": "8 个设计视图 D2/PNG 无漂移",
+      "result": "8 个设计视图的 D2 与 PNG 一致。",
       "exit_code": 0
     }
   ],
-  "scope": "Current production revision regression and report refresh: external WebUI assets, background server commands, scheduled-plan inspection/immediate execution, self-contained backup v9, and startup reconciliation. Documentation inputs updated in the working tree; no production-code changes in this refresh.",
+  "scope": "验证 CLI 帮助与补全、控制台、定时计划、文件类型筛选、v10 归档、v9 读取和启动对账。报告和图表使用本次文档更新的输入。",
   "historical_evidence": "verification.json (2026-10-14)",
-  "entrypoint": "uv run scripts/check.py --report --web-ui",
+  "entrypoint": "BAK_BROWSER_CHANNEL=chrome uv run scripts/check.py --report --web-ui",
   "historical_measurements_rerun": false,
   "codec_measurements": "lz77-measurements.json",
   "codec_measurements_rerun": false,
-  "document_base_revision": "e15a53492ee756544bd8cdcf6e24a1febc5e82f0",
+  "document_base_revision": "e7c65f33f9b46ea86ff33584671a79b1987cc67c",
   "document_inputs": {
     "version": "6.0",
-    "updated": "2026-11-16",
+    "updated": "2026-11-19",
     "models": [
       "use-cases.yaml",
       "model.yaml"
@@ -79,28 +79,13 @@
   "codec_measurements_recorded_at": "2026-10-31T15:47:32.993984+08:00",
   "supplemental_checks": [
     {
-      "command": "uv run ruff check .",
-      "result": "报告图片关系清理实现及回归用例更新后复核通过",
+      "command": "README 安装与 API 示例",
+      "result": "安装、服务启动、备份、恢复和硬链接还原通过。",
       "exit_code": 0
     },
     {
-      "command": "uv run basedpyright",
-      "result": "0 errors / 0 warnings / 0 notes",
-      "exit_code": 0
-    },
-    {
-      "command": "uv run python -m unittest discover -s docs/report/tests",
-      "result": "9 项通过；包含手工内容保护、私有成员渲染和无引用图片清理",
-      "exit_code": 0
-    },
-    {
-      "command": "uv run scripts/update_use_cases.py --check",
-      "result": "无漂移",
-      "exit_code": 0
-    },
-    {
-      "command": "uv run scripts/update_system_design.py --check",
-      "result": "无漂移",
+      "command": "README Shell 补全示例",
+      "result": "Bash、Fish 和 Zsh 均成功加载 bak 补全。",
       "exit_code": 0
     }
   ]

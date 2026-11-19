@@ -7,13 +7,13 @@
 | `use-cases.yaml` | 需求、用例和追踪关系 |
 | `model.yaml` | 构件、类型和时序视图 |
 | `generated/` | 由模型生成的 D2、PNG 和流程图 |
-| `current-verification.json` | 与 `production_revision` 对应的功能回归与运行环境 |
+| `current-verification.json` | 按 `production_revision` 标注的功能回归记录与运行环境 |
 | `verification.json` | 2026-10-14 的性能、稳定性和内存测量 |
 | `lz77-measurements.json` | 2026-10-31 的 Zstd 和 LZ77 内存编解码数据 |
 
 ## 生成与检查
 
-图表使用 D2 0.9.0、ELK 布局和 theme 0。Word 文件使用本地的 `report.docx` 和 `report.template.docx`，两者均由 Git 忽略。
+图表使用 D2 0.9.0、ELK 布局和 theme 0。生成脚本更新本地的 `docs/report/report.docx`。请先将课程 Word 文件放在该路径。
 
 ```sh
 uv run scripts/update_report.py

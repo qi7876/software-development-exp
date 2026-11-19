@@ -83,6 +83,10 @@ diagram: "Job and Repository Data Types" {
       "+ File { original_size }"
       "+ Directory"
       "+ Symlink { target }"
+      "+ Fifo"
+      "+ CharacterDevice { major, minor }"
+      "+ BlockDevice { major, minor }"
+      "+ HardLink { target }"
     }
     Metadata: "<<struct>>\nUnixMetadata" {
       shape: class

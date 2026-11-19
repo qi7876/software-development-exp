@@ -1,6 +1,6 @@
 {
   "version": "6.0",
-  "updated": "2026-11-16",
+  "updated": "2026-11-19",
   "title": "bak 当前实现系统设计",
   "diagrams": [
     {
@@ -17,7 +17,7 @@
       ],
       "details": [
         "浏览器可连接同一或另一台 bak API；地址和明文 API key 保存在浏览器 origin 的 localStorage。",
-        "工作目录作业库 schema v5，自包含备份格式 v9；仓库不再使用数据库，加密密钥仍由外部配置提供。",
+        "工作目录使用 schema v5 作业库。仓库存放自包含备份，新建文件使用 v10，服务兼容 v9。加密密钥来自配置指定的文件。",
         "自实现顺序归档后选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 或 AES-256-GCM 加密，形成九种模式；元数据和文件名仍为明文。",
         "配置式定时备份使用 IANA 时区与分钟级 Cron，复用 FIFO；停机不补跑，同一计划有未完成任务时跳过。",
         "bak server start 默认创建后台子进程并等待就绪；status/stop 通过当前用户的 Unix socket 管理实例。",
@@ -129,14 +129,14 @@
           "name": "Source directory",
           "package": "Local filesystem",
           "type": "folder",
-          "stereotype": "files / directories / symlinks"
+          "stereotype": "Unix file entries"
         },
         {
           "id": "Repo",
           "name": "Repository directory",
           "package": "Local repository",
           "type": "folder",
-          "stereotype": "self-contained backups v9"
+          "stereotype": "self-contained v10 / v9 backups"
         },
         {
           "id": "Files",
@@ -608,7 +608,7 @@
       "details": [
         "BackupOptions.compression 为 Option<CompressionOptions>；None 禁用，Some 为 Zstd 或 LZ77 专属配置，API、任务与仓库元数据均使用带 algorithm 标签的对象。",
         "Encryption 包含 algorithm、key_id 与 fingerprint，不保存密钥材料；Filter 的规则也随请求持久化。",
-        "ManifestEntry 是结构体，kind 才是区分 File/Directory/Symlink 的枚举。UnixMetadata 包含纳秒时间戳。",
+        "ManifestEntry 的 kind 记录条目类型。HardLink 指向先前记录的原始条目。UnixMetadata 包含纳秒时间戳。",
         "普通手动备份的 schedule_id/scheduled_for 均为空；自动触发保存计划标识和匹配分钟，立即运行计划保存计划标识与请求时刻；时间均为 UTC Unix 毫秒。"
       ],
       "constraints": [
@@ -745,7 +745,11 @@
           "attributes": [
             "+ File { original_size }",
             "+ Directory",
-            "+ Symlink { target }"
+            "+ Symlink { target }",
+            "+ Fifo",
+            "+ CharacterDevice { major, minor }",
+            "+ BlockDevice { major, minor }",
+            "+ HardLink { target }"
           ],
           "operations": []
         },
@@ -907,7 +911,7 @@
       "details": [
         "JobManager 持有 Arc<Keyring>，提交时固定标识与指纹，worker 执行前再次匹配。",
         "archive 打包后由 Content 选择可选 CompressionOptions 和 Encryption；LZ77 通过 Encoder/Decoder 流式处理，组合顺序固定先压缩后加密。",
-        "Filter::compile 在备份执行时校验正则和时间范围，CompiledFilter::matches 决定目录是否继续遍历。",
+        "Filter::compile 在执行时校验正则和时间范围。路径或元数据规则决定是否遍历目录，文件类型筛选保留所选条目所需的父目录。",
         "Scheduler 使用 croner/chrono-tz 并保留全部计划的不可变目录；AES 使用 HKDF-SHA256 为每个归档派生密钥，两个算法共用 STREAM BE32 和最终块验证。"
       ],
       "constraints": [
@@ -1560,7 +1564,7 @@
           "type": "message",
           "source": "Backup",
           "target": "Repo",
-          "text": "Publish v9 file with metadata and digest"
+          "text": "Publish v10 file with metadata and digest"
         },
         {
           "type": "return",
@@ -1749,7 +1753,7 @@
           "type": "message",
           "source": "Restore",
           "target": "Repo",
-          "text": "Read v9 footer / match external key and fingerprint"
+          "text": "Read v10 or v9 footer / match key and fingerprint"
         },
         {
           "type": "message",
@@ -1771,7 +1775,7 @@
           "type": "message",
           "source": "Restore",
           "target": "Dest",
-          "text": "Recreate symlinks / apply Unix metadata / sync"
+          "text": "Recreate entries and hard links / apply Unix metadata / sync"
         },
         {
           "type": "return",
