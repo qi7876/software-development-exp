@@ -842,7 +842,7 @@ def _populate_system_design(
         (
             (
                 "开发平台",
-                "macOS / Apple Silicon；Rust 1.98.0、2024 edition，Python >=3.13 文档工具。",
+                "macOS / Apple Silicon。Rust 1.100.0（2024 edition），Python 3.15.2 文档工具。",
             ),
             (
                 "构建与依赖",
