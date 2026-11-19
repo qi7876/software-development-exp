@@ -12,7 +12,7 @@
   <body>
     <a class="skip-link" href="#main">Skip to main content</a>
     <aside class="sidebar">
-      <a class="brand" href="#backup" aria-label="bak. home">bak.</a>
+      <a class="brand" href="#backup" aria-label="bak. home">bak<span>.</span></a>
       <nav aria-label="Main navigation">
         <a href="#backup" aria-current="page">
           <span>Create backup</span>
@@ -45,7 +45,7 @@
 
     <main id="main" tabindex="-1">
       <p class="connect-notice">
-        <span>Not connected. Connect to create backups, load a repository and view tasks.</span>
+        <span>Connect to a service to run backups and restores.</span>
         <a href="#connections">Manage connections</a>
       </p>
       <section id="backup" class="view" aria-labelledby="backup-title">
@@ -205,7 +205,7 @@
             >
               <h2 id="filter-summary">Filters</h2>
               <div class="filter-content">
-                <fieldset class="filter-row" aria-describedby="file-types-help">
+                <fieldset class="filter-row file-type-filter" aria-describedby="file-types-help">
                   <legend>File types</legend>
                   <div class="file-type-options">
                     <label><input type="checkbox" name="file_types" value="regular_file" checked />Regular files</label>
@@ -383,10 +383,10 @@
       >
         <div class="view-heading">
           <h1 id="repository-title" tabindex="-1">Backup repository</h1>
-          <span id="repository-label" class="view-meta">No repository loaded</span>
+          <span id="repository-label" class="view-meta"></span>
         </div>
         <div>
-          <form id="repository-form">
+          <form id="repository-form" class="repository-form">
             <fieldset class="inline-form" data-connected disabled>
               <div class="grow">
                 <label for="repository-path">Repository path</label
@@ -413,7 +413,7 @@
           <h1 id="schedules-title" tabindex="-1">Scheduled backups</h1>
           <button id="refresh-schedules" type="button" data-connected disabled>Refresh</button>
         </div>
-        <p class="view-meta">Plans come from the service configuration. Back up now uses the saved settings without changing the automatic schedule.</p>
+        <p class="view-meta">Edit plans in the service configuration.</p>
         <p id="schedules-timezone" class="view-meta"></p>
         <p id="schedules-message" class="message" role="status"></p>
         <div id="schedule-list"><div class="empty-state"><p>Not connected.</p></div></div>
@@ -427,9 +427,7 @@
           </button>
         </div>
         <div>
-          <p id="jobs-updated" class="view-meta">
-            Task records load after connecting. Click Refresh to update.
-          </p>
+          <p id="jobs-updated" class="view-meta"></p>
           <p id="jobs-message" class="message" role="status"></p>
           <div id="job-list">
             <div class="empty-state"><p>Not connected.</p></div>
@@ -450,7 +448,9 @@
         aria-labelledby="connections-title"
         hidden
       >
-        <h1 id="connections-title" tabindex="-1">Connections</h1>
+        <div class="view-heading">
+          <h1 id="connections-title" tabindex="-1">Connections</h1>
+        </div>
         <div>
           <h2>Saved connections</h2>
           <p id="storage-message" class="message" role="status"></p>
@@ -526,7 +526,7 @@
           required
         />
         <p id="destination-help" class="field-help">
-          Must be an existing empty directory that does not contain or sit inside the repository. A failed or interrupted restore may leave partial files.
+          Use an existing, empty directory separate from the repository. Failed restores can leave partial files.
         </p>
         <p id="restore-message" class="message" role="status"></p>
         <div class="dialog-actions">

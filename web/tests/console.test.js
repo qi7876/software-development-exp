@@ -265,9 +265,9 @@ test(
     assert.ok(action.x > heading.x + heading.width);
     assert.equal(await page.locator(".panel, #backup-filter summary").count(), 0);
     await page.locator("#filter-relative_path-include").waitFor();
-    for (const width of [768, 1024, 1440, 1920]) {
+    for (const width of [320, 390, 540, 768, 1024, 1440, 1920]) {
       await page.setViewportSize({ width, height: 1000 });
-      for (const name of ["connections", "repository", "jobs", "backup"]) {
+      for (const name of ["connections", "repository", "schedules", "jobs", "backup"]) {
         await view(name);
         assert.equal(
           await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
@@ -280,7 +280,7 @@ test(
       }
       const source = await page.locator("#source").boundingBox();
       const repository = await page.locator("#backup-repository").boundingBox();
-      if (width === 768) {
+      if (width <= 768) {
         assert.equal(source.x, repository.x);
         assert.ok(repository.y > source.y);
       } else {
@@ -617,8 +617,8 @@ test(
     await switchTo(local.url);
     assert.equal(await page.locator(".job").count(), 0);
     assert.equal(
-      await page.locator("#repository-label").textContent(),
-      "No repository loaded",
+      await page.locator("#backup-list .empty-state").textContent(),
+      "No repository loaded.",
     );
     await switchTo(remote.url);
     await page.waitForFunction(

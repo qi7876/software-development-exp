@@ -208,8 +208,8 @@ function resetSession() {
   ["connection", "backup", "repository", "jobs", "restore", "schedules"].forEach((name) =>
     message(`${name}-message`),
   );
-  $("repository-label").textContent = "No repository loaded";
-  $("jobs-updated").textContent = "Task records load after connecting. Click Refresh to update.";
+  $("repository-label").textContent = "";
+  $("jobs-updated").textContent = "";
   $("job-list").replaceChildren(empty("Not connected."));
   delete $("job-list").dataset.snapshot;
   $("backup-list").replaceChildren(empty("No repository loaded."));
