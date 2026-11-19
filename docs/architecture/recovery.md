@@ -16,7 +16,7 @@ expected `<job_id>.bak` in the recorded repository.
 ## Verification and cleanup
 
 A candidate must match the job ID and recorded compression and encryption
-settings. Recovery reads v9 and v10 archives, checks entry headers and sizes,
+settings. Recovery reads v10 archives, checks entry headers and sizes,
 consumes the codec and AEAD end markers, and verifies the container digest.
 Encrypted backups require the original key ID and fingerprint. Verification
 reads the backup file independently of the source directory.

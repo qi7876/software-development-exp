@@ -1164,45 +1164,31 @@ async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> 
 }
 
 #[tokio::test]
-async fn old_repository_is_rejected_before_payload_creation() -> TestResult {
+async fn repository_ignores_non_archive_files() -> TestResult {
     let mut server = TestServer::start().await?;
-    let database = server.path("repo with space/repository.sqlite3");
-    let mut connection = SqliteConnection::connect_with(
-        &SqliteConnectOptions::new()
-            .filename(&database)
-            .create_if_missing(true),
-    )
-    .await?;
-    sqlx::raw_sql("CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('preserve'); PRAGMA user_version = 7;").execute(&mut connection).await?;
-    connection.close().await?;
+    let unrelated = server.path("repo with space/repository.sqlite3");
+    std::fs::write(&unrelated, b"unrelated repository file")?;
+
+    assert_eq!(server.get(LIST_PATH).await?, json!({"backups": []}));
     let id = server.backup().await?;
-    let failed = server.wait_job(&id, false).await?;
-    assert_eq!(failed["state"], "failed");
-    assert!(
-        failed["error"]["message"]
-            .as_str()
-            .ok_or("missing error")?
-            .contains("legacy repository database")
-    );
-    assert!(!server.path("repo with space/backups").exists());
-    for entry in std::fs::read_dir(server.path("repo with space"))? {
-        assert_ne!(entry?.path().extension(), Some(std::ffi::OsStr::new("bak")));
-    }
-    let mut connection =
-        SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(database)).await?;
+    let job = server.wait_job(&id, false).await?;
+    assert_eq!(job["state"], "succeeded", "{job}");
+    let backups = server.get(LIST_PATH).await?;
     assert_eq!(
-        sqlx::query_scalar::<_, String>("SELECT value FROM sentinel")
-            .fetch_one(&mut connection)
-            .await?,
-        "preserve"
+        backups["backups"][0]["backup_id"],
+        job["result"]["backup_id"]
     );
+    let restore = server
+        .submit(
+            "/api/restores",
+            json!({"repository":"repo with space", "backup_id":job["result"]["backup_id"], "destination":"restored"}),
+        )
+        .await?;
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
-            .fetch_one(&mut connection)
-            .await?,
-        7
+        server.wait_job(&restore, false).await?["state"],
+        "succeeded"
     );
-    connection.close().await?;
+    assert_eq!(std::fs::read(unrelated)?, b"unrelated repository file");
     server.stop().await
 }
 

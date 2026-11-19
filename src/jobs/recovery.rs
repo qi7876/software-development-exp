@@ -2,7 +2,7 @@ use super::{
     JobError, JobInfo, JobManager, JobRequest, JobResult, archive,
     content::{BackupOptions, Keyring},
     filesystem::sync_directory,
-    repository::{self, ArchiveFile},
+    repository::ArchiveFile,
 };
 use std::{
     fs::File,
@@ -104,7 +104,6 @@ fn reconcile_backup(
     options: &BackupOptions,
     keys: &Keyring,
 ) -> Result<JobResult, JobError> {
-    repository::check_existing_format(directory)?;
     let destination = archive::path(directory, id);
     let pending = pending_paths(directory, id)?;
     let published = match std::fs::symlink_metadata(&destination) {
@@ -227,9 +226,6 @@ mod tests {
         let id = produce(&jobs, BackupOptions::default()).await?;
         let queued = jobs.submit(request(BackupOptions::default())?).await?;
         let path = archive::path(&directory.path().join("repo"), &id);
-        crate::test_support::rewrite_backup_metadata(&path, |manifest| {
-            manifest["format_version"] = json!(9);
-        })?;
         let original = std::fs::read(&path)?;
         let original_request = jobs.list_jobs(20, None).await?["jobs"][1]["request"].clone();
         let same = partial(directory.path(), &id);
@@ -342,6 +338,7 @@ mod tests {
             "incomplete",
             "ambiguous",
             "corrupt",
+            "unsupported version",
             "settings",
             "foreign",
             "missing",
@@ -364,6 +361,11 @@ mod tests {
                     let mut bytes = std::fs::read(&path)?;
                     bytes[8] ^= 1;
                     std::fs::write(&path, bytes)?;
+                }
+                "unsupported version" => {
+                    crate::test_support::rewrite_backup_metadata(&path, |manifest| {
+                        manifest["format_version"] = json!(9);
+                    })?;
                 }
                 "settings" => {
                     sqlx::query("UPDATE jobs SET request = json_set(request, '$.compression', null) WHERE job_id = ?").bind(&id).execute(&jobs.pool).await?;
@@ -397,12 +399,11 @@ mod tests {
                 .ok_or("lost interrupted job")?
                 .to_json()?;
             assert_eq!(job["state"], "failed", "{scenario}: {job}");
-            assert!(
-                job["error"]["message"]
-                    .as_str()
-                    .ok_or("missing error")?
-                    .contains("interrupted")
-            );
+            let message = job["error"]["message"].as_str().ok_or("missing error")?;
+            assert!(message.contains("interrupted"));
+            if scenario == "unsupported version" {
+                assert!(message.contains("unsupported backup format version 9"));
+            }
             assert!(matches!(
                 jobs.get_job(&queued.job_id)
                     .await?

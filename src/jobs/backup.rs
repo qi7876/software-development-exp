@@ -289,7 +289,6 @@ pub(super) fn run_with_options(
             ),
         ));
     }
-    super::repository::check_existing_format(&absolute_repository_path)?;
     let compiled_filter = filter.compile()?;
     let root_metadata = UnixMetadata::read(&absolute_source_path)?;
     let (backup_stats, backup_entries) = path_traversal(&absolute_source_path, &compiled_filter)?;

@@ -5,6 +5,7 @@ use std::{
 };
 
 #[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     pub(crate) listen: SocketAddr,
     pub(crate) secret_key: String,
@@ -35,12 +36,7 @@ impl Config {
         let config_path = working_directory.join("config.json");
         let config_data = std::fs::read(&config_path)
             .map_err(|error| format!("cannot read config {}: {error}", config_path.display()))?;
-        let value: serde_json::Value = serde_json::from_slice(&config_data)
-            .map_err(|error| format!("cannot parse config {}: {error}", config_path.display()))?;
-        if value.get("logging").is_some() {
-            return Err(format!("config {} contains obsolete logging settings; remove logging: job history is now stored in jobs.sqlite3", config_path.display()).into());
-        }
-        let mut config = serde_json::from_value::<Config>(value)
+        let mut config: Self = serde_json::from_slice(&config_data)
             .map_err(|error| format!("cannot parse config {}: {error}", config_path.display()))?;
 
         if config.secret_key.is_empty() {
@@ -120,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn configuration_rejects_obsolete_logging_settings() -> Result<(), Box<dyn Error>> {
+    fn configuration_rejects_unknown_top_level_fields() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
         let mut config: serde_json::Value =
             serde_json::from_str(include_str!("../working-directory-example/config.json"))?;
@@ -130,16 +126,22 @@ mod tests {
             serde_json::to_vec(&config)?,
         )?;
         Config::load(directory.path())?;
-        config["logging"] = serde_json::json!({"enabled": false});
-        std::fs::write(
-            directory.path().join("config.json"),
-            serde_json::to_vec(&config)?,
-        )?;
-        let error = Config::load(directory.path())
-            .err()
-            .ok_or("accepted obsolete logging settings")?;
-        assert!(error.to_string().contains("remove logging"));
-        assert!(error.to_string().contains("jobs.sqlite3"));
+        for field in ["logging", "unexpected"] {
+            let mut invalid = config.clone();
+            invalid[field] = serde_json::json!({});
+            std::fs::write(
+                directory.path().join("config.json"),
+                serde_json::to_vec(&invalid)?,
+            )?;
+            let error = Config::load(directory.path())
+                .err()
+                .ok_or("accepted unknown config field")?;
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("unknown field `{field}`"))
+            );
+        }
         Ok(())
     }
 }

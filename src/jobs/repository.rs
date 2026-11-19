@@ -16,7 +16,6 @@ const FOOTER: &[u8; 8] = b"BAKEND\0\x01";
 const TRAILER_SIZE: u64 = 48;
 const MAX_METADATA_SIZE: u64 = 64 * 1024 * 1024;
 pub(super) const FORMAT_VERSION: u32 = 10;
-const LEGACY_MANIFEST_VERSION: u32 = 9;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(super) struct BackupStats {
@@ -146,14 +145,14 @@ impl Manifest {
 
     fn validate(&self) -> Result<(), JobError> {
         validate_id(&self.backup_id)?;
-        if !matches!(
-            self.format_version,
-            LEGACY_MANIFEST_VERSION | FORMAT_VERSION
-        ) || self.checksum_algorithm != "sha256"
-        {
-            return Err(JobError::internal(
-                "unsupported self-contained backup format or checksum algorithm",
-            ));
+        if self.format_version != FORMAT_VERSION {
+            return Err(JobError::internal(format!(
+                "unsupported backup format version {}; expected {FORMAT_VERSION}",
+                self.format_version
+            )));
+        }
+        if self.checksum_algorithm != "sha256" {
+            return Err(JobError::internal("unsupported backup checksum algorithm"));
         }
         chrono::DateTime::parse_from_rfc3339(&self.created_at)
             .map_err(|e| JobError::internal(format!("invalid backup timestamp: {e}")))?;
@@ -205,18 +204,6 @@ impl Manifest {
                     path.display()
                 )));
             }
-            if self.format_version == LEGACY_MANIFEST_VERSION
-                && !matches!(
-                    entry.kind,
-                    ManifestEntryKind::File { .. }
-                        | ManifestEntryKind::Directory
-                        | ManifestEntryKind::Symlink { .. }
-                )
-            {
-                return Err(JobError::internal(
-                    "invalid entry kind for backup format v9",
-                ));
-            }
             if let ManifestEntryKind::HardLink { target } = &entry.kind
                 && !seen.get(target.as_path()).is_some_and(|original| {
                     !matches!(
@@ -250,7 +237,6 @@ pub(super) struct ArchiveFile {
 impl ArchiveFile {
     pub(super) fn read(repository: &Path, backup_id: &str) -> Result<Self, JobError> {
         validate_id(backup_id)?;
-        check_existing_format(repository)?;
         Self::open(&archive::path(repository, backup_id))
     }
 
@@ -279,9 +265,7 @@ impl ArchiveFile {
             let mut magic = [0; 8];
             file.read_exact(&mut magic)?;
             if &magic != MAGIC {
-                return Err(JobError::internal(
-                    "unsupported backup format; legacy archives require the prior binary and repository database",
-                ));
+                return Err(JobError::internal("unsupported backup container format"));
             }
             file.seek(SeekFrom::End(-(TRAILER_SIZE as i64)))?;
             let mut bytes = [0; 8];
@@ -464,18 +448,8 @@ impl Drop for PendingArchive {
     }
 }
 
-pub(super) fn check_existing_format(repository: &Path) -> Result<(), JobError> {
-    if repository.join("repository.sqlite3").try_exists()? {
-        return Err(JobError::internal(
-            "legacy repository database detected; use a new repository for self-contained backups and the prior binary for old backups",
-        ));
-    }
-    Ok(())
-}
-
 pub(super) fn list(repository: &Path) -> Result<Vec<RepoBackupInfo>, JobError> {
     let directory = get_absolute_directory_path(repository)?;
-    check_existing_format(&directory)?;
     let mut summaries = Vec::new();
     for entry in std::fs::read_dir(&directory)? {
         let path = entry?.path();
@@ -760,17 +734,12 @@ mod tests {
     }
 
     #[test]
-    fn legacy_databases_and_invalid_ids_are_preserved_without_writes() -> TestResult {
+    fn invalid_ids_are_rejected_without_writes() -> TestResult {
         let directory = TestDirectory::new()?;
         for id in ["", ".", "..", "../escape", "a/b", "a\\b"] {
             assert!(PendingArchive::create(directory.path(), id).is_err());
         }
         assert!(list(directory.path())?.is_empty());
-        let database = directory.path().join("repository.sqlite3");
-        std::fs::write(&database, b"legacy database")?;
-        assert!(check_existing_format(directory.path()).is_err());
-        assert!(list(directory.path()).is_err());
-        assert_eq!(std::fs::read(database)?, b"legacy database");
         Ok(())
     }
 

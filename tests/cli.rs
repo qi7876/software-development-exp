@@ -92,6 +92,11 @@ fn command_structure_and_help() -> TestResult {
     }
     let help = fixture.command(&["--help"])?;
     assert!(String::from_utf8_lossy(&help.stdout).contains("--help"));
+    let version = fixture.command(&["version"])?;
+    assert_eq!(
+        std::str::from_utf8(&version.stdout)?.trim(),
+        concat!("bak ", env!("CARGO_PKG_VERSION"))
+    );
     Ok(())
 }
 

@@ -353,7 +353,10 @@ async function connectProfile(connection, save = false) {
       {},
       attempt.signal,
     );
-    if (!status || typeof status.version !== "string")
+    if (
+      typeof status?.version !== "string" ||
+      !Array.isArray(status.encryption_keys)
+    )
       throw new Error("This address did not return a valid bak API status.");
     if (attempt !== state.connectionAttempt) return;
     if (save) {
@@ -374,7 +377,7 @@ async function connectProfile(connection, save = false) {
     document.querySelectorAll("[data-connected]").forEach((element) => {
       element.disabled = false;
     });
-    state.encryptionKeys = status.encryption_keys || [];
+    state.encryptionKeys = status.encryption_keys;
     for (const key of state.encryptionKeys)
       $("encryption-key").append(new Option(key.key_id, key.key_id));
     updateEncodingOptions();

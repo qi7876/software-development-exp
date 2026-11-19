@@ -26,7 +26,7 @@ Relative paths resolve from the server's working directory. Use existing, disjoi
 
 Use `bak server start --help` for command options, `bak server status` to check the managed instance, and `bak server stop` to stop it. Stop waits for the active job and preserves the queue for restart. For a supervisor, use `bak server start --foreground -d PATH`.
 
-The working directory holds `config.json`, `jobs.sqlite3`, and the managed server log `server.log`. Run one service per working directory on a local filesystem. Restart the service to apply configuration edits.
+The working directory holds `config.json`, `jobs.sqlite3`, and the managed server log `server.log`. Run one service per working directory on a local filesystem. Restart the service to apply configuration edits. Use the top-level fields listed below.
 
 | Field | Purpose |
 | --- | --- |
@@ -136,7 +136,7 @@ Request errors return the matching HTTP status and `{"error":{"code":400,"messag
 
 ## Repositories and recovery
 
-Copy a `<backup_id>.bak` file to another repository under its original name. For an encrypted backup, configure its original key ID and key material on the destination service. New backups use v10 and share repositories with v9. Formats through v8 use their original application version and repository database.
+Copy a `<backup_id>.bak` file to another repository under its original name. For an encrypted backup, configure its original key ID and key material on the destination service. `bak` 1.0 reads and writes v10 archives. To recover data from an earlier archive format, use the release that created it.
 
 The repository filesystem must support hard links and directory synchronization. At startup, the service verifies interrupted backup output and records interrupted restores as failed, preserving their output. See the [archive format](docs/architecture/archive.md) and [startup recovery](docs/architecture/recovery.md).
 

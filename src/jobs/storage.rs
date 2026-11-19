@@ -46,7 +46,7 @@ pub async fn open(path: &Path, schema: Schema, create: bool) -> Result<SqlitePoo
             version if version == i64::from(schema.version) => {}
             _ => {
                 return Err(JobError::internal(format!(
-                    "unsupported database schema version {version}; expected {} (no migration is available; use a new database)",
+                    "unsupported database schema version {version}; expected {}",
                     schema.version
                 )));
             }

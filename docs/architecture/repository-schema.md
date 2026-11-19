@@ -7,7 +7,7 @@ Each published `<backup_id>.bak` contains its own manifest and digest. See the
 
 | Field | Meaning |
 | --- | --- |
-| `format_version` | 10 for new archives; v9 is also readable |
+| `format_version` | 10 |
 | `backup_id` | Non-empty identifier with no path separators; matches the filename |
 | `created_at` | UTC RFC 3339 timestamp for generated backups |
 | `source` | Original absolute source path |
@@ -39,7 +39,6 @@ must match `entries_created`. JSON path strings require UTF-8.
 The first selected path for a given `(st_dev, st_ino)` of a non-directory entry
 stores its original kind and attributes. Each alias stores the same attributes and
 references that path directly. The restored aliases share the original's inode.
-Version 9 accepts `File`, `Directory`, and `Symlink` entries.
 
 Restore compares the decoded archive headers with this manifest before writing
 each entry. Files are created exclusively in an existing empty destination outside

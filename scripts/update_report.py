@@ -608,8 +608,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "仓库只保存自包含的 <backup_id>.bak；编码参数、文件清单、Unix 元数据、"
         "统计和 SHA-256 均在文件内。"
         "流式压缩加密完成后追加明文元数据与校验尾部，同步临时文件，再以不可覆盖的硬链接发布并同步目录。"
-        "作业库使用 schema v5。新建备份使用 v10，同一仓库中的 v9 备份可列出和恢复。"
-        "v8 及更早格式使用对应版本的程序和仓库数据库。",
+        "作业库使用 schema v5，备份使用 v10。",
     )
     _paragraph(
         document,
@@ -940,7 +939,7 @@ def _populate_system_design(
     for boundary in (
         "一个 bak 进程；HTTP、调度器、worker 和阻塞文件操作通过 Rust 调用与 Tokio 协作。",
         "API 经 JobManager 门面访问业务，内部模块按职责封装。",
-        "新备份使用 v10，仓库兼容 v9，作业库使用 schema v5。",
+        "备份使用 v10，作业库使用 schema v5。",
         "仓库保存自包含文件；文件发布后提交作业终态，启动时校验并对账中断任务。",
         "Web 控制台提供备份、恢复与定时计划操作，内容编码由备份参数选择。",
     ):
