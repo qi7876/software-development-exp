@@ -65,6 +65,8 @@ fn command_structure_and_help() -> TestResult {
     let fixture = BackgroundServer::new()?;
     for args in [
         vec!["help"],
+        vec!["--help"],
+        vec!["-h"],
         vec!["help", "server"],
         vec!["help", "server", "start"],
         vec!["help", "completions"],
@@ -77,7 +79,6 @@ fn command_structure_and_help() -> TestResult {
     }
     for args in [
         vec![],
-        vec!["--help"],
         vec!["--version"],
         vec!["-d", "."],
         vec!["server", "start"],
@@ -87,8 +88,8 @@ fn command_structure_and_help() -> TestResult {
     ] {
         assert!(!fixture.command(&args)?.status.success());
     }
-    let help = fixture.command(&["help"])?;
-    assert!(!String::from_utf8_lossy(&help.stdout).contains("Options:"));
+    let help = fixture.command(&["--help"])?;
+    assert!(String::from_utf8_lossy(&help.stdout).contains("--help"));
     Ok(())
 }
 

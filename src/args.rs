@@ -19,18 +19,8 @@ pub(crate) enum Action {
     FishCompletions,
 }
 
-fn subcommand(name: &'static str) -> Command {
-    Command::new(name).arg(
-        Arg::new("help")
-            .short('h')
-            .long("help")
-            .help("Print help")
-            .action(ArgAction::Help),
-    )
-}
-
 fn command(include_background_child: bool) -> Command {
-    let mut start = subcommand("start")
+    let mut start = Command::new("start")
         .about("Start the server in the background")
         .arg(
             Arg::new("working_directory")
@@ -59,17 +49,16 @@ fn command(include_background_child: bool) -> Command {
     }
 
     Command::new("bak")
-        .disable_help_flag(true)
         .subcommand_required(true)
-        .subcommand(subcommand("version").about("Print the version"))
+        .subcommand(Command::new("version").about("Print the version"))
         .subcommand(
-            subcommand("completions")
+            Command::new("completions")
                 .about("Generate a shell completion script")
                 .subcommand_required(true)
-                .subcommand(subcommand("fish").about("Generate Fish completions")),
+                .subcommand(Command::new("fish").about("Generate Fish completions")),
         )
         .subcommand(
-            subcommand("keygen")
+            Command::new("keygen")
                 .about("Generate an encryption key")
                 .arg(
                     Arg::new("output")
@@ -81,12 +70,14 @@ fn command(include_background_child: bool) -> Command {
                 ),
         )
         .subcommand(
-            subcommand("server")
+            Command::new("server")
                 .about("Manage the server")
                 .subcommand_required(true)
                 .subcommand(start)
-                .subcommand(subcommand("status").about("Show the current user's background server"))
-                .subcommand(subcommand("stop").about("Stop the background server gracefully")),
+                .subcommand(
+                    Command::new("status").about("Show the current user's background server"),
+                )
+                .subcommand(Command::new("stop").about("Stop the background server gracefully")),
         )
 }
 
@@ -153,7 +144,6 @@ mod tests {
     #[test]
     fn options_belong_to_commands() {
         for args in [
-            vec!["bak", "--help"],
             vec!["bak", "--version"],
             vec!["bak", "-d", "."],
             vec!["bak", "server", "start"],
@@ -169,12 +159,14 @@ mod tests {
         ] {
             assert!(command(true).try_get_matches_from(args).is_ok());
         }
-        assert_eq!(
-            command(true)
-                .try_get_matches_from(["bak", "help"])
-                .err()
-                .map(|e| e.kind()),
-            Some(clap::error::ErrorKind::DisplayHelp)
-        );
+        for help in ["help", "--help", "-h"] {
+            assert_eq!(
+                command(true)
+                    .try_get_matches_from(["bak", help])
+                    .err()
+                    .map(|error| error.kind()),
+                Some(clap::error::ErrorKind::DisplayHelp)
+            );
+        }
     }
 }
