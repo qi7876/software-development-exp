@@ -6,29 +6,29 @@
   font-size: 14px;
   line-height: 1.5;
 
-  --bg: #f4f6fa;
+  --bg: #fafafa;
   --surface: #fff;
-  --surface-muted: #eef2f8;
-  --text: #19253a;
-  --muted: #526179;
-  --border: #dce4ef;
-  --border-strong: #7f90a8;
-  --accent: #2453c7;
-  --accent-hover: #1c419e;
-  --accent-soft: #edf3ff;
-  --accent-text: #2149ad;
-  --accent-border: #bacdfa;
+  --surface-muted: #f5f5f5;
+  --text: #171717;
+  --muted: #737373;
+  --border: #e5e5e5;
+  --border-strong: #a3a3a3;
+  --accent: #262626;
+  --accent-hover: #000;
+  --accent-soft: #f5f5f5;
+  --accent-text: #171717;
+  --accent-border: #d4d4d4;
   --on-accent: #fff;
-  --danger: #a12c41;
-  --danger-soft: #fdf0f2;
-  --danger-border: #efbac4;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
+  --danger-border: #fca5a5;
   --on-danger: #fff;
-  --success: #18644e;
-  --success-soft: #e8f7ef;
-  --shadow: 0 1px 2px rgb(22 39 67 / 5%);
-  --shadow-dialog: 0 20px 60px rgb(15 27 46 / 25%);
-  --radius: 8px;
-  --radius-panel: 14px;
+  --success: #16a34a;
+  --success-soft: #f0fdf4;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-dialog: 0 12px 40px rgb(0 0 0 / 0.12);
+  --radius: 6px;
+  --radius-panel: 8px;
   --sidebar-width: 220px;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
@@ -38,27 +38,27 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #101827;
-    --surface: #192437;
-    --surface-muted: #243149;
-    --text: #edf2fb;
-    --muted: #b0bdd2;
-    --border: #32425a;
-    --border-strong: #7185a2;
-    --accent: #9cb8ff;
-    --accent-hover: #bfd0ff;
-    --accent-soft: #23365e;
-    --accent-text: #c4d4ff;
-    --accent-border: #455e92;
-    --on-accent: #142547;
-    --danger: #ffabb7;
-    --danger-soft: #41283a;
-    --danger-border: #784359;
-    --on-danger: #411827;
-    --success: #91dbb9;
-    --success-soft: #203c38;
-    --shadow: 0 1px 2px rgb(0 0 0 / 15%);
-    --shadow-dialog: 0 20px 60px rgb(0 0 0 / 45%);
+    --bg: #0a0a0a;
+    --surface: #171717;
+    --surface-muted: #262626;
+    --text: #fafafa;
+    --muted: #a3a3a3;
+    --border: #262626;
+    --border-strong: #525252;
+    --accent: #fafafa;
+    --accent-hover: #fff;
+    --accent-soft: #262626;
+    --accent-text: #fafafa;
+    --accent-border: #404040;
+    --on-accent: #0a0a0a;
+    --danger: #ef4444;
+    --danger-soft: #3f1515;
+    --danger-border: #7f1d1d;
+    --on-danger: #fff;
+    --success: #22c55e;
+    --success-soft: #14532d;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-dialog: 0 12px 40px rgb(0 0 0 / 0.6);
   }
 }
 * {
@@ -98,13 +98,14 @@ h1 {
   font-size: clamp(25px, 3vw, 32px);
   line-height: 1.2;
   font-weight: 700;
-  letter-spacing: -0.035em;
+  letter-spacing: -0.04em;
 }
 h2 {
   font-size: 16px;
   line-height: 1.5;
   font-weight: 600;
   margin-bottom: 12px;
+  letter-spacing: -0.01em;
 }
 h1:focus {
   outline: none;
@@ -117,9 +118,15 @@ textarea {
   display: block;
   width: 100%;
   min-width: 0;
-  padding: 0 10px;
-  border: 1px solid var(--border-strong);
+  padding: 0 12px;
+  border: 1px solid var(--border);
   background: var(--surface);
+  transition: border-color 0.15s ease;
+}
+input:not([type="range"]):focus,
+select:focus,
+textarea:focus {
+  border-color: var(--border-strong);
 }
 input:not([type="range"]),
 select {
@@ -192,16 +199,23 @@ fieldset:disabled {
 }
 button {
   min-height: 38px;
-  padding: 6px 14px;
+  padding: 6px 16px;
   border: 1px solid var(--border);
   background: var(--surface);
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
+  transition: all 0.15s ease;
 }
 button:hover:not(:disabled) {
   border-color: var(--border-strong);
   background: var(--surface-muted);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.05);
+}
+button:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
 }
 button:disabled {
   color: var(--muted);
@@ -216,6 +230,12 @@ button.primary {
 button.primary:hover:not(:disabled) {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgb(0 0 0 / 0.15);
+}
+button.primary:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.1);
 }
 button.primary:disabled {
   color: var(--muted);
@@ -262,9 +282,13 @@ button.icon-button {
   letter-spacing: -0.06em;
   line-height: 1;
   text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+.brand:hover {
+  opacity: 0.7;
 }
 .brand span {
-  color: var(--accent-text);
+  color: var(--muted);
 }
 .sidebar nav {
   display: grid;
@@ -279,15 +303,16 @@ button.icon-button {
   color: var(--muted);
   font-weight: 500;
   text-decoration: none;
+  transition: all 0.15s ease;
 }
 .sidebar nav a:hover {
   color: var(--text);
   background: var(--surface-muted);
 }
 .sidebar nav a[aria-current="page"] {
-  background: var(--accent-soft);
-  color: var(--accent-text);
-  font-weight: 650;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
 }
 .connection-panel {
   margin-top: auto;
@@ -309,6 +334,7 @@ button.icon-button {
   flex-shrink: 0;
   border: 1.5px solid var(--muted);
   border-radius: 50%;
+  transition: all 0.3s ease;
 }
 .connection-status[data-state="connected"] .connection-indicator {
   border-color: var(--success);
@@ -496,6 +522,7 @@ body:has(#connection-status[data-state="connected"]) .connect-notice {
 }
 .data-table tbody tr:hover {
   background: var(--surface-muted);
+  transition: background 0.15s ease;
 }
 .data-table th {
   background: var(--surface-muted);
@@ -596,13 +623,15 @@ body:has(#connection-status[data-state="connected"]) .connect-notice {
 .badge {
   display: inline-flex;
   align-items: center;
-  min-height: 23px;
-  padding-inline: 9px;
-  border-radius: 999px;
+  min-height: 22px;
+  padding-inline: 10px;
+  border-radius: 4px;
   color: var(--muted);
   background: var(--surface-muted);
-  font-size: 12px;
-  font-weight: 650;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 .badge.running {
   color: var(--accent-text);
