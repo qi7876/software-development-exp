@@ -371,7 +371,7 @@ def _draw_workflow(path: Path) -> None:
         "Browser / API\n202 + job ID",
         "Durable FIFO\njob queue",
         "Filter / encode\nZstd / LZ77 / AEAD",
-        "Sync + publish\nSelf-contained v9",
+        "Sync + publish\nSelf-contained v10",
         "List published\nbackups",
         "Decode / verify\nUnix metadata",
     )
@@ -406,7 +406,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "bak 是面向个人用户的本地文件备份软件。当前提供全量备份、已发布备份列表和完整恢复，"
-        "支持筛选、Unix 元数据、符号链接、可选 Zstd/LZ77 压缩和 "
+        "支持文件类型和元数据筛选、Unix 条目与硬链接、可选 Zstd/LZ77 压缩和 "
         "XChaCha20-Poly1305 / AES-256-GCM 内容加密，"
         "通过认证流、原始大小与 SHA-256 校验验证恢复结果，并以持久化作业提供可查询状态。",
     )
@@ -426,15 +426,18 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         anchor,
         ("项目", "当前条件"),
         (
-            (
-                "平台",
-                "程序采用 Rust；备份与恢复执行当前支持 Unix，"
-                "实际验证平台为 macOS。非 Unix 操作返回 501。",
-            ),
+            ("平台", "Linux 和 macOS。"),
             ("存储", "已有源、仓库和恢复目标目录；SQLite 使用本地文件系统。"),
             ("部署", "同一工作目录只运行一个服务；后台管理需 Unix，WebUI 从外部目录加载。"),
-            ("客户端", "独立静态 Web 控制台、curl/HTTP 自动化；CLI 管理服务与生成密钥。"),
-            ("数据范围", "普通文件、空目录、Unix 属性和符号链接；特殊文件跳过并统计。"),
+            (
+                "客户端",
+                "静态 Web 控制台与 HTTP 客户端执行备份和恢复。CLI 管理服务、生成密钥和补全脚本。",
+            ),
+            (
+                "数据范围",
+                "普通文件、目录、符号链接、FIFO、字符和块设备。"
+                "保留硬链接，跳过并统计 Unix 套接字。",
+            ),
         ),
         (2.8, 11.2),
     )
@@ -549,7 +552,8 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         anchor,
         ("参数或字段", "说明"),
         (
-            ("bak help；bak version", "通过子命令打印帮助或版本；根命令不接受选项。"),
+            ("bak --help / bak version", "显示帮助或版本。"),
+            ("bak completions <bash|fish|zsh>", "生成指定 shell 的补全脚本。"),
             ("bak server start -d <PATH>", "指定已有工作目录并后台启动；--foreground 可前台运行。"),
             ("bak server status / stop", "查看当前用户的后台实例；停止时等待活动作业完成。"),
             ("listen", "IP:port，例如 127.0.0.1:8080；配置仅在启动时读取。"),
@@ -604,14 +608,15 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "仓库只保存自包含的 <backup_id>.bak；编码参数、文件清单、Unix 元数据、"
         "统计和 SHA-256 均在文件内。"
         "流式压缩加密完成后追加明文元数据与校验尾部，同步临时文件，再以不可覆盖的硬链接发布并同步目录。"
-        "作业库 schema v5 保持不变，新备份格式 v9 使用新仓库，旧仓库及数据库保留并由旧版读取。",
+        "作业库使用 schema v5。新建备份使用 v10，同一仓库中的 v9 备份可列出和恢复。"
+        "v8 及更早格式使用对应版本的程序和仓库数据库。",
     )
     _paragraph(
         document,
         anchor,
         "恢复要求已有空目标且不与仓库重叠，预先校验全部条目路径，再以 "
         "create_new 写入并自动解密/解压，验证最终认证块、原文大小和 SHA-256，"
-        "重建符号链接、应用 Unix 元数据并同步。"
+        "重建链接和特殊条目、应用 Unix 元数据并同步。恢复设备节点需要相应权限和文件系统支持。"
         "正常关闭停止接收请求与领取作业，完成活动操作并留下 "
         "queued 作业。重启按持久化任务 ID 对账中断备份，完整输出补记成功，无法确认则标记失败；"
         "中断恢复保留输出且不重放，再继续 queued 作业。"
@@ -648,11 +653,10 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        "筛选使用严格目录剪枝：相对路径、UID/GID、四位八进制权限正"
-        "则和访问/修改时间条件共同作用于文件、目录与符号链接。"
-        "字段 AND、包含 OR、排除优先，时间起点含而终点不含。"
-        "祖先目录不匹配则不检查其后代；规则在 worker 中编译，"
-        "202 后仍可能失败。",
+        "筛选按文件类型、相对路径、UID/GID、四位八进制权限与访问和修改时间组合。"
+        "字段取交集，同字段的包含规则取并集，排除优先。时间范围从起点起算，到终点前结束。"
+        "目录未通过路径或元数据规则时剪除子树。取消目录类型后仍保留所选条目所需的父目录。"
+        "worker 在执行时编译正则并校验时间范围。",
     )
     _paragraph(
         document,
@@ -719,8 +723,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "Scheduled backups 页面查看全部启用/停用计划，Back up now 按服务端配置立即入队；"
         "立即运行不改变 Cron 游标，同计划活动任务返回 409；编辑仍需修改配置后重启。"
         "调度器与 HTTP、worker 共同受监督；调度失败使服务失败退出，"
-        "正常关闭停止新增任务并等待活动操作，已提交 queued 作业留给重启。"
-        "已有 schema-v5 工作目录可继续使用；仓库采用自包含 v9，旧仓库由旧版读取。",
+        "正常关闭停止新增任务并等待活动操作，已提交 queued 作业留给重启。",
     )
     _heading(document, anchor, "4. 非功能约束")
     _table(
@@ -937,8 +940,7 @@ def _populate_system_design(
     for boundary in (
         "一个 bak 进程；HTTP、调度器、worker 和阻塞文件操作通过 Rust 调用与 Tokio 协作。",
         "API 经 JobManager 门面访问业务，内部模块按职责封装。",
-        "自包含备份格式 v9、作业库 v5；"
-        "支持过滤与可选编码，旧仓库由对应旧版程序读取。",
+        "新备份使用 v10，仓库兼容 v9，作业库使用 schema v5。",
         "仓库保存自包含文件；文件发布后提交作业终态，启动时校验并对账中断任务。",
         "Web 控制台提供备份、恢复与定时计划操作，内容编码由备份参数选择。",
     ):
@@ -1065,14 +1067,13 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
         _paragraph(
             document,
             anchor,
-            f"当前记录日期：{current['recorded_at']}；被测代码提交：{current['production_revision']}；"
-            "详见 current-verification.json。"
-            "本轮执行功能回归和文档检查。",
+            f"记录日期为 {current['recorded_at']}，对应代码提交 {current['production_revision']}。"
+            "详见 current-verification.json。",
         )
         _table(
             document,
             anchor,
-            ("检查", "当前结果"),
+            ("检查", "结果"),
             ((row["command"], row["result"]) for row in current.get("checks", [])),
             (8.0, 6.0),
         )

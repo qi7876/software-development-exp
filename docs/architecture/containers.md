@@ -1,18 +1,17 @@
 # C2 Containers
 
-```text
-Browser console / scripts
-          |
-          | HTTP + Bearer authentication
-          v
-     axum HTTP service <------> jobs.sqlite3
-          |                         ^
-          | wake                    | claim / complete
-          v                         |
-     Tokio job worker --------------+
-          |
-          v
-     Source, .bak repository and restore destination
+```mermaid
+flowchart TD
+    Client["Browser console / scripts"] -->|HTTP with Bearer key| API
+    subgraph Service["bak service"]
+        API["axum HTTP API"] -->|Wake worker| Worker["Tokio job worker"]
+        Scheduler["Cron scheduler"] -->|Wake worker| Worker
+    end
+    API -->|Submit and read jobs| DB[("jobs.sqlite3")]
+    Scheduler -->|Track runs and submit jobs| DB
+    Worker -->|Claim jobs and record outcomes| DB
+    Worker --> Files["Source, .bak repository and restore destination"]
+    API -->|List backups| Files
 ```
 
 ## Service and console
@@ -51,8 +50,10 @@ per-plan cursors in SQLite and queues work through the same job manager. See
 ## Lifecycle
 
 The managed launcher waits for the child to report readiness on a local Unix
-socket. A per-user lock guards the background instance and a working-directory
-lock guards the task database. The child appends output to `server.log`.
+socket. The socket is `$XDG_STATE_HOME/bak/server.sock` and defaults to
+`$HOME/.local/state/bak/server.sock` when `XDG_STATE_HOME` is unset or empty.
+A per-user lock guards the background instance and a working-directory lock
+guards the task database. The child appends output to `server.log`.
 
 Startup reconciles interrupted jobs before serving requests. Ctrl-C, SIGTERM,
 and `server stop` stop new admission and claims, finish the active job, and
