@@ -25,6 +25,7 @@ fn subcommand(name: &'static str) -> Command {
 
 fn command() -> Command {
     Command::new("bak")
+        .disable_help_flag(true)
         .subcommand_required(true)
         .subcommand(subcommand("version").about("Print the version"))
         .subcommand(
