@@ -507,12 +507,15 @@ async fn occupied_destination_is_preserved(
 async fn filters_survive_restart_and_control_backup_and_restore_through_http() -> TestResult {
     let mut server = TestServer::start().await?;
     std::fs::create_dir(server.path("source/docs"))?;
+    std::fs::create_dir(server.path("source/docs/empty"))?;
     std::fs::create_dir(server.path("source/blocked"))?;
     std::fs::write(server.path("source/docs/keep.txt"), b"selected")?;
     std::fs::write(server.path("source/docs/drop.tmp"), b"excluded")?;
+    std::os::unix::fs::symlink("keep.txt", server.path("source/docs/link"))?;
     std::fs::write(server.path("source/blocked/unvisited.txt"), b"pruned")?;
     std::fs::write(server.path("source/root.bin"), b"not selected")?;
     let mut filter = unfiltered();
+    filter["file_types"] = json!(["regular_file", "fifo"]);
     filter["relative_path"] = json!({"include": ["^docs(/|$)"], "exclude": ["\\.tmp$"]});
     let id = server
         .submit(

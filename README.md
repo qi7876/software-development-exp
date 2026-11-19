@@ -62,6 +62,8 @@ Generate a key with `bak keygen --output /secure/backup-current.key` and add its
 
 ### Filters
 
+Under **File types**, select any combination of regular files, directories, symbolic links, FIFOs, character devices, and block devices. All six are selected by default. When directories are deselected, the backup still includes the parents needed to restore selected entries. Hard links follow their underlying file type.
+
 The **Filters** form matches relative path, UID, GID, mode, modification time, and access time. Enter one regular expression per line. Fields combine with AND, includes within a field combine with OR, and exclusions take precedence. Paths are relative to the source, UID/GID are decimal, and mode uses four-digit octal such as `0644`.
 
 Each hard-link path is evaluated separately. A rejected directory prunes its subtree, so include patterns must allow ancestors. To select `.txt` files directly inside `docs`, include both `^docs$` and `^docs/[^/]+\.txt$`. The console interprets date/time fields in the browser timezone. Start times are inclusive and end times are exclusive. Invalid filters appear as failed tasks.
@@ -116,7 +118,8 @@ Request errors return `{"error":{"code":400,"message":"..."}}` with the matching
 
 - Set `compression` to `{"algorithm":"zstd","level":3}` or `{"algorithm":"lz77","window_kib":64,"search_depth":32}`. Omit the field or use null for uncompressed data.
 - Set `encryption` to `{"algorithm":"xchacha20-poly1305","key_id":"current"}` or use `aes-256-gcm` as the algorithm. Omit the field or use null to store plaintext data.
-- Supply all six filter fields shown in the example. Regex fields contain `include` and `exclude` arrays. Empty arrays leave the field unrestricted. Time fields accept optional RFC 3339 `from` and `before` bounds. The worker validates regexes and time bounds during execution.
+- Supply the six filter fields shown in the example. Regex fields contain `include` and `exclude` arrays. Empty regex arrays leave the field unrestricted. Time fields accept optional RFC 3339 `from` and `before` bounds. The worker validates regexes and time bounds during execution.
+- Use the optional `filter.file_types` array with `regular_file`, `directory`, `symbolic_link`, `fifo`, `character_device`, and `block_device`. Omit it or use `null` to select all types. An empty array produces a backup with root metadata alone.
 - Scheduled jobs include `schedule_id` and a `scheduled_for` timestamp in UTC Unix milliseconds. A busy plan returns HTTP 409, an unknown plan returns 404, and an unavailable key returns 400.
 
 ## Repositories and recovery

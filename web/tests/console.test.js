@@ -8,6 +8,7 @@ import {
   readFile,
   readdir,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -41,8 +42,11 @@ async function refreshUntil(page, predicate, argument) {
 }
 
 async function clearFilterInputs(page) {
-  for (const input of await page.locator("#backup-filter input, #backup-filter textarea").all()) {
+  for (const input of await page.locator('#backup-filter input:not([type="checkbox"]), #backup-filter textarea').all()) {
     await input.fill("");
+  }
+  for (const checkbox of await page.getByRole("group", { name: "File types" }).getByRole("checkbox").all()) {
+    await checkbox.check();
   }
 }
 
@@ -710,8 +714,10 @@ test(
   async (t) => {
     const { directory, url } = await startServer(t);
     await mkdir(join(directory, "source/docs/private"), { recursive: true });
+    await mkdir(join(directory, "source/docs/empty"));
     await writeFile(join(directory, "source/docs/keep.txt"), "keep");
     await writeFile(join(directory, "source/docs/drop.tmp"), "drop");
+    await symlink("keep.txt", join(directory, "source/docs/link"));
     await writeFile(
       join(directory, "source/docs/private/secret.txt"),
       "secret",
@@ -737,6 +743,10 @@ test(
     await page.locator("#filter-relative_path-include").waitFor();
     await page.locator("#source").fill("source");
     await page.locator("#backup-repository").fill("repo with space");
+    const fileTypes = page.getByRole("group", { name: "File types" });
+    assert.equal(await fileTypes.locator("input:checked").count(), 6);
+    await fileTypes.getByRole("checkbox", { name: "Directories" }).uncheck();
+    await fileTypes.getByRole("checkbox", { name: "Symbolic links" }).uncheck();
     await page
       .locator("#filter-relative_path-include")
       .fill("^docs(/|$)\n\n  ");
@@ -754,7 +764,7 @@ test(
     await page.locator("#filter-atime-before").fill("2100-01-01T08:00");
     assert.equal(
       await page.locator("#filter-summary").textContent(),
-      "Filters · 6",
+      "Filters · 7",
     );
     assert.equal(
       await page.evaluate(
@@ -776,6 +786,8 @@ test(
     );
     await page.locator('nav a[href="#repository"]').click();
     await page.locator('nav a[href="#backup"]').click();
+    await fileTypes.waitFor();
+    assert.equal(await fileTypes.locator("input:checked").count(), 4);
     assert.equal(
       await page.locator("#filter-mode-include").inputValue(),
       "^[0-7]{4}$",
@@ -786,6 +798,7 @@ test(
     await page.locator("#backup-button").click();
     const payload = (await requestPromise).postDataJSON();
     assert.deepEqual(payload.filter, {
+      file_types: ["regular_file", "fifo", "character_device", "block_device"],
       relative_path: {
         include: ["^docs(/|$)"],
         exclude: [String.raw`\.tmp$`, "^docs/private(/|$)"],
@@ -823,7 +836,7 @@ test(
     );
     assert.deepEqual(
       await page
-        .locator("#backup-filter input, #backup-filter textarea")
+        .locator('#backup-filter input:not([type="checkbox"]), #backup-filter textarea')
         .evaluateAll((inputs) => inputs.map((input) => input.value)),
       Array(12).fill(""),
     );
@@ -881,7 +894,10 @@ test(
       await page.locator(".job-error").first().textContent(),
       /400.*regex/,
     );
+    await page.locator('nav a[href="#backup"]').click();
+    await fileTypes.getByRole("checkbox", { name: "Directories" }).uncheck();
     await deleteCurrentConnection(page);
+    assert.equal(await page.locator('input[name="file_types"]:checked').count(), 6);
     assert.equal(
       await page.locator("#filter-relative_path-include").inputValue(),
       "",
@@ -920,7 +936,7 @@ test(
       await page.locator("#encryption-key option").allTextContents(),
       ["Select a server key", "current", "previous"],
     );
-    assert.equal(await page.locator('input[type="checkbox"]').count(), 0);
+    assert.equal(await page.locator('.backup-options input[type="checkbox"]').count(), 0);
     assert.deepEqual(
       await page.locator("#compression-algorithm option").allTextContents(),
       ["None", "Zstd", "LZ77"],

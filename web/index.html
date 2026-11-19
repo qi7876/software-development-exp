@@ -205,6 +205,20 @@
             >
               <h2 id="filter-summary">Filters</h2>
               <div class="filter-content">
+                <fieldset class="filter-row" aria-describedby="file-types-help">
+                  <legend>File types</legend>
+                  <div class="file-type-options">
+                    <label><input type="checkbox" name="file_types" value="regular_file" checked />Regular files</label>
+                    <label><input type="checkbox" name="file_types" value="directory" checked />Directories</label>
+                    <label><input type="checkbox" name="file_types" value="symbolic_link" checked />Symbolic links</label>
+                    <label><input type="checkbox" name="file_types" value="fifo" checked />FIFOs (named pipes)</label>
+                    <label><input type="checkbox" name="file_types" value="character_device" checked />Character devices</label>
+                    <label><input type="checkbox" name="file_types" value="block_device" checked />Block devices</label>
+                  </div>
+                  <p id="file-types-help" class="field-help">
+                    Parent directories are included when needed to restore selected entries.
+                  </p>
+                </fieldset>
                 <fieldset class="filter-row">
                   <legend>Relative path</legend>
                   <div class="filter-columns">

@@ -623,7 +623,10 @@ $("encryption-algorithm").addEventListener("change", updateEncodingOptions);
 const regexFilterFields = ["relative_path", "uid", "gid", "mode"];
 const timeFilterFields = ["mtime", "atime"];
 const filterInputs = [
-  ...$("backup-filter").querySelectorAll("input, textarea"),
+  ...$("backup-filter").querySelectorAll('input:not([type="checkbox"]), textarea'),
+];
+const fileTypeInputs = [
+  ...$("backup-filter").querySelectorAll('input[name="file_types"]'),
 ];
 
 function patterns(value) {
@@ -636,7 +639,7 @@ function updateFilterSummary() {
       (input) =>
         input.id.startsWith(`filter-${field}-`) && input.value.trim() !== "",
     ),
-  ).length;
+  ).length + Number(fileTypeInputs.some((input) => !input.checked));
   $("filter-summary").textContent = count
     ? `Filters · ${count}`
     : "Filters";
@@ -646,11 +649,18 @@ function clearFilter() {
   filterInputs.forEach((input) => {
     input.value = "";
   });
+  fileTypeInputs.forEach((input) => {
+    input.checked = input.defaultChecked;
+  });
   updateFilterSummary();
 }
 
 function backupFilter() {
   const filter = {};
+  const fileTypes = fileTypeInputs.filter((input) => input.checked);
+  if (fileTypes.length !== fileTypeInputs.length) {
+    filter.file_types = fileTypes.map((input) => input.value);
+  }
   for (const field of regexFilterFields) {
     filter[field] = {};
     for (const list of ["include", "exclude"])

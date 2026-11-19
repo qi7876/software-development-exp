@@ -1,7 +1,7 @@
 mod filter;
 
-use filter::CompiledFilter;
 pub(crate) use filter::Filter;
+use filter::{CompiledFilter, FileType};
 
 use super::{
     JobError, archive,
@@ -80,38 +80,45 @@ fn walk_directory(
             continue;
         }
 
+        let file_type = FileType::from_filesystem(file_type).ok_or_else(|| {
+            JobError::internal(format!(
+                "unrecognized file type for {}",
+                absolute_file_path.display()
+            ))
+        })?;
+        let selected = compiled_filter.includes_type(file_type);
+        let directory = file_type == FileType::Directory;
+        if !directory && !selected {
+            backup_stats.skipped_filtered += 1;
+            continue;
+        }
+
         if !compiled_filter.matches(&relative_file_path, &metadata)? {
             backup_stats.skipped_filtered += 1;
             continue;
         }
 
-        let kind = if file_type.is_dir() {
-            BackupEntryKind::Directory
-        } else if file_type.is_file() {
-            BackupEntryKind::File
-        } else if file_type.is_symlink() {
-            BackupEntryKind::Symlink
-        } else if file_type.is_fifo() {
-            BackupEntryKind::MetadataOnly(ManifestEntryKind::Fifo)
-        } else if file_type.is_char_device() || file_type.is_block_device() {
-            let (major, minor) = device_numbers(stat.rdev())?;
-            BackupEntryKind::MetadataOnly(if file_type.is_char_device() {
-                ManifestEntryKind::CharacterDevice { major, minor }
-            } else {
-                ManifestEntryKind::BlockDevice { major, minor }
-            })
-        } else {
-            return Err(JobError::internal(format!(
-                "unrecognized file type for {}",
-                absolute_file_path.display()
-            )));
+        let kind = match file_type {
+            FileType::Directory => BackupEntryKind::Directory,
+            FileType::RegularFile => BackupEntryKind::File,
+            FileType::SymbolicLink => BackupEntryKind::Symlink,
+            FileType::Fifo => BackupEntryKind::MetadataOnly(ManifestEntryKind::Fifo),
+            FileType::CharacterDevice | FileType::BlockDevice => {
+                let (major, minor) = device_numbers(stat.rdev())?;
+                BackupEntryKind::MetadataOnly(if file_type == FileType::CharacterDevice {
+                    ManifestEntryKind::CharacterDevice { major, minor }
+                } else {
+                    ManifestEntryKind::BlockDevice { major, minor }
+                })
+            }
         };
-        let (kind, metadata) = if file_type.is_dir() {
+        let entry_index = backup_entries.len();
+        let (kind, metadata) = if directory {
             (kind, metadata)
         } else {
             let index = *original_entries
                 .entry((stat.dev(), stat.ino()))
-                .or_insert(backup_entries.len());
+                .or_insert(entry_index);
             match backup_entries.get(index) {
                 Some(original) => (
                     BackupEntryKind::MetadataOnly(ManifestEntryKind::HardLink {
@@ -122,13 +129,12 @@ fn walk_directory(
                 None => (kind, metadata),
             }
         };
-        backup_stats.entries_created += 1;
         backup_entries.push(BackupEntry {
             relative_path: relative_file_path,
             metadata,
             kind,
         });
-        if file_type.is_dir() {
+        if directory {
             walk_directory(
                 absolute_root,
                 &absolute_file_path,
@@ -137,7 +143,13 @@ fn walk_directory(
                 backup_entries,
                 original_entries,
             )?;
+            if !selected && backup_entries.len() == entry_index + 1 {
+                backup_entries.pop();
+                backup_stats.skipped_filtered += 1;
+                continue;
+            }
         }
+        backup_stats.entries_created += 1;
     }
     Ok(())
 }
@@ -769,6 +781,7 @@ mod tests {
     fn existing_character_device_is_backed_up_as_metadata() -> Result<(), Box<dyn Error>> {
         let repository = TestDirectory::new()?;
         let mut config = crate::test_support::unfiltered_config();
+        config["file_types"] = serde_json::json!(["character_device"]);
         config["relative_path"]["include"] = serde_json::json!(["^null$"]);
         let filter = serde_json::from_value(config)?;
         run(Path::new("/dev"), repository.path(), &filter, "device")?;
@@ -787,6 +800,70 @@ mod tests {
             &archive::path(repository.path(), "device"),
             &manifest.entries,
         )?;
+        Ok(())
+    }
+
+    #[test]
+    fn file_type_filter_keeps_selected_entries_and_their_parent_paths() -> Result<(), Box<dyn Error>>
+    {
+        let fixture = TestDirectory::new()?;
+        let source = fixture.path();
+        std::fs::create_dir_all(source.join("nested/empty"))?;
+        std::fs::create_dir(source.join("unselected"))?;
+        std::fs::write(source.join("nested/file"), b"data")?;
+        std::fs::write(source.join("unselected/file"), b"data")?;
+        std::os::unix::fs::symlink("file", source.join("nested/link"))?;
+        nix::unistd::mkfifo(&source.join("nested/pipe"), nix::sys::stat::Mode::S_IRUSR)?;
+        std::fs::hard_link(source.join("nested/pipe"), source.join("pipe-alias"))?;
+
+        for (types, expected, skipped) in [
+            (
+                vec!["fifo", "symbolic_link"],
+                vec!["nested", "nested/link", "nested/pipe", "pipe-alias"],
+                4,
+            ),
+            (
+                vec!["directory"],
+                vec!["nested", "nested/empty", "unselected"],
+                5,
+            ),
+            (vec![], vec![], 8),
+        ] {
+            let mut config = crate::test_support::unfiltered_config();
+            config["file_types"] = serde_json::json!(types);
+            let filter: Filter = serde_json::from_value(config)?;
+            let (stats, entries) = path_traversal(source, &filter.compile()?)?;
+            let mut paths: Vec<_> = entries
+                .iter()
+                .map(|entry| entry.relative_path.as_path())
+                .collect();
+            paths.sort_unstable();
+            assert_eq!(paths, expected.iter().map(Path::new).collect::<Vec<_>>());
+            assert_eq!(stats.entries_created as usize, expected.len());
+            assert_eq!(stats.skipped_filtered, skipped);
+            if types.contains(&"fifo") {
+                assert_eq!(
+                    entries
+                        .iter()
+                        .filter(|entry| matches!(
+                            entry.kind,
+                            BackupEntryKind::MetadataOnly(ManifestEntryKind::Fifo)
+                        ))
+                        .count(),
+                    1
+                );
+                assert_eq!(
+                    entries
+                        .iter()
+                        .filter(|entry| matches!(
+                            entry.kind,
+                            BackupEntryKind::MetadataOnly(ManifestEntryKind::HardLink { .. })
+                        ))
+                        .count(),
+                    1
+                );
+            }
+        }
         Ok(())
     }
 
