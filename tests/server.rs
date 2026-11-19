@@ -55,7 +55,7 @@ fn rewrite_backup_metadata(path: &Path, update: impl FnOnce(&mut Value)) -> Test
 
 fn add_active_workload(path: &Path) -> TestResult {
     let mut bytes = vec![0; 16 * 1024 * 1024];
-    rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut bytes);
+    getrandom::fill(&mut bytes)?;
     std::fs::write(path.join("active-workload"), bytes)?;
     Ok(())
 }
@@ -955,7 +955,7 @@ async fn nine_storage_modes_keys_and_authenticated_corruption_through_http() -> 
         2
     );
     let mut random = vec![0; 3 * 128 * 1024 + 17];
-    rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut random);
+    getrandom::fill(&mut random)?;
     std::fs::write(server.path("source/random"), &random)?;
     std::fs::write(server.path("source/empty"), [])?;
     std::fs::write(server.path("source/exact"), vec![b'x'; 128 * 1024])?;

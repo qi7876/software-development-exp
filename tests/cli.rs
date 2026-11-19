@@ -247,7 +247,7 @@ async fn stop_waits_for_active_backup_and_retains_queued_work() -> TestResult {
     std::fs::create_dir(directory.join("repo"))?;
     std::fs::write(directory.join("source/file"), "backup contents")?;
     let mut workload = vec![0; 16 * 1024 * 1024];
-    rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut workload);
+    getrandom::fill(&mut workload)?;
     std::fs::write(directory.join("source/active-workload"), workload)?;
     let start = fixture.start(&directory)?;
     success(&start);
