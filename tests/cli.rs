@@ -67,6 +67,8 @@ fn command_structure_and_help() -> TestResult {
         vec!["help"],
         vec!["help", "server"],
         vec!["help", "server", "start"],
+        vec!["help", "completions"],
+        vec!["completions", "fish", "--help"],
         vec!["version"],
         vec!["server", "start", "--help"],
         vec!["keygen", "--help"],
@@ -80,11 +82,44 @@ fn command_structure_and_help() -> TestResult {
         vec!["-d", "."],
         vec!["server", "start"],
         vec!["server", "-d", "."],
+        vec!["completions"],
+        vec!["completions", "bash"],
     ] {
         assert!(!fixture.command(&args)?.status.success());
     }
     let help = fixture.command(&["help"])?;
     assert!(!String::from_utf8_lossy(&help.stdout).contains("Options:"));
+    Ok(())
+}
+
+#[test]
+fn fish_completion_script_includes_public_commands_and_options() -> TestResult {
+    let fixture = BackgroundServer::new()?;
+    let output = fixture.command(&["completions", "fish"])?;
+    success(&output);
+    assert!(output.stderr.is_empty());
+
+    let script = std::str::from_utf8(&output.stdout)?;
+    for candidate in [
+        "-a \"completions\"",
+        "-a \"fish\"",
+        "-a \"server\"",
+        "-a \"start\"",
+        "-a \"status\"",
+        "-a \"stop\"",
+        "-a \"keygen\"",
+        "-a \"version\"",
+        "-a \"help\"",
+        "-s d -l working-directory",
+        "-l foreground",
+        "-l output",
+    ] {
+        assert!(
+            script.contains(candidate),
+            "missing completion for {candidate}"
+        );
+    }
+    assert!(!script.contains("background-child"));
     Ok(())
 }
 

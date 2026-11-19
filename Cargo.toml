@@ -31,6 +31,7 @@ zeroize = "1.8"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
 chrono = { version = "0.4.45", default-features = false, features = ["now", "serde"] }
 clap = "4.6.7"
+clap_complete = "4.6.12"
 filetime = "0.2.29"
 hex = "0.4.3"
 http = "1.5.0"

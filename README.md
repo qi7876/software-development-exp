@@ -22,6 +22,19 @@ Paths refer to the selected server. Relative paths resolve from its working dire
 
 Backups preserve regular files, directories, symbolic links, FIFOs, character devices, block devices, and hard links. Each hard-linked regular-file inode contributes one payload, and restore recreates the shared inode. Unix sockets are skipped and counted. Device restoration requires permission to create nodes on the destination filesystem.
 
+### Fish completions
+
+With `bak` on your `PATH`, run `bak completions fish | source` to load completions in the current Fish session. To load them automatically in future sessions, save the script in your Fish configuration directory.
+
+```fish
+set -l fish_config ~/.config/fish
+if set -q XDG_CONFIG_HOME[1]; and test -n "$XDG_CONFIG_HOME"
+    set fish_config "$XDG_CONFIG_HOME/fish"
+end
+mkdir -p "$fish_config/completions"
+bak completions fish > "$fish_config/completions/bak.fish"
+```
+
 ## Configuration and service
 
 The directory passed to `server start -d` contains `config.json`, `jobs.sqlite3`, and the background log `server.log`. Run one service per working directory on a local filesystem. Restart the service after editing configuration.
