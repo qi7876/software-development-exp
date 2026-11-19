@@ -6,15 +6,18 @@ pub(crate) use filter::Filter;
 use super::{
     JobError, archive,
     content::{BackupOptions, Content, Keyring},
-    filesystem::{get_absolute_directory_path, paths_overlap},
+    filesystem::{device_numbers, get_absolute_directory_path, paths_overlap},
     repository::{
-        BackupStats, Manifest, ManifestEntry, ManifestEntryKind, PendingArchive, UnixMetadata,
+        BackupStats, FORMAT_VERSION, Manifest, ManifestEntry, ManifestEntryKind, PendingArchive,
+        UnixMetadata,
     },
 };
 use chrono::{SecondsFormat, Utc};
 use http::StatusCode;
 use std::{
+    collections::HashMap,
     io,
+    os::unix::fs::{FileTypeExt, MetadataExt},
     path::{Path, PathBuf},
 };
 
@@ -28,14 +31,16 @@ enum BackupEntryKind {
     File,
     Directory,
     Symlink,
+    MetadataOnly(ManifestEntryKind),
 }
 
 fn walk_directory(
     absolute_root: &Path,
     absolute_current: &Path,
     compiled_filter: &CompiledFilter,
-    backip_stats: &mut BackupStats,
+    backup_stats: &mut BackupStats,
     backup_entries: &mut Vec<BackupEntry>,
+    original_entries: &mut HashMap<(u64, u64), usize>,
 ) -> Result<(), JobError> {
     let source_dir = std::fs::read_dir(absolute_current).map_err(|error| {
         JobError::internal(format!(
@@ -68,54 +73,70 @@ fn walk_directory(
             })?
             .to_path_buf();
 
-        let file_type = file.file_type().map_err(|error| {
-            JobError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!(
-                    "failed to get file type {}: {error}",
-                    relative_file_path.display(),
-                ),
-            )
-        })?;
-        if !file_type.is_dir() && !file_type.is_file() && !file_type.is_symlink() {
-            backip_stats.skipped_unsupported += 1;
+        let (stat, metadata) = UnixMetadata::inspect(&absolute_file_path)?;
+        let file_type = stat.file_type();
+        if file_type.is_socket() {
+            backup_stats.skipped_unsupported += 1;
             continue;
         }
 
-        let metadata = UnixMetadata::read(&absolute_file_path)?;
         if !compiled_filter.matches(&relative_file_path, &metadata)? {
-            backip_stats.skipped_filtered += 1;
+            backup_stats.skipped_filtered += 1;
             continue;
         }
 
+        let kind = if file_type.is_dir() {
+            BackupEntryKind::Directory
+        } else if file_type.is_file() {
+            BackupEntryKind::File
+        } else if file_type.is_symlink() {
+            BackupEntryKind::Symlink
+        } else if file_type.is_fifo() {
+            BackupEntryKind::MetadataOnly(ManifestEntryKind::Fifo)
+        } else if file_type.is_char_device() || file_type.is_block_device() {
+            let (major, minor) = device_numbers(stat.rdev())?;
+            BackupEntryKind::MetadataOnly(if file_type.is_char_device() {
+                ManifestEntryKind::CharacterDevice { major, minor }
+            } else {
+                ManifestEntryKind::BlockDevice { major, minor }
+            })
+        } else {
+            return Err(JobError::internal(format!(
+                "unrecognized file type for {}",
+                absolute_file_path.display()
+            )));
+        };
+        let (kind, metadata) = if file_type.is_dir() {
+            (kind, metadata)
+        } else {
+            let index = *original_entries
+                .entry((stat.dev(), stat.ino()))
+                .or_insert(backup_entries.len());
+            match backup_entries.get(index) {
+                Some(original) => (
+                    BackupEntryKind::MetadataOnly(ManifestEntryKind::HardLink {
+                        target: original.relative_path.clone(),
+                    }),
+                    original.metadata.clone(),
+                ),
+                None => (kind, metadata),
+            }
+        };
+        backup_stats.entries_created += 1;
+        backup_entries.push(BackupEntry {
+            relative_path: relative_file_path,
+            metadata,
+            kind,
+        });
         if file_type.is_dir() {
-            backip_stats.entries_created += 1;
-            backup_entries.push(BackupEntry {
-                relative_path: relative_file_path,
-                metadata,
-                kind: BackupEntryKind::Directory,
-            });
             walk_directory(
                 absolute_root,
                 &absolute_file_path,
                 compiled_filter,
-                backip_stats,
+                backup_stats,
                 backup_entries,
+                original_entries,
             )?;
-        } else if file_type.is_file() {
-            backip_stats.entries_created += 1;
-            backup_entries.push(BackupEntry {
-                relative_path: relative_file_path,
-                metadata,
-                kind: BackupEntryKind::File,
-            });
-        } else if file_type.is_symlink() {
-            backip_stats.entries_created += 1;
-            backup_entries.push(BackupEntry {
-                relative_path: relative_file_path,
-                metadata,
-                kind: BackupEntryKind::Symlink,
-            });
         }
     }
     Ok(())
@@ -138,6 +159,7 @@ fn path_traversal(
         compiled_filter,
         &mut backup_stats,
         &mut backup_entries,
+        &mut HashMap::new(),
     )?;
     Ok((backup_stats, backup_entries))
 }
@@ -196,6 +218,7 @@ fn backup_all_files(
                     )
                 }
                 BackupEntryKind::Directory => (ManifestEntryKind::Directory, None),
+                BackupEntryKind::MetadataOnly(kind) => (kind, None),
                 BackupEntryKind::Symlink => (
                     ManifestEntryKind::Symlink {
                         target: std::fs::read_link(&source_path).map_err(|error| {
@@ -273,7 +296,7 @@ pub(super) fn run_with_options(
     )?;
 
     let manifest = Manifest {
-        format_version: 9,
+        format_version: FORMAT_VERSION,
         backup_id: backup_id.to_owned(),
         created_at,
         source: absolute_source_path,
@@ -532,7 +555,7 @@ mod tests {
         let manifest = Manifest::read(&repository, "backup-001")?;
         assert_eq!(manifest.backup_id, "backup-001");
         assert_eq!(manifest.source, std::fs::canonicalize(&source)?);
-        assert_eq!(manifest.format_version, 9);
+        assert_eq!(manifest.format_version, FORMAT_VERSION);
         assert!(matches!(
             manifest.compression,
             Some(super::super::content::CompressionOptions::Zstd(_))
@@ -738,6 +761,32 @@ mod tests {
         assert!(std::fs::symlink_metadata(payloads.join("keep/link")).is_err());
         assert!(!payloads.join("backups").exists());
         verify_archive(&archive::path(&repository, "filtered"), &manifest.entries)?;
+        Ok(())
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn existing_character_device_is_backed_up_as_metadata() -> Result<(), Box<dyn Error>> {
+        let repository = TestDirectory::new()?;
+        let mut config = crate::test_support::unfiltered_config();
+        config["relative_path"]["include"] = serde_json::json!(["^null$"]);
+        let filter = serde_json::from_value(config)?;
+        run(Path::new("/dev"), repository.path(), &filter, "device")?;
+        let manifest = Manifest::read(repository.path(), "device")?;
+        let stat = std::fs::symlink_metadata("/dev/null")?;
+        let (major, minor) = device_numbers(stat.rdev())?;
+        let [entry] = manifest.entries.as_slice() else {
+            return Err("expected only the selected character device".into());
+        };
+        assert_eq!(entry.relative_path, Path::new("null"));
+        assert_eq!(
+            entry.kind,
+            ManifestEntryKind::CharacterDevice { major, minor }
+        );
+        verify_archive(
+            &archive::path(repository.path(), "device"),
+            &manifest.entries,
+        )?;
         Ok(())
     }
 

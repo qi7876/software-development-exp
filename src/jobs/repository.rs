@@ -15,6 +15,8 @@ const MAGIC: &[u8; 8] = b"BAKFILE\x01";
 const FOOTER: &[u8; 8] = b"BAKEND\0\x01";
 const TRAILER_SIZE: u64 = 48;
 const MAX_METADATA_SIZE: u64 = 64 * 1024 * 1024;
+pub(super) const FORMAT_VERSION: u32 = 10;
+const LEGACY_MANIFEST_VERSION: u32 = 9;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(super) struct BackupStats {
@@ -77,13 +79,21 @@ pub(super) enum ManifestEntryKind {
     File { original_size: u64 },
     Directory,
     Symlink { target: PathBuf },
+    Fifo,
+    CharacterDevice { major: u32, minor: u32 },
+    BlockDevice { major: u32, minor: u32 },
+    HardLink { target: PathBuf },
 }
 
 impl UnixMetadata {
     #[cfg(unix)]
     pub(super) fn read(path: &Path) -> Result<Self, JobError> {
-        use std::os::unix::fs::MetadataExt;
+        Self::inspect(path).map(|(_, metadata)| metadata)
+    }
 
+    #[cfg(unix)]
+    pub(super) fn inspect(path: &Path) -> Result<(std::fs::Metadata, Self), JobError> {
+        use std::os::unix::fs::MetadataExt;
         let metadata = std::fs::symlink_metadata(path).map_err(|error| {
             JobError::internal(format!(
                 "cannot read metadata for {}: {error}",
@@ -103,7 +113,7 @@ impl UnixMetadata {
                 })
         };
 
-        Ok(Self {
+        let unix = Self {
             uid: metadata.uid(),
             gid: metadata.gid(),
             mode: metadata.mode() & 0o7777,
@@ -115,7 +125,8 @@ impl UnixMetadata {
                 seconds: metadata.mtime(),
                 nanoseconds: nanoseconds(metadata.mtime_nsec())?,
             },
-        })
+        };
+        Ok((metadata, unix))
     }
 }
 
@@ -135,7 +146,11 @@ impl Manifest {
 
     fn validate(&self) -> Result<(), JobError> {
         validate_id(&self.backup_id)?;
-        if self.format_version != 9 || self.checksum_algorithm != "sha256" {
+        if !matches!(
+            self.format_version,
+            LEGACY_MANIFEST_VERSION | FORMAT_VERSION
+        ) || self.checksum_algorithm != "sha256"
+        {
             return Err(JobError::internal(
                 "unsupported self-contained backup format or checksum algorithm",
             ));
@@ -169,7 +184,7 @@ impl Manifest {
             Ok(())
         };
         valid_metadata(&self.root_metadata)?;
-        let mut seen = BTreeMap::new();
+        let mut seen: BTreeMap<&Path, &ManifestEntry> = BTreeMap::new();
         for entry in &self.entries {
             let path = &entry.relative_path;
             if path.as_os_str().is_empty()
@@ -181,20 +196,42 @@ impl Manifest {
                 )));
             }
             if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty())
-                && seen.get(parent) != Some(&true)
+                && !seen
+                    .get(parent)
+                    .is_some_and(|parent| matches!(parent.kind, ManifestEntryKind::Directory))
             {
                 return Err(JobError::internal(format!(
                     "invalid backup entry parent: {}",
                     path.display()
                 )));
             }
-            if seen
-                .insert(
-                    path.as_path(),
-                    matches!(entry.kind, ManifestEntryKind::Directory),
+            if self.format_version == LEGACY_MANIFEST_VERSION
+                && !matches!(
+                    entry.kind,
+                    ManifestEntryKind::File { .. }
+                        | ManifestEntryKind::Directory
+                        | ManifestEntryKind::Symlink { .. }
                 )
-                .is_some()
             {
+                return Err(JobError::internal(
+                    "invalid entry kind for backup format v9",
+                ));
+            }
+            if let ManifestEntryKind::HardLink { target } = &entry.kind
+                && !seen.get(target.as_path()).is_some_and(|original| {
+                    !matches!(
+                        original.kind,
+                        ManifestEntryKind::Directory | ManifestEntryKind::HardLink { .. }
+                    ) && original.metadata == entry.metadata
+                })
+            {
+                return Err(JobError::internal(format!(
+                    "invalid hard link target {} for backup entry {}",
+                    target.display(),
+                    path.display()
+                )));
+            }
+            if seen.insert(path, entry).is_some() {
                 return Err(JobError::internal("duplicate backup entry path"));
             }
             valid_metadata(&entry.metadata)?;
@@ -474,7 +511,7 @@ mod tests {
 
     fn metadata(id: &str, time: &str) -> Manifest {
         Manifest {
-            format_version: 9,
+            format_version: FORMAT_VERSION,
             backup_id: id.into(),
             created_at: time.into(),
             source: "/source".into(),
@@ -508,6 +545,44 @@ mod tests {
         let mut pending = PendingArchive::create(repository, &manifest.backup_id)?;
         pending.output()?.write_all(b"encoded-payload")?;
         pending.publish(manifest)
+    }
+
+    #[test]
+    fn device_entries_use_headers_without_payload() -> TestResult {
+        let directory = TestDirectory::new()?;
+        let mut manifest = metadata("devices", "2026-11-16T00:00:00Z");
+        manifest.entries = [
+            (
+                "character",
+                ManifestEntryKind::CharacterDevice { major: 1, minor: 3 },
+            ),
+            (
+                "block",
+                ManifestEntryKind::BlockDevice {
+                    major: 259,
+                    minor: 65_537,
+                },
+            ),
+        ]
+        .into_iter()
+        .map(|(path, kind)| ManifestEntry {
+            relative_path: path.into(),
+            metadata: manifest.root_metadata.clone(),
+            kind,
+        })
+        .collect();
+        manifest.backup_stats.entries_created = 2;
+        let mut pending = PendingArchive::create(directory.path(), &manifest.backup_id)?;
+        let mut writer = archive::Writer::new(pending.output()?)?;
+        for entry in &manifest.entries {
+            writer.append(entry, &mut io::empty())?;
+        }
+        writer.finish()?;
+        pending.publish(&manifest)?;
+        let backup = ArchiveFile::read(directory.path(), &manifest.backup_id)?;
+        assert_eq!(backup.manifest.entries, manifest.entries);
+        backup.verify(&Keyring::default())?;
+        Ok(())
     }
 
     #[test]
