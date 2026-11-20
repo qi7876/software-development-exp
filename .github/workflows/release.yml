@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified packages to GitHub Releases
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate the release ref
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - name: Require main
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+            echo 'Run Release from main.' >&2
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read the package version
+        id: metadata
+        shell: bash
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Verify and package
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+
+  assemble:
+    name: Assemble release files
+    needs: [prepare, verify]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: bak-*
+          path: dist
+          merge-multiple: true
+      - name: Verify both packages and write checksums
+        working-directory: dist
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          packages=("bak-v$VERSION-linux-x86_64.tar.gz" "bak-v$VERSION-macos-arm64.tar.gz")
+          for package in "${packages[@]}"; do
+            tar -tzf "$package" > /dev/null
+          done
+          sha256sum "${packages[@]}" > SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: dist
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [prepare, assemble]
+    if: inputs.publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: dist
+      - name: Publish the tested commit and packages
+        working-directory: dist
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          tag="v$VERSION"
+          tag_ref=$(git ls-remote --refs --tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "refs/tags/$tag")
+          releases=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name')
+          if [[ -n "$tag_ref" ]] || grep -Fxq -- "$tag" <<< "$releases"; then
+            echo "Tag or release $tag already exists." >&2
+            exit 1
+          fi
+          sha256sum -c SHA256SUMS
+          gh release create "$tag" --target "$GITHUB_SHA" --generate-notes \
+            "bak-v$VERSION-linux-x86_64.tar.gz" "bak-v$VERSION-macos-arm64.tar.gz" SHA256SUMS

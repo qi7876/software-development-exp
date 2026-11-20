@@ -18,6 +18,7 @@ def main(*, report: bool = False, web_ui: bool = False) -> None:
         [
             "cargo",
             "clippy",
+            "--locked",
             "--all-targets",
             "--all-features",
             "--",
@@ -25,8 +26,8 @@ def main(*, report: bool = False, web_ui: bool = False) -> None:
             "warnings",
         ]
     )
-    _run(["cargo", "test", "--all-targets"])
-    _run(["cargo", "build", "--all-targets"])
+    _run(["cargo", "test", "--locked", "--all-targets"])
+    _run(["cargo", "build", "--locked", "--all-targets"])
     if web_ui:
         _run(["npm", "--prefix", "web", "run", "check"])
         _run(["npm", "--prefix", "web", "test"])
