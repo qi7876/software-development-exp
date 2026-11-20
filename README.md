@@ -29,7 +29,7 @@ if [ ! -f working-directory-example/config.json ]; then
   "secret_key": "example-local-test-key",
   "web_ui": {
     "enabled": true,
-    "path": "../web"
+    "path": "../web-ui"
   },
   "encryption": {
     "keys": {
@@ -60,7 +60,7 @@ bak keygen --output working-directory-example/backup.key
 bak server start -d working-directory-example
 ```
 
-The example configuration loads `backup.key` at startup. Generate the key once and reuse it on subsequent starts.
+The example configuration loads `backup.key` at startup. Generate the key once and reuse it on subsequent starts. If your existing example configuration points to `../web`, change `web_ui.path` to `../web-ui`.
 
 1. Open <http://127.0.0.1:8080/>. In **Manage connections**, enter `127.0.0.1:8080` and the example key `example-local-test-key`, then select **Verify and save**.
 2. Put files in `working-directory-example/source`. In **Create backup**, enter `source` and `repository`, then submit.
@@ -80,7 +80,7 @@ The working directory holds `config.json`, `jobs.sqlite3`, and the managed serve
 | `listen` | HTTP listening address, such as `127.0.0.1:8080` |
 | `secret_key` | Bearer key for API requests |
 | `web_ui.enabled` | Serve the browser console. Defaults to false |
-| `web_ui.path` | Console asset directory, required when enabled. Use the repository's `web/` directory or a deployed copy |
+| `web_ui.path` | Console asset directory, required when enabled. Use the repository's `web-ui/` directory or a deployed copy |
 | `encryption.keys` | Map of key IDs to key files |
 | `scheduled_backups` | IANA timezone and Cron plans |
 
@@ -192,8 +192,8 @@ The repository filesystem must support hard links and directory synchronization.
 Run `uv run scripts/check.py` for Rust and Python checks. Install Node.js 20+ to run the browser checks.
 
 ```sh
-npm --prefix web ci
-(cd web && npx playwright install chromium)
+npm --prefix web-ui ci
+(cd web-ui && npx playwright install chromium)
 uv run scripts/check.py --web-ui
 ```
 

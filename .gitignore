@@ -325,7 +325,7 @@ repository.sqlite3-wal
 repository.sqlite3-shm
 
 # Optional browser-test dependencies
-/web/node_modules/
+/web-ui/node_modules/
 
 # Runtime server instance lock (keep the file; its OS lock tracks liveness)
 server.lock

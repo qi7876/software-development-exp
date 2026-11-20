@@ -28,8 +28,8 @@ def main(*, report: bool = False, web_ui: bool = False) -> None:
     _run(["cargo", "test", "--all-targets"])
     _run(["cargo", "build", "--all-targets"])
     if web_ui:
-        _run(["npm", "--prefix", "web", "run", "check"])
-        _run(["npm", "--prefix", "web", "test"])
+        _run(["npm", "--prefix", "web-ui", "run", "check"])
+        _run(["npm", "--prefix", "web-ui", "test"])
     _run(["uv", "run", "ruff", "check", "."])
     _run(["uv", "run", "basedpyright"])
     if report:

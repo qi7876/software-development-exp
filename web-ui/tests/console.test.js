@@ -115,7 +115,7 @@ async function startServer(
     JSON.stringify({
       listen: "127.0.0.1:0",
       secret_key: apiSecret,
-      web_ui: { enabled: webUi, path: join(project, "web") },
+      web_ui: { enabled: webUi, path: join(project, "web-ui") },
       scheduled_backups: scheduledBackups,
       encryption: {
         keys: encryption
