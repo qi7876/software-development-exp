@@ -19,11 +19,10 @@ temporary=$(mktemp -d)
 trap 'rm -r -- "$temporary"' EXIT
 
 stage="$temporary/$package"
-mkdir -p "$stage/web" "$stage/working-directory-example"
+mkdir -p "$stage/web"
 install -m 755 target/release/bak "$stage/bak"
 cp LICENSE "$stage/"
 cp web/{index.html,app.js,styles.css,favicon.svg} "$stage/web/"
-cp working-directory-example/config.json "$stage/working-directory-example/"
 archive="$output_directory/$package.tar.gz"
 COPYFILE_DISABLE=1 tar -czf "$archive" -C "$temporary" "$package"
 echo "Created $archive"

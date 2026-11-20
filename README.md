@@ -22,11 +22,45 @@ Run these commands from the extracted package or repository root.
 
 ```sh
 mkdir -p working-directory-example/source working-directory-example/repository working-directory-example/restored
+if [ ! -f working-directory-example/config.json ]; then
+  cat > working-directory-example/config.json <<'BAK_EXAMPLE_CONFIG'
+{
+  "listen": "127.0.0.1:8080",
+  "secret_key": "example-local-test-key",
+  "web_ui": {
+    "enabled": true,
+    "path": "../web"
+  },
+  "encryption": {
+    "keys": {
+      "key": "backup.key"
+    }
+  },
+  "scheduled_backups": {
+    "timezone": "Asia/Shanghai",
+    "plans": [
+      {
+        "id": "daily-source",
+        "enabled": false,
+        "cron": "0 2 * * *",
+        "source": "source",
+        "repository": "repository",
+        "compression": {
+          "algorithm": "zstd",
+          "level": 3
+        },
+        "encryption": null
+      }
+    ]
+  }
+}
+BAK_EXAMPLE_CONFIG
+fi
 bak keygen --output working-directory-example/backup.key
 bak server start -d working-directory-example
 ```
 
-The [example configuration](working-directory-example/config.json) loads `backup.key` at startup. Generate it once and reuse it on subsequent starts.
+The example configuration loads `backup.key` at startup. Generate the key once and reuse it on subsequent starts.
 
 1. Open <http://127.0.0.1:8080/>. In **Manage connections**, enter `127.0.0.1:8080` and the example key `example-local-test-key`, then select **Verify and save**.
 2. Put files in `working-directory-example/source`. In **Create backup**, enter `source` and `repository`, then submit.

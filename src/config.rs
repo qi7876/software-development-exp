@@ -118,9 +118,10 @@ mod tests {
     #[test]
     fn configuration_rejects_unknown_top_level_fields() -> Result<(), Box<dyn Error>> {
         let directory = TestDirectory::new()?;
-        let mut config: serde_json::Value =
-            serde_json::from_str(include_str!("../working-directory-example/config.json"))?;
-        config["web_ui"] = serde_json::json!({"enabled": false});
+        let config = serde_json::json!({
+            "listen": "127.0.0.1:0",
+            "secret_key": "test-key"
+        });
         std::fs::write(
             directory.path().join("config.json"),
             serde_json::to_vec(&config)?,
