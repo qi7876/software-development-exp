@@ -1,5 +1,4 @@
-report.docx
-report.template.docx
+/docs/report/generated/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -250,6 +249,7 @@ rustc-ice-*.txt
 # General
 .DS_Store
 ~$*.docx
+~$*.pptx
 .localized
 __MACOSX/
 .AppleDouble

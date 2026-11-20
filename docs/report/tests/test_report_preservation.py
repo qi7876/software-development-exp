@@ -11,6 +11,7 @@ from shutil import copy2
 
 from docx import Document
 from docx.table import _Cell  # pyright: ignore[reportPrivateUsage]
+from lxml import etree
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -56,13 +57,11 @@ def _protected_document(path: Path) -> bytes:
                 for generated in list(cell)[index:]:
                     cell.remove(generated)
                 break
-    return body.xml.encode()
+    return etree.tostring(body, method="c14n")
 
 
 class ReportPreservationTests(unittest.TestCase):
     def test_sync_preserves_cover_and_front_matter(self) -> None:
-        if not REPORT_PATH.is_file():
-            self.skipTest("local report.docx is ignored by Git and is not present")
         with tempfile.TemporaryDirectory() as directory:
             temporary_report = Path(directory) / "report.docx"
             copy2(REPORT_PATH, temporary_report)

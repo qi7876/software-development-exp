@@ -176,6 +176,5 @@ publish both packages. The workflow tags the build commit with the version in
 
 - [C1 system context](docs/architecture/system-context.md) and [C2 containers](docs/architecture/containers.md)
 - [Repository manifest](docs/architecture/repository-schema.md), [encryption](docs/architecture/content-encryption.md), and [LZ77](docs/architecture/lz77.md)
-- [Follow-up priorities](docs/mvp.md)
 
 [MIT license](LICENSE)
