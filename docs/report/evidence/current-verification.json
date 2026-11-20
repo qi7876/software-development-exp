@@ -1,9 +1,9 @@
 {
-  "recorded_at": "2026-11-20T10:54:00+08:00",
-  "production_revision": "709bf45f40c085e7b17900df329c97cd1ab42543",
-  "source_tree": "d11bb19d4ed574326b0fb247291d9f7b2ad6c4ff",
+  "recorded_at": "2026-11-20T14:11:35+08:00",
+  "production_revision": "eb834bbcf3367a319944a8410a4e4507ff9198e0",
+  "source_tree": "82f28408f1746b3e8f7797df323f4784842211a9",
   "environment": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
-  "entrypoint": "UV_LOCKED=1 uv run --locked scripts/check.py --report --web-ui",
+  "entrypoint": "BAK_BROWSER_CHANNEL=chrome UV_LOCKED=1 uv run --locked scripts/check.py --report --web-ui",
   "checks": [
     {
       "command": "cargo fmt --all --check",
@@ -26,13 +26,13 @@
       "exit_code": 0
     },
     {
-      "command": "npm --prefix web run check",
+      "command": "npm --prefix web-ui run check",
       "result": "通过",
       "exit_code": 0
     },
     {
-      "command": "npm --prefix web test",
-      "result": "Playwright Chromium 回归 6 项通过。",
+      "command": "npm --prefix web-ui test",
+      "result": "Playwright 使用 Chrome 运行，6 项浏览器回归通过。",
       "exit_code": 0
     },
     {
@@ -62,20 +62,20 @@
     }
   ],
   "ci": {
-    "headSha": "b1e8ec47751506b21292a8e7955315fdc66da83b",
+    "headSha": "e757ec9ccfa3063faa13a5a4a611094e9103b569",
     "conclusion": "success",
-    "url": "https://github.com/qi7876/software-development-exp/actions/runs/44660263999",
-    "updatedAt": "2026-11-20T02:23:52Z",
+    "url": "https://github.com/qi7876/software-development-exp/actions/runs/44684051924",
+    "updatedAt": "2026-11-20T05:55:56Z",
     "jobs": [
       {
         "name": "Rust checks (linux-x86_64)",
         "conclusion": "success",
-        "url": "https://github.com/qi7876/software-development-exp/actions/runs/44660263999/job/136036473998"
+        "url": "https://github.com/qi7876/software-development-exp/actions/runs/44684051924/job/136114038978"
       },
       {
         "name": "Rust checks (macos-arm64)",
         "conclusion": "success",
-        "url": "https://github.com/qi7876/software-development-exp/actions/runs/44660263999/job/136036474223"
+        "url": "https://github.com/qi7876/software-development-exp/actions/runs/44684051924/job/136114039212"
       }
     ]
   }

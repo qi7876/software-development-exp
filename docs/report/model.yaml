@@ -18,10 +18,10 @@
       "details": [
         "浏览器可连接同一或另一台 bak API；地址和明文 API key 保存在浏览器 origin 的 localStorage。",
         "工作目录使用 schema v5 作业库。仓库存放自包含 v10 备份。加密密钥来自配置指定的文件。",
-        "自实现顺序归档后选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 或 AES-256-GCM 加密，形成九种模式；元数据和文件名以明文保存。",
+        "顺序归档支持原样保存、Zstd 和自实现 LZ77，载荷可明文保存或使用 XChaCha20-Poly1305、AES-256-GCM 加密。两组选项组合成九种模式，外层元数据明文保存。",
         "配置式定时备份使用 IANA 时区与分钟级 Cron，复用 FIFO；服务按当前分钟触发，同一计划有活动任务时跳过本次触发。",
         "bak server start 默认创建后台子进程并等待就绪；status/stop 通过当前用户的 Unix socket 管理实例。",
-        "静态 WebUI 独立部署并由 web_ui.path 指定目录，资源在请求时读取；SQLite 保存作业，仓库存放自包含归档。",
+        "发行包将静态控制台放在 web-ui/。服务按请求从 web_ui.path 读取资源，SQLite 保存作业，仓库存放自包含归档。",
         "启动在 HTTP 和 worker 之前按持久化任务 ID 对账：验证已发布文件或发布唯一完整临时文件，再提交结果。"
       ],
       "constraints": [
@@ -983,14 +983,14 @@
             "- keys: Arc<Keyring>"
           ],
           "operations": [
-            "+ submit(request): JobInfo",
-            "+ get_job(id): Option<JobInfo>",
-            "+ list_jobs(limit, before): Value",
-            "+ list_backups(path): Vec<RepoBackupInfo>",
+            "+ submit(request): Result<JobInfo, JobError>",
+            "+ get_job(id): Result<Option<JobInfo>, JobError>",
+            "+ list_jobs(limit, before): Result<Value, JobError>",
+            "+ list_backups(path): Result<Vec<RepoBackupInfo>, JobError>",
             "+ run_worker(stop): Result",
             "+ initialize_schedule(id, minute): Result",
             "+ schedule_tick(id, minute, request): Result",
-            "+ run_schedule_now(id, request): JobInfo",
+            "+ run_schedule_now(id, request): Result<JobInfo, JobError>",
             "- recover_interrupted(): Result"
           ]
         },
@@ -1003,9 +1003,9 @@
             "- keys: BTreeMap"
           ],
           "operations": [
-            "+ load(directory, files): Keyring",
-            "+ select(id, algorithm): Encryption",
-            "+ resolve(encryption): &[u8;32]"
+            "+ load(directory, files): Result<Keyring, JobError>",
+            "+ select(id, algorithm): Result<Encryption, JobError>",
+            "+ resolve(encryption): Result<&[u8; 32], JobError>"
           ]
         },
         {
@@ -1015,7 +1015,7 @@
           "stereotype": "struct",
           "attributes": [],
           "operations": [
-            "+ matches(path, metadata): bool"
+            "+ matches(path, metadata): Result<bool, JobError>"
           ]
         },
         {
@@ -1025,9 +1025,9 @@
           "stereotype": "struct",
           "attributes": [],
           "operations": [
-            "+ new(options, keys, backup_id): Content",
-            "+ writer(file, path): ContentWriter",
-            "+ reader(file, path): ContentReader"
+            "+ new(options, keys, backup_id): Result<Content, JobError>",
+            "+ writer(file, path): io::Result<ContentWriter>",
+            "+ reader(file, path): io::Result<ContentReader>"
           ]
         },
         {
@@ -1057,9 +1057,9 @@
           "stereotype": "module",
           "attributes": [],
           "operations": [
-            "+ ArchiveFile::read(path, id): ArchiveFile",
+            "+ ArchiveFile::read(repository, id): Result<ArchiveFile, JobError>",
             "+ PendingArchive::publish(manifest): Result",
-            "+ list(path): Vec<RepoBackupInfo>",
+            "+ list(repository): Result<Vec<RepoBackupInfo>, JobError>",
             "+ ArchiveFile::verify(keys): Result"
           ]
         },
@@ -1070,8 +1070,8 @@
           "stereotype": "module",
           "attributes": [],
           "operations": [
-            "+ Encoder::new(writer, options): Encoder",
-            "+ Decoder::new(reader): Decoder"
+            "+ Encoder::new(writer, options): io::Result<Encoder>",
+            "+ Decoder::new(reader): io::Result<Decoder>"
           ]
         },
         {
@@ -1085,11 +1085,11 @@
             "- configured_plans: Vec<PlanConfig>"
           ],
           "operations": [
-            "+ prepare(config, keys): Scheduler",
+            "+ prepare(config, keys): Result<Scheduler, JobError>",
             "+ initialize(jobs, now): Result",
             "+ run(jobs, stop): Result",
             "+ describe(): Value",
-            "+ request(id, keys): JobRequest"
+            "+ request(id, keys): Result<JobRequest, JobError>"
           ]
         }
       ],
@@ -1332,7 +1332,7 @@
           "type": "message",
           "source": "Jobs",
           "target": "DB",
-          "text": "Commit verified success or interrupted failure; never replay"
+          "text": "Commit verified success or interrupted failure"
         },
         {
           "type": "message",
@@ -1350,7 +1350,7 @@
           "type": "message",
           "source": "Scheduler",
           "target": "Jobs",
-          "text": "Initialize UTC cursors; no catch-up"
+          "text": "Initialize UTC cursors to the startup minute or later"
         },
         {
           "type": "message",
@@ -1366,13 +1366,13 @@
         },
         {
           "type": "opt",
-          "text": "Embedded console enabled"
+          "text": "Static console enabled"
         },
         {
           "type": "message",
           "source": "User",
           "target": "Server",
-          "text": "Load public UI / verify selected API"
+          "text": "Serve assets from web_ui.path / verify selected API"
         },
         {
           "type": "return",
@@ -1557,14 +1557,14 @@
           "text": "Finish payload / metadata / digest and sync temporary file"
         },
         {
-          "type": "alt",
-          "text": "Payload processing succeeded"
-        },
-        {
           "type": "message",
           "source": "Backup",
           "target": "Repo",
-          "text": "Publish v10 file with metadata and digest"
+          "text": "Publish with exclusive hard link / sync directory"
+        },
+        {
+          "type": "alt",
+          "text": "Archive written and published"
         },
         {
           "type": "return",
@@ -1632,8 +1632,8 @@
       ],
       "details": [
         "备份列表返回编码模式与密钥信息。界面显示密钥匹配状态，worker 校验恢复请求。",
-        "读取仓库头后匹配密钥，验证全部相对路径，再创建文件、目录和符号链接。",
-        "顺序解包、核对条目头并验证结束标记、最终认证块、文件大小与整包哈希；子项完成后应用目录与根元数据。"
+        "读取归档尾部的 manifest 并匹配密钥，验证全部相对路径，再按归档流重建条目。",
+        "写入时核对条目头和文件大小，随后验证流结束标记、加密载荷的最终认证块及容器 SHA-256。"
       ],
       "constraints": [
         "恢复从备份记录选择解码参数。",
@@ -1762,20 +1762,20 @@
           "text": "Validate all entry paths before writes"
         },
         {
+          "type": "message",
+          "source": "Restore",
+          "target": "Dest",
+          "text": "Decode and match headers and sizes / write entries and hard links"
+        },
+        {
+          "type": "message",
+          "source": "Restore",
+          "target": "Dest",
+          "text": "Verify stream end and SHA-256 / apply directory and root metadata / sync"
+        },
+        {
           "type": "alt",
-          "text": "All payloads and integrity checks succeed"
-        },
-        {
-          "type": "message",
-          "source": "Restore",
-          "target": "Dest",
-          "text": "Decode entries / match headers and sizes / verify archive SHA-256"
-        },
-        {
-          "type": "message",
-          "source": "Restore",
-          "target": "Dest",
-          "text": "Recreate entries and hard links / apply Unix metadata / sync"
+          "text": "Restore and integrity checks succeed"
         },
         {
           "type": "return",
@@ -1885,7 +1885,7 @@
       "steps": [
         {
           "type": "loop",
-          "text": "Every second; inspect current minute only"
+          "text": "Check the current UTC minute every second"
         },
         {
           "type": "message",
@@ -1901,13 +1901,13 @@
         },
         {
           "type": "opt",
-          "text": "New matching minute"
+          "text": "UTC minute advanced"
         },
         {
           "type": "message",
           "source": "Scheduler",
           "target": "Jobs",
-          "text": "schedule_tick(id, minute, request)"
+          "text": "schedule_tick(id, minute, optional matching request)"
         },
         {
           "type": "message",
@@ -1917,7 +1917,7 @@
         },
         {
           "type": "alt",
-          "text": "Cursor advanced and no active job"
+          "text": "Cursor advanced, Cron matched, plan idle"
         },
         {
           "type": "message",
@@ -1939,13 +1939,13 @@
         },
         {
           "type": "else",
-          "text": "Duplicate minute or active plan"
+          "text": "Duplicate minute, Cron mismatch, or active plan"
         },
         {
           "type": "message",
           "source": "Jobs",
           "target": "DB",
-          "text": "COMMIT without another queued job"
+          "text": "Commit cursor transaction"
         },
         {
           "type": "end",

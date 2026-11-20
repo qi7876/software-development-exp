@@ -42,7 +42,7 @@
     {
       "id": "FR-08",
       "name": "浏览器控制台与连接管理",
-      "description": "独立部署的静态控制台提供创建备份、仓库恢复、定时计划、任务记录及连接管理；配置 web_ui.path 后运行时读取资源，浏览器验证成功才切换服务并清空旧服务数据。"
+      "description": "静态控制台提供创建备份、仓库恢复、定时计划、任务记录及连接管理。发行包的资源位于 web-ui/，服务按 web_ui.path 读取。浏览器验证新连接后切换服务并清空旧服务数据。"
     },
     {
       "id": "FR-09",
@@ -74,7 +74,7 @@
     {
       "id": "NFR-01",
       "name": "数据正确性",
-      "description": "恢复后保持相对路径、条目类型、内容和支持的 Unix 元数据。源与已发布归档在操作前后保持一致。"
+      "description": "恢复保留相对路径、条目类型、内容和受支持的 Unix 元数据。备份读取源文件并发布新归档，恢复读取已发布归档并写入目标目录。"
     },
     {
       "id": "NFR-02",
@@ -104,7 +104,7 @@
     {
       "id": "NFR-07",
       "name": "运行平台",
-      "description": "备份和恢复在 Unix 平台执行，验证环境为 macOS。"
+      "description": "备份和恢复支持 Linux 和 macOS，发行包与 Rust CI 覆盖 Linux x86_64 和 macOS ARM64。"
     }
   ],
   "actors": [
@@ -381,7 +381,7 @@
         {
           "id": "B4",
           "actor": "系统",
-          "action": "绑定监听地址，启动认证 API、可选静态 UI 和 FIFO worker。"
+          "action": "校验计划并初始化调度游标，再绑定监听地址，启动认证 API、可选静态 UI、FIFO worker 和调度器。"
         }
       ],
       "alternative_flows": [
@@ -408,7 +408,7 @@
           "from": "B3-B4",
           "condition": "数据库不可用或端口占用",
           "steps": [
-            "输出启动失败原因并非零退出。"
+            "输出启动失败原因，以非零状态退出。"
           ]
         }
       ]
@@ -536,7 +536,7 @@
         {
           "id": "B3",
           "actor": "系统",
-          "action": "worker FIFO 领取作业；验证路径、仓库版本及密钥指纹，编译筛选规则。"
+          "action": "worker 按 FIFO 领取作业，核对密钥指纹，确认源与仓库是互不重叠的已有目录，再编译筛选规则。"
         },
         {
           "id": "B4",
@@ -546,12 +546,12 @@
         {
           "id": "B5",
           "actor": "系统",
-          "action": "向唯一隐藏 .partial 写入条目头和数据，依次按需压缩、加密；追加 manifest、长度、结束标记及摘要，SHA-256 覆盖除摘要自身外的全部容器字节。"
+          "action": "向唯一隐藏 .partial 写入条目头和数据，依次按需压缩、加密。写完归档流结束标记后，结束压缩与加密编码。"
         },
         {
           "id": "B6",
           "actor": "系统",
-          "action": "完成编码与最终认证块，同步临时文件，硬链接发布 <backup_id>.bak 并同步目录，移除本次临时链接后再次同步。"
+          "action": "追加明文 manifest、长度、容器尾标记与 SHA-256 摘要。同步临时文件，硬链接发布 <backup_id>.bak 并同步目录，移除临时链接后再次同步。"
         },
         {
           "id": "B7",
@@ -572,7 +572,7 @@
         {
           "id": "E2",
           "from": "B3-B6",
-          "condition": "路径/格式错误、规则无效、密钥变化或 IO/提交失败",
+          "condition": "路径、筛选规则或密钥校验失败，或写入及发布归档失败",
           "steps": [
             "作业失败并记录原因；无效规则和密钥在创建载荷前失败。",
             "作业失败时清理本次临时输出，异常退出留下的文件由启动对账处理。文件发布和 SQLite 记账各自提交。"
@@ -683,7 +683,7 @@
         "NFR-06"
       ],
       "business_rules": [
-        "使用 create_new 避免覆盖已有路径。",
+        "普通文件使用 create_new 独占创建。",
         "符号链接按记录的目标路径重建。子项恢复后应用目录元数据，最后应用根元数据。",
         "恢复匹配密钥标识与指纹，失败时保留已写入的输出。"
       ],
@@ -880,7 +880,7 @@
       "name": "Manage browser API connections",
       "kind": "main",
       "priority": "高",
-      "goal": "通过独立部署的控制台连接本机或远程 API，并隔离不同服务的数据。",
+      "goal": "通过 Web 控制台连接本机或远程 API，按当前连接展示对应服务的数据。",
       "primary_actor": "CLIENT",
       "supporting_actors": [],
       "trigger": "打开连接管理并添加、编辑、选择或删除连接。",
@@ -952,7 +952,7 @@
       "name": "Generate and configure encryption keys",
       "kind": "main",
       "priority": "高",
-      "goal": "独立管理服务端对称加密密钥，避免密钥进入浏览器和任务历史。",
+      "goal": "在服务端管理归档加密密钥，通过标识与指纹引用密钥。",
       "primary_actor": "CLIENT",
       "supporting_actors": [
         "KEYS"
@@ -1023,7 +1023,7 @@
       "name": "View and run configured backup plans",
       "kind": "main",
       "priority": "高",
-      "goal": "查看配置计划，按 Cron 自动备份或立即执行保存的参数，避免同计划重复活动任务。",
+      "goal": "查看配置计划，按 Cron 自动备份或按保存的参数立即执行。每个计划最多有一个排队或运行中的作业。",
       "primary_actor": "CLIENT",
       "supporting_actors": [
         "SRC",
@@ -1078,12 +1078,12 @@
         {
           "id": "B3",
           "actor": "系统",
-          "action": "每秒检查当前分钟，转换到 IANA 时区后匹配 Cron。"
+          "action": "每秒检查 UTC 分钟。进入新分钟时转换到 IANA 时区并匹配 Cron。"
         },
         {
           "id": "B4",
           "actor": "系统",
-          "action": "事务推进进度，检查同计划活动任务，满足条件时保存 queued 任务及来源。"
+          "action": "事务推进计划的分钟游标。Cron 匹配且同计划空闲时，保存 queued 任务及计划来源。"
         },
         {
           "id": "B5",

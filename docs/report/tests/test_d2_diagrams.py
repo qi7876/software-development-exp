@@ -71,7 +71,7 @@ class D2DiagramTests(unittest.TestCase):
                             if separator:
                                 self.assertIn(member_type.strip(), text)
                     for operation in element["operations"]:
-                        name, separator, return_type = operation.rpartition(":")
+                        name, separator, return_type = operation.rpartition(": ")
                         if not separator:
                             name = operation
                         self.assertIn(name.strip().removeprefix("+ ").removeprefix("- "), text)
