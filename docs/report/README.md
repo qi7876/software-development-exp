@@ -8,8 +8,8 @@
 | `model.yaml` | 构件、类型和时序视图 |
 | `generated/` | 由模型生成的 D2、PNG 和流程图 |
 | `current-verification.json` | 功能回归记录与运行环境，结果对应 `production_revision` 指定的提交 |
-| `verification.json` | 2026-10-14 的性能、稳定性和内存测量 |
-| `lz77-measurements.json` | 2026-10-31 的 Zstd 和 LZ77 内存编解码数据 |
+| `verification.json` | 性能、稳定性、CPU 与内存实测记录 |
+| `lz77-measurements.json` | Zstd 和 LZ77 内存编解码实测记录 |
 
 ## 生成与检查
 

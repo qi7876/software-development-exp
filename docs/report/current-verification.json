@@ -1,8 +1,9 @@
 {
-  "recorded_at": "2026-11-19T21:54:55+08:00",
-  "production_revision": "e7c65f33f9b46ea86ff33584671a79b1987cc67c",
-  "source_tree": "6269dbb66532d4a88c6a72ba1cb80c2a7c1c2f7a",
+  "recorded_at": "2026-11-20T10:54:00+08:00",
+  "production_revision": "709bf45f40c085e7b17900df329c97cd1ab42543",
+  "source_tree": "d11bb19d4ed574326b0fb247291d9f7b2ad6c4ff",
   "environment": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
+  "entrypoint": "UV_LOCKED=1 uv run --locked scripts/check.py --report --web-ui",
   "checks": [
     {
       "command": "cargo fmt --all --check",
@@ -16,7 +17,7 @@
     },
     {
       "command": "cargo test --all-targets",
-      "result": "96 项单元或组件测试、5 项 CLI 测试和 13 项 HTTP 集成测试通过。2 项手动测试默认跳过。",
+      "result": "单元与组件 96 项、CLI 5 项、HTTP 集成 13 项通过。默认跳过 2 项手动测试。",
       "exit_code": 0
     },
     {
@@ -31,7 +32,7 @@
     },
     {
       "command": "npm --prefix web test",
-      "result": "6 项 Chrome 浏览器回归通过。",
+      "result": "Playwright Chromium 回归 6 项通过。",
       "exit_code": 0
     },
     {
@@ -41,52 +42,41 @@
     },
     {
       "command": "uv run basedpyright",
-      "result": "0 errors / 0 warnings / 0 notes",
+      "result": "0 个错误、0 个警告。",
       "exit_code": 0
     },
     {
       "command": "uv run python -m unittest discover -s docs/report/tests",
-      "result": "9 项报告保护、模型和图表测试通过。",
+      "result": "报告保护、模型和图表测试 9 项通过。",
       "exit_code": 0
     },
     {
       "command": "uv run scripts/update_use_cases.py --check",
-      "result": "用例 D2 与 PNG 一致。",
+      "result": "用例图 D2 与 PNG 一致。",
       "exit_code": 0
     },
     {
       "command": "uv run scripts/update_system_design.py --check",
-      "result": "8 个设计视图的 D2 与 PNG 一致。",
+      "result": "8 个设计视图 D2 与 PNG 一致。",
       "exit_code": 0
     }
   ],
-  "scope": "验证 CLI 帮助与补全、控制台、定时计划、文件类型筛选、v10 归档、v9 读取和启动对账。报告和图表使用本次文档更新的输入。",
-  "historical_evidence": "verification.json (2026-10-14)",
-  "entrypoint": "BAK_BROWSER_CHANNEL=chrome uv run scripts/check.py --report --web-ui",
-  "historical_measurements_rerun": false,
-  "codec_measurements": "lz77-measurements.json",
-  "codec_measurements_rerun": false,
-  "document_base_revision": "e7c65f33f9b46ea86ff33584671a79b1987cc67c",
-  "document_inputs": {
-    "version": "6.0",
-    "updated": "2026-11-19",
-    "models": [
-      "use-cases.yaml",
-      "model.yaml"
-    ],
-    "generator": "scripts/update_report.py"
-  },
-  "codec_measurements_recorded_at": "2026-10-31T15:47:32.993984+08:00",
-  "supplemental_checks": [
-    {
-      "command": "README 安装与 API 示例",
-      "result": "安装、服务启动、备份、恢复和硬链接还原通过。",
-      "exit_code": 0
-    },
-    {
-      "command": "README Shell 补全示例",
-      "result": "Bash、Fish 和 Zsh 均成功加载 bak 补全。",
-      "exit_code": 0
-    }
-  ]
+  "ci": {
+    "headSha": "b1e8ec47751506b21292a8e7955315fdc66da83b",
+    "conclusion": "success",
+    "url": "https://github.com/qi7876/software-development-exp/actions/runs/44660263999",
+    "updatedAt": "2026-11-20T02:23:52Z",
+    "jobs": [
+      {
+        "name": "Rust checks (linux-x86_64)",
+        "conclusion": "success",
+        "url": "https://github.com/qi7876/software-development-exp/actions/runs/44660263999/job/136036473998"
+      },
+      {
+        "name": "Rust checks (macos-arm64)",
+        "conclusion": "success",
+        "url": "https://github.com/qi7876/software-development-exp/actions/runs/44660263999/job/136036474223"
+      }
+    ]
+  }
 }

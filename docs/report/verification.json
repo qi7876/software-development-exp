@@ -1,8 +1,8 @@
 {
-  "recorded_at": "2026-10-14T11:12:53.814269+00:00",
-  "production_revision": "36eed9e6671fc51a3ca8bf4d251cb2a08917264e",
-  "environment": "macOS-27.2-arm64-arm-64bit-Mach-O",
-  "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+  "recorded_at": "2026-11-20T02:40:23.957797+00:00",
+  "production_revision": "709bf45f40c085e7b17900df329c97cd1ab42543",
+  "environment": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
+  "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
   "build_profile": "profiling (release optimization with debug symbols)",
   "seed": 20261014,
   "performance": [
@@ -10,341 +10,2301 @@
       "dataset": "compressible",
       "source_bytes": 268435456,
       "cycles": 3,
-      "duration_seconds": 1.4589145829995687,
+      "duration_seconds": 1.0236225409898907,
       "runs": [
         {
-          "backup_seconds": 0.13985200000024633,
-          "restore_seconds": 0.13790791599967633,
-          "payload_bytes": 8210
+          "backup_seconds": 0.07765333401039243,
+          "restore_seconds": 0.08483400000841357,
+          "payload_bytes": 9704
         },
         {
-          "backup_seconds": 0.14534466700024495,
-          "restore_seconds": 0.14549983400138444,
-          "payload_bytes": 8210
+          "backup_seconds": 0.07743495801696554,
+          "restore_seconds": 0.07736991698038764,
+          "payload_bytes": 9704
         },
         {
-          "backup_seconds": 0.15246591699906276,
-          "restore_seconds": 0.14190833300017403,
-          "payload_bytes": 8210
+          "backup_seconds": 0.0768568339990452,
+          "restore_seconds": 0.05921029197634198,
+          "payload_bytes": 9704
         }
       ],
       "http_status_latency": {
-        "samples": 64,
-        "median_ms": 3.3177915001942893,
-        "p95_ms": 3.7348750011005905,
-        "max_ms": 11.661000000458444
+        "samples": 39,
+        "median_ms": 2.4935000110417604,
+        "p95_ms": 2.9199580021668226,
+        "max_ms": 10.463334008818492
       },
-      "sampled_peak_rss_bytes": 11272192,
-      "rss_start_bytes": 6488064,
-      "rss_end_bytes": 11272192,
+      "sampled_peak_rss_bytes": 13516800,
+      "rss_start_bytes": 8585216,
+      "rss_end_bytes": 13516800,
+      "time_output": "        1.92 real         0.15 user         0.18 sys\n            13533184  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1104  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                  92  messages sent\n                 185  messages received\n                   1  signals received\n                 133  voluntary context switches\n                1380  involuntary context switches\n          4816496905  instructions retired\n          1422020763  cycles elapsed\n             8798640  peak memory footprint\n",
       "correctness": "passed",
-      "restart_history": "not exercised",
-      "time_peak_rss_bytes": 11370496,
-      "raw_evidence": "target/report-analysis/current/compressible"
+      "restart_history": "not exercised"
     },
     {
       "dataset": "incompressible",
       "source_bytes": 268435456,
       "cycles": 3,
-      "duration_seconds": 2.2450957500004733,
+      "duration_seconds": 2.1770876249938738,
       "runs": [
         {
-          "backup_seconds": 0.22103324999989127,
-          "restore_seconds": 0.15512741599923174,
-          "payload_bytes": 268441609
+          "backup_seconds": 0.20675474999006838,
+          "restore_seconds": 0.1467453750083223,
+          "payload_bytes": 268443553
         },
         {
-          "backup_seconds": 0.20577787500042177,
-          "restore_seconds": 0.15396999999938998,
-          "payload_bytes": 268441609
+          "backup_seconds": 0.2075498750200495,
+          "restore_seconds": 0.14619595801923424,
+          "payload_bytes": 268443553
         },
         {
-          "backup_seconds": 0.20243779200063727,
-          "restore_seconds": 0.14274312499946973,
-          "payload_bytes": 268441609
+          "backup_seconds": 0.20887191602378152,
+          "restore_seconds": 0.14715629201964475,
+          "payload_bytes": 268443553
         }
       ],
       "http_status_latency": {
-        "samples": 78,
-        "median_ms": 3.4069164994434686,
-        "p95_ms": 3.6901670009683585,
-        "max_ms": 3.8535830008186167
+        "samples": 84,
+        "median_ms": 2.483687494532205,
+        "p95_ms": 2.8111249848734587,
+        "max_ms": 11.091124993981794
       },
-      "sampled_peak_rss_bytes": 11517952,
-      "rss_start_bytes": 6438912,
-      "rss_end_bytes": 11517952,
+      "sampled_peak_rss_bytes": 13615104,
+      "rss_start_bytes": 8617984,
+      "rss_end_bytes": 13615104,
+      "time_output": "        2.93 real         0.87 user         0.41 sys\n            13631488  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1098  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 182  messages sent\n                 365  messages received\n                   1  signals received\n                 134  voluntary context switches\n                2407  involuntary context switches\n         12080309677  instructions retired\n          5520124051  cycles elapsed\n             8929712  peak memory footprint\n",
       "correctness": "passed",
-      "restart_history": "not exercised",
-      "time_peak_rss_bytes": 11616256,
-      "raw_evidence": "target/report-analysis/current/incompressible"
+      "restart_history": "not exercised"
     },
     {
       "dataset": "small-files",
       "source_bytes": 4096000,
       "cycles": 3,
-      "duration_seconds": 22.8088453750006,
+      "duration_seconds": 11.771616042009555,
       "runs": [
         {
-          "backup_seconds": 3.7946509159992274,
-          "restore_seconds": 3.8163910410003155,
-          "payload_bytes": 4105000
+          "backup_seconds": 0.06084816699149087,
+          "restore_seconds": 3.6903850410017185,
+          "payload_bytes": 4359608
         },
         {
-          "backup_seconds": 3.811700041000222,
-          "restore_seconds": 3.389554125000359,
-          "payload_bytes": 4105000
+          "backup_seconds": 0.06012804200872779,
+          "restore_seconds": 3.7093823330069426,
+          "payload_bytes": 4359608
         },
         {
-          "backup_seconds": 3.6322533330003353,
-          "restore_seconds": 3.6461173330008023,
-          "payload_bytes": 4105000
+          "backup_seconds": 0.058893000008538365,
+          "restore_seconds": 3.856488958990667,
+          "payload_bytes": 4359608
         }
       ],
       "http_status_latency": {
-        "samples": 1156,
-        "median_ms": 6.422146000659268,
-        "p95_ms": 9.28929200017592,
-        "max_ms": 32.462249999298365
+        "samples": 758,
+        "median_ms": 3.7711044860770926,
+        "p95_ms": 4.448542022146285,
+        "max_ms": 23.94145799917169
       },
-      "sampled_peak_rss_bytes": 10502144,
-      "rss_start_bytes": 6438912,
-      "rss_end_bytes": 10502144,
+      "sampled_peak_rss_bytes": 13991936,
+      "rss_start_bytes": 8568832,
+      "rss_end_bytes": 13991936,
+      "time_output": "       15.74 real         0.13 user         0.85 sys\n            14008320  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1120  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                1530  messages sent\n                3060  messages received\n                   1  signals received\n               12461  voluntary context switches\n               16540  involuntary context switches\n          8027719175  instructions retired\n          2876064901  cycles elapsed\n             9273752  peak memory footprint\n",
       "correctness": "passed",
-      "restart_history": "not exercised",
-      "time_peak_rss_bytes": 10600448,
-      "raw_evidence": "target/report-analysis/current/small-files"
+      "restart_history": "not exercised"
     }
   ],
   "instruments": [
     {
       "template": "Time Profiler",
-      "recorded_at": "2026-10-14T11:05:17.694631+00:00",
+      "recorded_at": "2026-11-20T02:50:46.820690+00:00",
       "debug_entitlement": "com.apple.security.get-task-allow",
       "status": "recorded",
-      "cycles": 43,
-      "trace": "target/report-analysis/signed-instruments/Time-Profiler/server/recording.trace",
+      "cycles": 47,
+      "trace": "target/report-refresh/performance/Time-Profiler/server/recording.trace",
       "toc_export_exit_code": 0,
       "cpu_summary": {
-        "samples": 14367,
-        "sampled_cpu_seconds": 14.367,
+        "samples": 15314,
+        "sampled_cpu_seconds": 15.314,
         "leaf_categories_percent": {
-          "SHA-256": 49.18,
-          "Filesystem/syscalls": 31.82,
-          "Other": 12.41,
-          "Zstd": 6.42,
-          "SQLite": 0.17
+          "SHA-256": 49.15,
+          "Filesystem/syscalls": 32.93,
+          "Other": 11.43,
+          "Zstd": 6.37,
+          "SQLite": 0.12
         },
         "top_leaf_frames": [
           {
-            "symbol": "_RNvNtCsa7A7AsypVnu_4sha26sha25611compress256",
-            "sampled_ms": 7066.0,
-            "percent": 49.18
+            "symbol": "_RNvNtCs81AyRCp3YY2_4sha26sha25611compress256",
+            "sampled_ms": 7527.0,
+            "percent": 49.15
           },
           {
             "symbol": "write",
-            "sampled_ms": 3434.0,
-            "percent": 23.9
-          },
-          {
-            "symbol": "_platform_memmove",
-            "sampled_ms": 1208.0,
-            "percent": 8.41
+            "sampled_ms": 3747.0,
+            "percent": 24.47
           },
           {
             "symbol": "read",
-            "sampled_ms": 1095.0,
-            "percent": 7.62
+            "sampled_ms": 1263.0,
+            "percent": 8.25
+          },
+          {
+            "symbol": "_platform_memmove",
+            "sampled_ms": 1259.0,
+            "percent": 8.22
           },
           {
             "symbol": "ZSTD_compressBlock_doubleFast_extDict_generic",
-            "sampled_ms": 850.0,
-            "percent": 5.92
+            "sampled_ms": 919.0,
+            "percent": 6.0
           },
           {
             "symbol": "HIST_count_simple",
-            "sampled_ms": 223.0,
-            "percent": 1.55
+            "sampled_ms": 189.0,
+            "percent": 1.23
           },
           {
             "symbol": "ZSTD_compressBlock_doubleFast",
-            "sampled_ms": 54.0,
-            "percent": 0.38
+            "sampled_ms": 43.0,
+            "percent": 0.28
           },
           {
-            "symbol": "__accept",
-            "sampled_ms": 31.0,
-            "percent": 0.22
+            "symbol": "kevent",
+            "sampled_ms": 30.0,
+            "percent": 0.2
           }
         ]
       },
-      "duration_seconds": 36.356385,
-      "analysis": "采集副本获得调试授权后，采集 36.356 秒、43 个循环和 14,367 个 CPU 样本。按叶帧权重统计：SHA-256 49.18%，文件系统调用 31.82%，Zstd 6.42%。"
+      "analysis": "完成 47 次循环，记录 15,314 个 CPU 样本。叶帧采样权重分布为 SHA-256 49.15%、文件系统调用 32.93%、其他 11.43%、Zstd 6.37%、SQLite 0.12%。"
     },
     {
       "template": "Allocations",
-      "recorded_at": "2026-10-14T11:06:02.302389+00:00",
+      "recorded_at": "2026-11-20T02:51:33.369947+00:00",
       "debug_entitlement": "com.apple.security.get-task-allow",
       "status": "recorded",
-      "cycles": 45,
-      "trace": "target/report-analysis/signed-instruments/Allocations/server/recording.trace",
+      "cycles": 47,
+      "trace": "target/report-refresh/performance/Allocations/server/recording.trace",
       "toc_export_exit_code": 0,
       "memory_summary": {
         "allocations": {
           "status": "exported",
           "categories": {
             "All Heap & Anonymous VM": {
-              "persistent-bytes": 31961328,
-              "count-persistent": 990,
-              "total-bytes": 1885188736,
-              "transient-bytes": 1853227408,
-              "count-events": 1082987,
-              "count-transient": 547911,
-              "count-total": 548901
+              "persistent-bytes": 29816048,
+              "count-persistent": 991,
+              "total-bytes": 691745744,
+              "transient-bytes": 661929696,
+              "count-events": 1324568,
+              "count-transient": 666636,
+              "count-total": 667627
             },
             "All Heap Allocations": {
-              "persistent-bytes": 127216,
-              "count-persistent": 975,
-              "total-bytes": 535851648,
-              "transient-bytes": 535724432,
-              "count-events": 1079595,
-              "count-transient": 546217,
-              "count-total": 547192
+              "persistent-bytes": 128240,
+              "count-persistent": 977,
+              "total-bytes": 602895312,
+              "transient-bytes": 602767072,
+              "count-events": 1324403,
+              "count-transient": 666555,
+              "count-total": 667532
             },
             "All Anonymous VM": {
-              "persistent-bytes": 31834112,
-              "count-persistent": 15,
-              "total-bytes": 1349337088,
-              "transient-bytes": 1317502976,
-              "count-events": 3392,
-              "count-transient": 1694,
-              "count-total": 1709
+              "persistent-bytes": 29687808,
+              "count-persistent": 14,
+              "total-bytes": 88850432,
+              "transient-bytes": 59162624,
+              "count-events": 165,
+              "count-transient": 81,
+              "count-total": 95
             },
             "VM: Stack": {
-              "persistent-bytes": 31834112,
-              "count-persistent": 15,
-              "total-bytes": 1238056960,
-              "transient-bytes": 1206222848,
-              "count-events": 1128,
-              "count-transient": 562,
-              "count-total": 577
+              "persistent-bytes": 29687808,
+              "count-persistent": 14,
+              "total-bytes": 83345408,
+              "transient-bytes": 53657600,
+              "count-events": 53,
+              "count-transient": 25,
+              "count-total": 39
             }
           },
-          "output": "target/report-analysis/signed-instruments/Allocations/allocations.xml"
+          "output": "target/report-refresh/performance/Allocations/allocations.xml"
         }
       },
-      "duration_seconds": 36.076932,
-      "analysis": "有效采集 36.077 秒，完成 45 个已验证的 256 MiB 备份/恢复循环。累计堆分配 511.03 MiB，结束时存活堆 124.23 KiB、975 个分配；线程栈类别的存活虚拟分配 30.36 MiB。"
+      "analysis": "完成 47 次循环，累计堆分配 574.97 MiB。采集结束时存活堆 125.23 KiB，共 977 个分配。"
     },
     {
       "template": "Leaks",
-      "recorded_at": "2026-10-14T11:06:43.387062+00:00",
+      "recorded_at": "2026-11-20T02:52:22.485833+00:00",
       "debug_entitlement": "com.apple.security.get-task-allow",
       "status": "recorded",
       "cycles": 45,
-      "trace": "target/report-analysis/signed-instruments/Leaks/server/recording.trace",
+      "trace": "target/report-refresh/performance/Leaks/server/recording.trace",
       "toc_export_exit_code": 0,
       "memory_summary": {
         "allocations": {
           "status": "exported",
           "categories": {
             "All Heap & Anonymous VM": {
-              "persistent-bytes": 34109984,
-              "count-persistent": 1019,
-              "total-bytes": 1884410976,
-              "transient-bytes": 1850300992,
-              "count-events": 1041690,
-              "count-transient": 527201,
-              "count-total": 528220
+              "persistent-bytes": 27672112,
+              "count-persistent": 1018,
+              "total-bytes": 657409376,
+              "transient-bytes": 629737264,
+              "count-events": 1253355,
+              "count-transient": 630734,
+              "count-total": 631752
             },
             "All Heap Allocations": {
-              "persistent-bytes": 129568,
-              "count-persistent": 1003,
-              "total-bytes": 530388064,
-              "transient-bytes": 530258496,
-              "count-events": 1038287,
-              "count-transient": 525502,
-              "count-total": 526505
+              "persistent-bytes": 130608,
+              "count-persistent": 1005,
+              "total-bytes": 573244768,
+              "transient-bytes": 573114160,
+              "count-events": 1253201,
+              "count-transient": 630658,
+              "count-total": 631663
             },
             "All Anonymous VM": {
-              "persistent-bytes": 33980416,
-              "count-persistent": 16,
-              "total-bytes": 1354022912,
-              "transient-bytes": 1320042496,
-              "count-events": 3403,
-              "count-transient": 1699,
-              "count-total": 1715
+              "persistent-bytes": 27541504,
+              "count-persistent": 13,
+              "total-bytes": 84164608,
+              "transient-bytes": 56623104,
+              "count-events": 154,
+              "count-transient": 76,
+              "count-total": 89
             },
             "VM: Stack": {
-              "persistent-bytes": 33980416,
-              "count-persistent": 16,
-              "total-bytes": 1242349568,
-              "transient-bytes": 1208369152,
-              "count-events": 1131,
-              "count-transient": 563,
-              "count-total": 579
+              "persistent-bytes": 27541504,
+              "count-persistent": 13,
+              "total-bytes": 79052800,
+              "transient-bytes": 51511296,
+              "count-events": 50,
+              "count-transient": 24,
+              "count-total": 37
             }
           },
-          "output": "target/report-analysis/signed-instruments/Leaks/allocations.xml"
+          "output": "target/report-refresh/performance/Leaks/allocations.xml"
         },
         "leaks": {
           "status": "exported",
           "reported_rows": 0,
           "rows": [],
-          "output": "target/report-analysis/signed-instruments/Leaks/leaks.xml"
+          "output": "target/report-refresh/performance/Leaks/leaks.xml"
         }
       },
-      "duration_seconds": 35.883298,
-      "analysis": "有效采集 35.883 秒，完成 45 个已验证的 256 MiB 备份/恢复循环；Leaks 表成功导出，泄漏条目为 0 行。"
+      "analysis": "完成 45 次循环，Instruments 泄漏表记录 0 条。"
     }
-  ],
-  "limitations": [
-    "单台 Apple Silicon macOS 机器；优化构建、缓存预热、HTTP 轮询与 RSS 采样开销；未建立性能合格线，未验证其他平台。",
-    "每轮使用独立临时仓库且成功校验后删除输出；没有测量一个长期仓库的规模增长或磁盘空间压力。",
-    "RSS、physical footprint 与 malloc 存活字节是不同指标；采样峰值不是 time -l 的进程终生峰值。",
-    "10 分钟稳定性观察与 SIGKILL 回归不覆盖长期运行、断电、文件系统崩溃或并发源修改。",
-    "当前运行记录保存稳定性聚合指标；脚本已修正重启时覆盖原始 RSS/日志的问题，后续运行将单独保留重启前完整样本。",
-    "无生产代码优化；失败输出自动清理、非 Unix 执行和其他规划功能仍未实现。"
   ],
   "stability": {
     "dataset": "stability",
     "source_bytes": 1150976,
-    "cycles": 320,
-    "duration_seconds": 601.7353506659983,
-    "http_status_latency": {
-      "samples": 9950,
-      "median_ms": 6.414062499970896,
-      "p95_ms": 10.561749999396852,
-      "max_ms": 64.94674999885319
-    },
-    "sampled_peak_rss_bytes": 11386880,
-    "rss_start_bytes": 6455296,
-    "rss_end_bytes": 11288576,
-    "correctness": "passed",
-    "restart_history": "passed",
-    "runs_summary": {
-      "backup_seconds": {
-        "min": 0.2529211250002845,
-        "median": 0.4099972495005204,
-        "max": 0.7509708749985293
+    "cycles": 399,
+    "duration_seconds": 600.6011817089748,
+    "runs": [
+      {
+        "backup_seconds": 0.02584945800481364,
+        "restore_seconds": 0.4148260410001967,
+        "payload_bytes": 1177542
       },
-      "restore_seconds": {
-        "min": 0.22708383299868728,
-        "median": 0.41089500050020433,
-        "max": 0.6398566670013679
+      {
+        "backup_seconds": 0.05017125001177192,
+        "restore_seconds": 0.41432691700174473,
+        "payload_bytes": 1177542
       },
-      "payload_bytes": {
-        "min": 1151909,
-        "median": 1151909.0,
-        "max": 1151909
+      {
+        "backup_seconds": 0.055225416988832876,
+        "restore_seconds": 0.4166575830022339,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04900429199915379,
+        "restore_seconds": 0.4137193750066217,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05108475001179613,
+        "restore_seconds": 0.4354711249761749,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.037870333006139845,
+        "restore_seconds": 0.40465279199997894,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.055929250025656074,
+        "restore_seconds": 0.4039693330123555,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05226500000571832,
+        "restore_seconds": 0.4080836659995839,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04996870900504291,
+        "restore_seconds": 0.412495874974411,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.046328958007507026,
+        "restore_seconds": 0.41937416698783636,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05039420799585059,
+        "restore_seconds": 0.4388828750234097,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.051757374982116744,
+        "restore_seconds": 0.43875837497762404,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05870862500160001,
+        "restore_seconds": 0.41534762500668876,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.06018383300397545,
+        "restore_seconds": 0.4342063330113888,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05810562497936189,
+        "restore_seconds": 0.4025685839878861,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.049225708993617445,
+        "restore_seconds": 0.44003870800952427,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.058211291005136445,
+        "restore_seconds": 0.43580616600229405,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05276979098562151,
+        "restore_seconds": 0.42306154198013246,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.060523124993778765,
+        "restore_seconds": 0.4075507500092499,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04815637500723824,
+        "restore_seconds": 0.4169924589805305,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.060050415981095284,
+        "restore_seconds": 0.43564195799990557,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05046349999611266,
+        "restore_seconds": 0.40886962501099333,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05775566698866896,
+        "restore_seconds": 0.4070288340153638,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.051245167007436976,
+        "restore_seconds": 0.4164935830049217,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05576458299765363,
+        "restore_seconds": 0.4102588329988066,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05106975001399405,
+        "restore_seconds": 0.4424355840019416,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.056199624988948926,
+        "restore_seconds": 0.4283650830038823,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.059795834007672966,
+        "restore_seconds": 0.3952812080096919,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054922500014072284,
+        "restore_seconds": 0.4052571250067558,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04992483300156891,
+        "restore_seconds": 0.38521304199821316,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05948900000657886,
+        "restore_seconds": 0.41119729200727306,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05917704099556431,
+        "restore_seconds": 0.4291711659752764,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05345879201195203,
+        "restore_seconds": 0.40653862501494586,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054181207990041,
+        "restore_seconds": 0.40916725000715815,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05902600000263192,
+        "restore_seconds": 0.41379487499943934,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05424550001043826,
+        "restore_seconds": 0.4088976659986656,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05112770799314603,
+        "restore_seconds": 0.4416793330165092,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.060535334021551535,
+        "restore_seconds": 0.40360854199388996,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.052867708989651874,
+        "restore_seconds": 0.3933121250011027,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05469654200715013,
+        "restore_seconds": 0.44027495800401084,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05118495799251832,
+        "restore_seconds": 0.43876287498278543,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.059162541991099715,
+        "restore_seconds": 0.41823529201792553,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054143167013535276,
+        "restore_seconds": 0.4308984999952372,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0560693749866914,
+        "restore_seconds": 0.41774525001528673,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.056298957992112264,
+        "restore_seconds": 0.408339417015668,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05415791700943373,
+        "restore_seconds": 0.4093080419988837,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.06078550001257099,
+        "restore_seconds": 0.4064714170235675,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054576291993726045,
+        "restore_seconds": 0.4167302920250222,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.03235366701846942,
+        "restore_seconds": 0.37178954100818373,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05307750002248213,
+        "restore_seconds": 0.41140737498062663,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05185225000604987,
+        "restore_seconds": 0.407798250002088,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05367554200347513,
+        "restore_seconds": 0.4511642080033198,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054262291989289224,
+        "restore_seconds": 0.41068375000031665,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.049566582980332896,
+        "restore_seconds": 0.44439012501970865,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.06275391698000021,
+        "restore_seconds": 0.41194350001751445,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.050747582979965955,
+        "restore_seconds": 0.4027772909903433,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.051472874998580664,
+        "restore_seconds": 0.42302979200030677,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04996237499290146,
+        "restore_seconds": 0.40758504200493917,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05206191600882448,
+        "restore_seconds": 0.41763800001353957,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05201258297893219,
+        "restore_seconds": 0.41090375001658686,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04678991698892787,
+        "restore_seconds": 0.4251290000102017,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05377274999045767,
+        "restore_seconds": 0.4110797090106644,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.059742707991972566,
+        "restore_seconds": 0.4147647079953458,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05237529199803248,
+        "restore_seconds": 0.40965508299996145,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05694895898341201,
+        "restore_seconds": 0.4142091249814257,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05302799999481067,
+        "restore_seconds": 0.4140915409952868,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04934812500141561,
+        "restore_seconds": 0.4216075419972185,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.051207832992076874,
+        "restore_seconds": 0.414561749988934,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.049400708987377584,
+        "restore_seconds": 0.4137011249840725,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0514580000017304,
+        "restore_seconds": 0.40454395799315535,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.052496082993457094,
+        "restore_seconds": 0.4046669999952428,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05049374999362044,
+        "restore_seconds": 0.4253670829930343,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05717095799627714,
+        "restore_seconds": 0.42303141599404626,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05072570900665596,
+        "restore_seconds": 0.41383162498823367,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04885141699924134,
+        "restore_seconds": 0.45286870800191537,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05442254198715091,
+        "restore_seconds": 0.412323833006667,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0561573330196552,
+        "restore_seconds": 0.4483965839899611,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04848762499750592,
+        "restore_seconds": 0.42442737499368377,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.056874874979257584,
+        "restore_seconds": 0.40965449999202974,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.052506750012980774,
+        "restore_seconds": 0.41459291698993184,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05235949999769218,
+        "restore_seconds": 0.39155016699805856,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05100491701159626,
+        "restore_seconds": 0.4325792500167154,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05241500001284294,
+        "restore_seconds": 0.4047457499837037,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05264579100185074,
+        "restore_seconds": 0.40583766700001433,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05034962500212714,
+        "restore_seconds": 0.4039007500105072,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.046817166992696,
+        "restore_seconds": 0.41074474999913946,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05612974998075515,
+        "restore_seconds": 0.45675099999061786,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.06322204100433737,
+        "restore_seconds": 0.4178185419877991,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05644350001239218,
+        "restore_seconds": 0.3988375419867225,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04804862500168383,
+        "restore_seconds": 0.39444820801145397,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.058407959004398435,
+        "restore_seconds": 0.41346745801274665,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.061618167004780844,
+        "restore_seconds": 0.41200487499008887,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0478487919899635,
+        "restore_seconds": 0.411705291015096,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0583502090012189,
+        "restore_seconds": 0.4288293330173474,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.058738250023452565,
+        "restore_seconds": 0.42085529200267047,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.055003416986437514,
+        "restore_seconds": 0.42240429201046936,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05028391699306667,
+        "restore_seconds": 0.3980660419911146,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.057107542001176625,
+        "restore_seconds": 0.432788417005213,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.047350125008961186,
+        "restore_seconds": 0.4045228749746457,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05162962502799928,
+        "restore_seconds": 0.44282274998840876,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04598616700968705,
+        "restore_seconds": 0.4381391250062734,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04928891599411145,
+        "restore_seconds": 0.44064541699481197,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04825754201738164,
+        "restore_seconds": 0.41056629200465977,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.049063249985920265,
+        "restore_seconds": 0.4410227079933975,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05087545799324289,
+        "restore_seconds": 0.40008141699945554,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05374175001634285,
+        "restore_seconds": 0.40008200000738725,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.058176582999294624,
+        "restore_seconds": 0.44238466600654647,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04622887499863282,
+        "restore_seconds": 0.41832500000600703,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054919624992180616,
+        "restore_seconds": 0.38073712500045076,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04805229199700989,
+        "restore_seconds": 0.41380379200563766,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04806816601194441,
+        "restore_seconds": 0.4117099159921054,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04937237498234026,
+        "restore_seconds": 0.4402950419753324,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04765866600791924,
+        "restore_seconds": 0.4179520419856999,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05082791700260714,
+        "restore_seconds": 0.415580000000773,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05804137501399964,
+        "restore_seconds": 0.4187424590054434,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05903466700692661,
+        "restore_seconds": 0.412514249997912,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05366174998925999,
+        "restore_seconds": 0.3921289580175653,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05559337500017136,
+        "restore_seconds": 0.3930827500007581,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05492749999393709,
+        "restore_seconds": 0.4456134589854628,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.028738624998368323,
+        "restore_seconds": 0.41544054201222025,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05261129199061543,
+        "restore_seconds": 0.41699137500836514,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05212116599432193,
+        "restore_seconds": 0.4439218330080621,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05503679197863676,
+        "restore_seconds": 0.4404339170141611,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05737958298414014,
+        "restore_seconds": 0.4169936659745872,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05543558398494497,
+        "restore_seconds": 0.41596795900841244,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.053539208020083606,
+        "restore_seconds": 0.41739720798796043,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0557161670003552,
+        "restore_seconds": 0.4162024580000434,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.031622709007933736,
+        "restore_seconds": 0.4450312919798307,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.058689291996415704,
+        "restore_seconds": 0.43041162501322106,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05914187498274259,
+        "restore_seconds": 0.41741562500828877,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.056385999982012436,
+        "restore_seconds": 0.41646979202050716,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05318324998370372,
+        "restore_seconds": 0.44052141602151096,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.056609958002809435,
+        "restore_seconds": 0.4266222500009462,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05180329200811684,
+        "restore_seconds": 0.4134477500047069,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05854712499422021,
+        "restore_seconds": 0.4303354579897132,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.06174612499307841,
+        "restore_seconds": 0.4113442079978995,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.049888832989381626,
+        "restore_seconds": 0.4203999169985764,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04896612500306219,
+        "restore_seconds": 0.41411724998033606,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0477532499935478,
+        "restore_seconds": 0.41488654201384634,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0531300840084441,
+        "restore_seconds": 0.3944039999914821,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05145670898491517,
+        "restore_seconds": 0.39312166700256057,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.06057454098481685,
+        "restore_seconds": 0.39620766599546187,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0586435419972986,
+        "restore_seconds": 0.38147762499284,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05603062498266809,
+        "restore_seconds": 0.3911106250016019,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.049530416989000514,
+        "restore_seconds": 0.38716920898878016,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.055015208024997264,
+        "restore_seconds": 0.4080020830151625,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0555282499990426,
+        "restore_seconds": 0.39598462500725873,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05719866600702517,
+        "restore_seconds": 0.4063979579950683,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05557354100164957,
+        "restore_seconds": 0.39412945799995214,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05628799999249168,
+        "restore_seconds": 0.4089960420096759,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.053759458009153605,
+        "restore_seconds": 0.3873232499754522,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05571229101042263,
+        "restore_seconds": 0.40812704199925065,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.053394040995044634,
+        "restore_seconds": 0.42215708299772814,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05300449999049306,
+        "restore_seconds": 0.420873416995164,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054135542013682425,
+        "restore_seconds": 0.4193337910110131,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05629279199638404,
+        "restore_seconds": 0.41512562497518957,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05650145802064799,
+        "restore_seconds": 0.4230801249796059,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.058708208991447464,
+        "restore_seconds": 0.3994138750131242,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054876834008609876,
+        "restore_seconds": 0.40196495898999274,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054787542001577094,
+        "restore_seconds": 0.42667074999189936,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.06236158299725503,
+        "restore_seconds": 0.44394029199611396,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.055197999987285584,
+        "restore_seconds": 0.4152507500257343,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05866304200026207,
+        "restore_seconds": 0.40811379201477394,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05917791699175723,
+        "restore_seconds": 0.43627754200133495,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.052767250017495826,
+        "restore_seconds": 0.41198020800948143,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05270400000154041,
+        "restore_seconds": 0.4151780829997733,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.051675082999281585,
+        "restore_seconds": 0.42125966600724496,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05028991602011956,
+        "restore_seconds": 0.42080479199648835,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.050179208017652854,
+        "restore_seconds": 0.44229450001148507,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.050390791991958395,
+        "restore_seconds": 0.4174492080055643,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05131758301286027,
+        "restore_seconds": 0.4191294999909587,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05259112498606555,
+        "restore_seconds": 0.4240022500162013,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05062245798762888,
+        "restore_seconds": 0.41627862499444745,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0537439999752678,
+        "restore_seconds": 0.44723104199511,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04860758301219903,
+        "restore_seconds": 0.4242269169772044,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.055750667001120746,
+        "restore_seconds": 0.4151542080217041,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.052984333015047014,
+        "restore_seconds": 0.44986699998844415,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05515241698594764,
+        "restore_seconds": 0.42792954199831,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0503234589996282,
+        "restore_seconds": 0.4143646250013262,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.061114749987609684,
+        "restore_seconds": 0.415266124997288,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.06038641699706204,
+        "restore_seconds": 0.44235458300681785,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04987191699910909,
+        "restore_seconds": 0.41256216599140316,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04945962500642054,
+        "restore_seconds": 0.44858654201379977,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04715212501469068,
+        "restore_seconds": 0.39315024999086745,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04576558401458897,
+        "restore_seconds": 0.3944356669962872,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05781920801382512,
+        "restore_seconds": 0.4036227499891538,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.059900666994508356,
+        "restore_seconds": 0.42520825000246987,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05113358300877735,
+        "restore_seconds": 0.4153532080235891,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05442254201625474,
+        "restore_seconds": 0.4206374589994084,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.049288292007986456,
+        "restore_seconds": 0.4393407499883324,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05674925001221709,
+        "restore_seconds": 0.44251200000871904,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.059014500002376735,
+        "restore_seconds": 0.42005195797537453,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.055015499994624406,
+        "restore_seconds": 0.41317337498185225,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.053817000007256866,
+        "restore_seconds": 0.41252091599744745,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05881966699962504,
+        "restore_seconds": 0.40284520798013546,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05442841601325199,
+        "restore_seconds": 0.38827075000153854,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.050673041987465695,
+        "restore_seconds": 0.41594345899648033,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.055429000000003725,
+        "restore_seconds": 0.410454958997434,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05491112498566508,
+        "restore_seconds": 0.44038099999306723,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05627737499889918,
+        "restore_seconds": 0.42785620799986646,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.058789500006241724,
+        "restore_seconds": 0.41327970899874344,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.053030792012577876,
+        "restore_seconds": 0.4332086250069551,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05266316598863341,
+        "restore_seconds": 0.44154704100219533,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05939516701619141,
+        "restore_seconds": 0.440730458998587,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05974675001925789,
+        "restore_seconds": 0.41152824999880977,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05386862502200529,
+        "restore_seconds": 0.40639370898134075,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05647679101093672,
+        "restore_seconds": 0.4153047500003595,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05716537497937679,
+        "restore_seconds": 0.40421691598021425,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05843079098849557,
+        "restore_seconds": 0.4364397920144256,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05727662501158193,
+        "restore_seconds": 0.4288483749842271,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.056103000009898096,
+        "restore_seconds": 0.4029697079968173,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.06260579102672637,
+        "restore_seconds": 0.41373445800854824,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05803549999836832,
+        "restore_seconds": 0.41553712499444373,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04866374999983236,
+        "restore_seconds": 0.4096995419822633,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04921479101176374,
+        "restore_seconds": 0.44834829098545015,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05186899998807348,
+        "restore_seconds": 0.4146050830022432,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04945608301204629,
+        "restore_seconds": 0.4075793749943841,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05407637500320561,
+        "restore_seconds": 0.41575758400722407,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05289424999500625,
+        "restore_seconds": 0.40988579200347885,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05229745799442753,
+        "restore_seconds": 0.42201833400758915,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04717229201924056,
+        "restore_seconds": 0.4090998749888968,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05782874999567866,
+        "restore_seconds": 0.411912083014613,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05129483400378376,
+        "restore_seconds": 0.40688062499975786,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.053394207992823794,
+        "restore_seconds": 0.4397215000062715,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05469424999319017,
+        "restore_seconds": 0.41116658301325515,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.052068584016524255,
+        "restore_seconds": 0.4105980420135893,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05323754099663347,
+        "restore_seconds": 0.4147675409913063,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05485212500207126,
+        "restore_seconds": 0.4408914580126293,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.056739916995866224,
+        "restore_seconds": 0.43603679101215675,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.058410208992427215,
+        "restore_seconds": 0.4181938749970868,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05109087500022724,
+        "restore_seconds": 0.44232729100622237,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.051092666981276125,
+        "restore_seconds": 0.4358651660149917,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05179399999906309,
+        "restore_seconds": 0.4135790840082336,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.052264625002862886,
+        "restore_seconds": 0.40660820799530484,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.047396334004588425,
+        "restore_seconds": 0.4152559580106754,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04834587502409704,
+        "restore_seconds": 0.4957118339953013,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.055268417025217786,
+        "restore_seconds": 0.4167306669987738,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.053946166997775435,
+        "restore_seconds": 0.42933641700074077,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05248687500716187,
+        "restore_seconds": 0.40949787499266677,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054277165996609256,
+        "restore_seconds": 0.4035712089971639,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05418720800662413,
+        "restore_seconds": 0.408385625021765,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.051347667002119124,
+        "restore_seconds": 0.41137425001943484,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05228845798410475,
+        "restore_seconds": 0.41087429199251346,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.050396000006003305,
+        "restore_seconds": 0.4304621250194032,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054591166001046076,
+        "restore_seconds": 0.4143646250013262,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.053240542009007186,
+        "restore_seconds": 0.4103672909841407,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05837604100815952,
+        "restore_seconds": 0.44480012499843724,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.057062832987867296,
+        "restore_seconds": 0.40934691700385883,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.06124050001380965,
+        "restore_seconds": 0.4034948749758769,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.059373750002123415,
+        "restore_seconds": 0.4125096659990959,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.06056650000391528,
+        "restore_seconds": 0.42952616699039936,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04784850002033636,
+        "restore_seconds": 0.4319290839775931,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.050899791007395834,
+        "restore_seconds": 0.4104097920062486,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.051082209014566615,
+        "restore_seconds": 0.4283775420044549,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0559796669986099,
+        "restore_seconds": 0.43448166601592675,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.043298874981701374,
+        "restore_seconds": 0.41337483399547637,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05380329099716619,
+        "restore_seconds": 0.40105020799092017,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.048069832992041484,
+        "restore_seconds": 0.43626629197387956,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.056911125022452325,
+        "restore_seconds": 0.43771287499112077,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05117441600305028,
+        "restore_seconds": 0.4039664590090979,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04986962501425296,
+        "restore_seconds": 0.4071509579953272,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.057297625025967136,
+        "restore_seconds": 0.4028607920045033,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.057786041987128556,
+        "restore_seconds": 0.41280983298202045,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.042175250011496246,
+        "restore_seconds": 0.4220039170177188,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04196858301293105,
+        "restore_seconds": 0.4012553330103401,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04402566698263399,
+        "restore_seconds": 0.4044339999963995,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04628941701957956,
+        "restore_seconds": 0.3807267919764854,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04808787498041056,
+        "restore_seconds": 0.4013385419966653,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05103558299015276,
+        "restore_seconds": 0.39757283398648724,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05440575000829995,
+        "restore_seconds": 0.38468079100130126,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04612241598078981,
+        "restore_seconds": 0.4020279580145143,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0483116660034284,
+        "restore_seconds": 0.40629891701973975,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04895037499954924,
+        "restore_seconds": 0.41118233298766427,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.051190750004025176,
+        "restore_seconds": 0.43467820799560286,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05149287500535138,
+        "restore_seconds": 0.3853202080063056,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04914229200221598,
+        "restore_seconds": 0.40486066599260084,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04843591697863303,
+        "restore_seconds": 0.41511633299523965,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05367024999577552,
+        "restore_seconds": 0.4276180000160821,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05430266700568609,
+        "restore_seconds": 0.3870112500153482,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04971929101157002,
+        "restore_seconds": 0.3983150420244783,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05385200001182966,
+        "restore_seconds": 0.41667270800098777,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05372704198816791,
+        "restore_seconds": 0.3893786250264384,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04868300000089221,
+        "restore_seconds": 0.41536149999592453,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.052893749991199,
+        "restore_seconds": 0.4189923749945592,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.053716791997430846,
+        "restore_seconds": 0.4068685839883983,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05415991699555889,
+        "restore_seconds": 0.4012341249908786,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05390758300200105,
+        "restore_seconds": 0.4081920419994276,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.053745374985737726,
+        "restore_seconds": 0.39373616699595004,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05131891701603308,
+        "restore_seconds": 0.43045445799361914,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.055838875006884336,
+        "restore_seconds": 0.3875772920146119,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04838950000703335,
+        "restore_seconds": 0.4037449160241522,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04821708402596414,
+        "restore_seconds": 0.4182898330036551,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.047462332993745804,
+        "restore_seconds": 0.4140535420156084,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.06592758299666457,
+        "restore_seconds": 0.4478024170093704,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.051352249982301146,
+        "restore_seconds": 0.41462250001495704,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04911858300329186,
+        "restore_seconds": 0.412607583013596,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.047391625004820526,
+        "restore_seconds": 0.4139012079976965,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05037820799043402,
+        "restore_seconds": 0.41237000000546686,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05855541699565947,
+        "restore_seconds": 0.4404560829862021,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.046620374982012436,
+        "restore_seconds": 0.41400562500348315,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05465170799288899,
+        "restore_seconds": 0.43378520899568684,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.050551499996799976,
+        "restore_seconds": 0.4169267500110436,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.053318708000006154,
+        "restore_seconds": 0.4424760830006562,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04892654099967331,
+        "restore_seconds": 0.44223495898768306,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054195000004256144,
+        "restore_seconds": 0.4377493750071153,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04886491599609144,
+        "restore_seconds": 0.42461587497382425,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05868362501496449,
+        "restore_seconds": 0.44918416600557975,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.059300624998286366,
+        "restore_seconds": 0.4326018750143703,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.055968083994230255,
+        "restore_seconds": 0.43584012499195524,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0549893340212293,
+        "restore_seconds": 0.4102208339900244,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05551304097753018,
+        "restore_seconds": 0.41240974998800084,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05936466599814594,
+        "restore_seconds": 0.40723020798759535,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.055729040992446244,
+        "restore_seconds": 0.41057633300079033,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05341583301196806,
+        "restore_seconds": 0.41537599998991936,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05181729199830443,
+        "restore_seconds": 0.41129595797974616,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.056060000002617016,
+        "restore_seconds": 0.41897708299802616,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05588220898061991,
+        "restore_seconds": 0.42046224998193793,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05568158399546519,
+        "restore_seconds": 0.4429912919877097,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05615979200229049,
+        "restore_seconds": 0.44276874998467974,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.058176792023004964,
+        "restore_seconds": 0.4175416659854818,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04867645798367448,
+        "restore_seconds": 0.41470599998137914,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05071124999085441,
+        "restore_seconds": 0.4127792909857817,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05062466600793414,
+        "restore_seconds": 0.4202044580015354,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.052214166993508115,
+        "restore_seconds": 0.41579804100911133,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0284161250165198,
+        "restore_seconds": 0.41720587501185946,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05902037501800805,
+        "restore_seconds": 0.41099116700934246,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05521958399913274,
+        "restore_seconds": 0.41539595799986273,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05668900001910515,
+        "restore_seconds": 0.40193154200096615,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.056483374995877966,
+        "restore_seconds": 0.39548529201420024,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05720804200973362,
+        "restore_seconds": 0.4125480829970911,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04932820898829959,
+        "restore_seconds": 0.4110932500043418,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.051355333998799324,
+        "restore_seconds": 0.41351979100727476,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04974337501334958,
+        "restore_seconds": 0.4314625419792719,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05107429198687896,
+        "restore_seconds": 0.42981516697909683,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054265250015305355,
+        "restore_seconds": 0.40530204100650735,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.051967207982670516,
+        "restore_seconds": 0.4192994580080267,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05270649999147281,
+        "restore_seconds": 0.43815874998108484,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05529133300296962,
+        "restore_seconds": 0.4362022079876624,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05607462499756366,
+        "restore_seconds": 0.4395221250015311,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.052820749988313764,
+        "restore_seconds": 0.43813820800278336,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05726258299546316,
+        "restore_seconds": 0.41338045799057,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05244754199520685,
+        "restore_seconds": 0.413950374990236,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05001800000900403,
+        "restore_seconds": 0.41307612499804236,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05297408299520612,
+        "restore_seconds": 0.41099783399840817,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.06043312500696629,
+        "restore_seconds": 0.39977020799415186,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05425391599419527,
+        "restore_seconds": 0.39876749998074956,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05696200000238605,
+        "restore_seconds": 0.39699954201932997,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.053357041004346684,
+        "restore_seconds": 0.40569508299813606,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05559629201889038,
+        "restore_seconds": 0.39757916700909846,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.056748124974546954,
+        "restore_seconds": 0.4145009169878904,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05078691599192098,
+        "restore_seconds": 0.4134101250092499,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05110595902078785,
+        "restore_seconds": 0.40565112500917166,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.055185249977512285,
+        "restore_seconds": 0.4065594159765169,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05262708300142549,
+        "restore_seconds": 0.39267049997579306,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05317404100787826,
+        "restore_seconds": 0.3941095840127673,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05473495801561512,
+        "restore_seconds": 0.41373420899617486,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05210633299429901,
+        "restore_seconds": 0.4133897080027964,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0493420000129845,
+        "restore_seconds": 0.41898899999796413,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05502337499638088,
+        "restore_seconds": 0.41033816698472947,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05791324999881908,
+        "restore_seconds": 0.4045437500171829,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05556974999490194,
+        "restore_seconds": 0.4105565409990959,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.042859749984927475,
+        "restore_seconds": 0.42038149997824803,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05339600000297651,
+        "restore_seconds": 0.41372825001599267,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054311250016326085,
+        "restore_seconds": 0.4139740829996299,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05092762497952208,
+        "restore_seconds": 0.4172596670105122,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.053900750004686415,
+        "restore_seconds": 0.41950545899453573,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05169212500914,
+        "restore_seconds": 0.4212497909902595,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04930416701245122,
+        "restore_seconds": 0.41387699998449534,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0539589160180185,
+        "restore_seconds": 0.4247552090091631,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05850220797583461,
+        "restore_seconds": 0.4161569169955328,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04870154202217236,
+        "restore_seconds": 0.40594825000152923,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04914366698358208,
+        "restore_seconds": 0.4321026669931598,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05464612500509247,
+        "restore_seconds": 0.43261691599036567,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.0451671670016367,
+        "restore_seconds": 0.41168045898666605,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04842966698925011,
+        "restore_seconds": 0.41581870801746845,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04699412500485778,
+        "restore_seconds": 0.4148580829787534,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.048103292006999254,
+        "restore_seconds": 0.40940604198840447,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05458495899802074,
+        "restore_seconds": 0.3687195419915952,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05309362499974668,
+        "restore_seconds": 0.4137493330053985,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05262512501212768,
+        "restore_seconds": 0.39968033399782144,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04420099998242222,
+        "restore_seconds": 0.4122423329972662,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05596724999486469,
+        "restore_seconds": 0.4134684579912573,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05155416700290516,
+        "restore_seconds": 0.4406184160034172,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05040766700403765,
+        "restore_seconds": 0.4457382920081727,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.050495625007897615,
+        "restore_seconds": 0.38733229201170616,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.055734583002049476,
+        "restore_seconds": 0.4340014999906998,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.049885792017448694,
+        "restore_seconds": 0.4112702920101583,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.053704291000030935,
+        "restore_seconds": 0.4124985829985235,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.054267708997940645,
+        "restore_seconds": 0.3984331249957904,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.051710625004488975,
+        "restore_seconds": 0.404320125002414,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.051855500001693144,
+        "restore_seconds": 0.39420600002631545,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05135220900410786,
+        "restore_seconds": 0.3991339589993004,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05089204199612141,
+        "restore_seconds": 0.4356208340032026,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05488945898832753,
+        "restore_seconds": 0.3871356250019744,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05207295899163,
+        "restore_seconds": 0.3968557500047609,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05046425000182353,
+        "restore_seconds": 0.38611066702287644,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.04866408300586045,
+        "restore_seconds": 0.38860791697516106,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.06231391700566746,
+        "restore_seconds": 0.3928754999942612,
+        "payload_bytes": 1177542
+      },
+      {
+        "backup_seconds": 0.05936545800068416,
+        "restore_seconds": 0.4409303330176044,
+        "payload_bytes": 1177542
       }
+    ],
+    "http_status_latency": {
+      "samples": 8852,
+      "median_ms": 4.317395520047285,
+      "p95_ms": 7.747499999823049,
+      "max_ms": 20.986874995287508
     },
-    "raw_evidence": "target/report-analysis/current/stability"
-  },
-  "baseline_commit": "7d0cbbc",
-  "hardware": {
-    "model": "Mac17,3",
-    "memory_bytes": 17179869184,
-    "cpu": "Apple M5"
+    "sampled_peak_rss_bytes": 13336576,
+    "rss_start_bytes": 8650752,
+    "rss_end_bytes": 13336576,
+    "time_output": "      601.10 real         3.81 user        13.01 sys\n            13352960  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                4580  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n               18906  messages sent\n               37848  messages received\n                   1  signals received\n              133206  voluntary context switches\n              239368  involuntary context switches\n         89147350348  instructions retired\n         39727445395  cycles elapsed\n             8339864  peak memory footprint\n",
+    "correctness": "passed",
+    "restart_history": "passed"
   },
   "memory_analysis": {
     "cycles": 20,
@@ -353,225 +2313,68 @@
         "phase": "before",
         "tool": "vmmap",
         "exit_code": 0,
-        "output": "target/report-analysis/memory-followup/before-vmmap.txt"
+        "output": "target/report-refresh/performance/memory/before-vmmap.txt"
       },
       {
         "phase": "before",
         "tool": "heap",
         "exit_code": 0,
-        "output": "target/report-analysis/memory-followup/before-heap.txt"
+        "output": "target/report-refresh/performance/memory/before-heap.txt"
       },
       {
         "phase": "before",
         "tool": "leaks",
         "exit_code": 0,
-        "output": "target/report-analysis/memory-followup/before-leaks.txt"
+        "output": "target/report-refresh/performance/memory/before-leaks.txt"
       },
       {
         "phase": "after",
         "tool": "vmmap",
         "exit_code": 0,
-        "output": "target/report-analysis/memory-followup/after-vmmap.txt"
+        "output": "target/report-refresh/performance/memory/after-vmmap.txt"
       },
       {
         "phase": "after",
         "tool": "heap",
         "exit_code": 0,
-        "output": "target/report-analysis/memory-followup/after-heap.txt"
+        "output": "target/report-refresh/performance/memory/after-heap.txt"
       },
       {
         "phase": "after",
         "tool": "leaks",
         "exit_code": 0,
-        "output": "target/report-analysis/memory-followup/after-leaks.txt"
+        "output": "target/report-refresh/performance/memory/after-leaks.txt"
       }
     ],
-    "sampled_peak_rss_bytes": 10977280,
+    "sampled_peak_rss_bytes": 12845056,
     "snapshots": [
       {
         "phase": "before",
-        "physical_footprint_bytes": 2670592,
-        "malloc_nodes": 1394,
-        "malloc_reported_kb": 387,
+        "physical_footprint_bytes": 4243456,
+        "malloc_nodes": 1689,
+        "malloc_bytes": 593760,
         "leak_count": 0,
         "leaked_bytes": 0
       },
       {
         "phase": "after",
-        "physical_footprint_bytes": 6930432,
-        "malloc_nodes": 1919,
-        "malloc_reported_kb": 463,
+        "physical_footprint_bytes": 8142848,
+        "malloc_nodes": 2262,
+        "malloc_bytes": 686000,
         "leak_count": 0,
         "leaked_bytes": 0
       }
     ],
-    "analysis": "正常进程执行 20 个循环前后，vmmap、heap、leaks 均执行成功。存活 malloc 节点从 1,394 增至 1,919，报告大小从 387 KB 增至 463 KB，physical footprint 从 2,608 KiB 增至 6,768 KiB。两次 leaks 均报告 0 leaks / 0 bytes。"
+    "analysis": "完成 20 次循环并采集运行前后快照。采样峰值 RSS 为 12.25 MiB。物理内存占用从 4,144 KiB 变为 7,952 KiB。存活 malloc 分配从 1,689 个变为 2,262 个，共 669.9 KiB。两次 leaks 分别报告 0 和 0 条泄漏。"
   },
-  "checks": [
-    {
-      "command": "cargo fmt --all --check",
-      "result": "通过"
-    },
-    {
-      "command": "cargo clippy --all-targets --all-features -- -D warnings",
-      "result": "通过，未发现警告"
-    },
-    {
-      "command": "cargo test --all-targets",
-      "result": "42 个组件测试与 6 个应用集成测试通过"
-    },
-    {
-      "command": "cargo build --all-targets",
-      "result": "通过"
-    },
-    {
-      "command": "uv run ruff check .",
-      "result": "通过"
-    },
-    {
-      "command": "uv run basedpyright",
-      "result": "0 errors / 0 warnings"
-    },
-    {
-      "command": "uv run python -m unittest discover -s docs/report/tests",
-      "result": "9 个文档与分析工具测试通过"
-    },
-    {
-      "command": "uv run scripts/update_use_cases.py --check; uv run scripts/update_system_design.py --check",
-      "result": "D2 和 PNG 无漂移"
-    }
-  ],
-  "commands": [
-    "uv run python scripts/analyze_backup.py --stability-seconds 600 --output target/report-analysis/current",
-    "xcrun xctrace export --input target/report-analysis/current/Time-Profiler/server/recording.trace --xpath '/trace-toc/run[@number=\"1\"]/data/table[@schema=\"time-profile\"]' --output target/report-analysis/current/Time-Profiler/samples.xml",
-    "analyze_backup.profile(target/profiling/bak, target/report-analysis/allocations-retry, \"Allocations\")",
-    "analyze_backup.memory_analysis(target/profiling/bak, target/report-analysis/memory-followup)",
-    "uv run scripts/check.py --report",
-    "uv run scripts/analyze_backup.py --instruments-only --output target/report-analysis/signed-instruments"
-  ],
+  "source_tree": "d11bb19d4ed574326b0fb247291d9f7b2ad6c4ff",
+  "command": "uv run --locked scripts/analyze_backup.py --output target/report-refresh/performance",
+  "hardware": {
+    "cpu": "Apple M5",
+    "memory_bytes": 17179869184
+  },
   "findings": [
-    "公开功能和故障回归均通过；组件测试验证文件系统、数据库与编码管线的协作。",
-    "1,000 个 4 KiB 小文件的备份/恢复中位耗时约 3.79/3.65 秒，高于 256 MiB 大文件约 0.15–0.21 秒。后续可用 File Activity 分析逐文件同步与元数据处理成本。",
-    "稳定性测量持续 601.7 秒，320 个循环全部通过；RSS 从约 6.2 MiB 增至约 10.8 MiB，峰值约 10.9 MiB。后续可延长预热后采样并分析分配调用栈。",
-    "Time Profiler 大文件采样中，SHA-256 是最大叶帧热点，可作为后续性能优化的分析入口。",
-    "采集副本加入调试授权后，Allocations 和 Leaks 均完成采集及表格导出；Leaks 表为 0 行，结束时存活堆约 124 KiB。"
-  ],
-  "report_validation": {
-    "template_bytes_unchanged": true,
-    "diagram_visual_review": "passed",
-    "preview": "Updated Quick Look HTML rendered through Chrome, 15 pages; CPU/allocation/leak evidence reviewed. Native Word pagination not independently checked.",
-    "protected_content_compared_with_generation_backup": "passed",
-    "generation_backup": "target/report-backups/20261014-191511-171675/report.docx",
-    "recorded_at": "2026-10-14T11:18:01.204986+00:00"
-  },
-  "instruments_previous_attempts": [
-    {
-      "template": "Time Profiler",
-      "status": "recorded",
-      "cycles": 46,
-      "trace": "target/report-analysis/current/Time-Profiler/server/recording.trace",
-      "toc_export_exit_code": 0,
-      "cpu_summary": {
-        "samples": 14865,
-        "sampled_cpu_seconds": 14.865,
-        "leaf_categories_percent": {
-          "SHA-256": 49.59,
-          "Filesystem/syscalls": 31.15,
-          "Other": 12.51,
-          "Zstd": 6.57,
-          "SQLite": 0.19
-        },
-        "top_leaf_frames": [
-          {
-            "symbol": "_RNvNtCsa7A7AsypVnu_4sha26sha25611compress256",
-            "sampled_ms": 7372.0,
-            "percent": 49.59
-          },
-          {
-            "symbol": "write",
-            "sampled_ms": 3387.0,
-            "percent": 22.79
-          },
-          {
-            "symbol": "_platform_memmove",
-            "sampled_ms": 1352.0,
-            "percent": 9.1
-          },
-          {
-            "symbol": "read",
-            "sampled_ms": 1194.0,
-            "percent": 8.03
-          },
-          {
-            "symbol": "ZSTD_compressBlock_doubleFast_extDict_generic",
-            "sampled_ms": 922.0,
-            "percent": 6.2
-          },
-          {
-            "symbol": "HIST_count_simple",
-            "sampled_ms": 183.0,
-            "percent": 1.23
-          },
-          {
-            "symbol": "ZSTD_compressBlock_doubleFast",
-            "sampled_ms": 39.0,
-            "percent": 0.26
-          },
-          {
-            "symbol": "__open",
-            "sampled_ms": 35.0,
-            "percent": 0.24
-          }
-        ]
-      },
-      "analysis": "35.876 秒采集、46 个循环、14,865 个 CPU 样本。按叶帧权重统计：SHA-256 49.59%，文件读写等系统调用 31.15%，Zstd 6.57%；这些是采样 CPU 占比，不能解释为墙钟时间占比。"
-    },
-    {
-      "template": "Allocations",
-      "status": "failed",
-      "error": "xctrace 启动采集后，目标进程在监听前保持暂停，30 秒内未就绪；关闭采集也超时。无有效分配或泄漏 trace，已清理自有进程。",
-      "analysis": "Instruments 模板未完成有效采集；正常进程的系统内存工具分析单独记录。",
-      "retry": {
-        "template": "Allocations",
-        "status": "failed",
-        "error": "server startup timed out: Starting recording with the Allocations template. Launching process: bak. Time limit: 70.0 s\n",
-        "shutdown_error": "Command '['xcrun', 'xctrace', 'record', '--template', 'Allocations', '--time-limit', '70s', '--output', '/Users/qi7876/projects/software-development-exp/target/report-analysis/allocations-retry/server/recording.trace', '--target-stdout', '/Users/qi7876/projects/software-development-exp/target/report-analysis/allocations-retry/server/server.log', '--no-prompt', '--launch', '--', '/Users/qi7876/projects/software-development-exp/target/profiling/bak', '-d', '/Users/qi7876/projects/software-development-exp/target/report-analysis/allocations-retry/server']' timed out after 30 seconds"
-      }
-    },
-    {
-      "template": "Leaks",
-      "status": "failed",
-      "error": "xctrace 启动采集后，目标进程在监听前保持暂停，30 秒内未就绪；关闭采集也超时。无有效分配或泄漏 trace，已清理自有进程。",
-      "analysis": "Instruments 模板未完成有效采集；正常进程的系统内存工具分析单独记录。"
-    }
-  ],
-  "instrument_signing_diagnosis": {
-    "recorded_at": "2026-10-14T11:12:53.813831+00:00",
-    "cause": "profiling 二进制缺少 Instruments 附加所需的 com.apple.security.get-task-allow 调试授权。",
-    "comparison": [
-      {
-        "case": "without-debug-entitlement",
-        "ready": false,
-        "target_state": "S",
-        "recorder_exit": 2,
-        "recorder_log": "Starting recording with the Allocations template. Launching process: bak. Time limit: 6.0 s\nCtrl-C to stop the recording\nReached specified time limit, ending recording...\nRun issues were detected (trace is still ready to be viewed):\n* [Error] Failed to attach to target: Failed to attach to target process.\n\n* [Error] Failed to attach to target process\n\n\t* [Error] Failed to attach to target process.\n\nRecording failed with errors. Saving output file...\nOutput file saved as: allocation.trace\n"
-      },
-      {
-        "case": "with-debug-entitlement",
-        "ready": true,
-        "target_state": "S",
-        "http_status": 200,
-        "recorder_exit": 0,
-        "recorder_log": "Starting recording with the Allocations template. Launching process: bak. Time limit: 6.0 s\nCtrl-C to stop the recording\nTarget app exited, ending recording...\nRecording completed. Saving output file...\nOutput file saved as: allocation.trace\n"
-      }
-    ],
-    "fix": "复制临时采集程序并进行 ad-hoc 签名，加入调试授权。",
-    "regression_check": "真实 codesign 验证采集副本含调试授权，输入二进制字节保持不变。"
-  },
-  "final_check": {
-    "recorded_at": "2026-10-14T11:15:11.104911+00:00",
-    "command": "uv run scripts/check.py --report",
-    "exit_code": 0,
-    "log": "target/report-analysis/signed-instruments/check.log"
-  }
+    "256 MiB 可压缩输入生成 9.5 KiB 的归档。同大小随机输入生成 256.01 MiB 的归档。",
+    "1,000 个 4 KiB 文件共生成 4.16 MiB 的归档。备份和恢复的耗时中位数分别为 0.060 秒和 3.709 秒。"
+  ]
 }
