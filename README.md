@@ -167,7 +167,7 @@ Set `BAK_BROWSER_CHANNEL=chrome` to use installed Chrome. For report checks, run
 
 ### CI and releases
 
-Pull requests to `main` run `cargo test --locked --all-targets` on Linux and macOS.
+Pull requests to `main` run Rust formatting checks, Clippy, and tests on Linux and macOS.
 In GitHub Actions, select **Release** → **Run workflow** on `main` to build and
 publish both packages. The workflow tags the build commit with the version in
 `Cargo.toml`.
