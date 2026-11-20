@@ -60,7 +60,7 @@ bak keygen --output working-directory-example/backup.key
 bak server start -d working-directory-example
 ```
 
-Release packages already include `working-directory-example/config.json`. The example configuration above loads `backup.key` at startup. Generate it once and reuse it on subsequent starts.
+The example configuration loads `backup.key` at startup. Generate the key once and reuse it on subsequent starts.
 
 1. Open <http://127.0.0.1:8080/>. In **Manage connections**, enter `127.0.0.1:8080` and the example key `example-local-test-key`, then select **Verify and save**.
 2. Put files in `working-directory-example/source`. In **Create backup**, enter `source` and `repository`, then submit.
