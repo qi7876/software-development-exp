@@ -31,12 +31,13 @@ from use_case_model import Actor, Model, UseCase, actor_map, case_map, inverse_r
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_PATH = ROOT / "docs" / "report" / "report.docx"
 GENERATED_DIR = ROOT / "docs" / "report" / "generated"
+EVIDENCE_DIR = ROOT / "docs" / "report" / "evidence"
 GENERATED_CONTENT_WIDTH_CM = 14.0
 BODY_FONT_SIZE_PT = 10.5
 TABLE_FONT_SIZE_PT = 10.5
-VERIFICATION_PATH = ROOT / "docs" / "report" / "verification.json"
-CODEC_MEASUREMENTS_PATH = ROOT / "docs" / "report" / "lz77-measurements.json"
-CURRENT_VERIFICATION_PATH = ROOT / "docs" / "report" / "current-verification.json"
+VERIFICATION_PATH = EVIDENCE_DIR / "verification.json"
+CODEC_MEASUREMENTS_PATH = EVIDENCE_DIR / "lz77-measurements.json"
+CURRENT_VERIFICATION_PATH = EVIDENCE_DIR / "current-verification.json"
 
 
 def _find_section_cell(document: DocumentType, title: str) -> _Cell:

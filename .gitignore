@@ -250,6 +250,7 @@ rustc-ice-*.txt
 # General
 .DS_Store
 ~$*.docx
+~$*.pptx
 .localized
 __MACOSX/
 .AppleDouble
