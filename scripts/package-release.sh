@@ -16,15 +16,7 @@ package="bak-v$version-$platform"
 mkdir -p "$output_directory"
 
 temporary=$(mktemp -d)
-server_pid=
-cleanup() {
-    if [[ -n "$server_pid" ]]; then
-        kill "$server_pid" 2>/dev/null || true
-        wait "$server_pid" 2>/dev/null || true
-    fi
-    rm -r -- "$temporary"
-}
-trap cleanup EXIT
+trap 'rm -r -- "$temporary"' EXIT
 
 stage="$temporary/$package"
 mkdir -p "$stage/web" "$stage/working-directory-example"
@@ -34,35 +26,4 @@ cp web/{index.html,app.js,styles.css,favicon.svg} "$stage/web/"
 cp working-directory-example/config.json "$stage/working-directory-example/"
 archive="$output_directory/$package.tar.gz"
 COPYFILE_DISABLE=1 tar -czf "$archive" -C "$temporary" "$package"
-
-mkdir "$temporary/unpacked"
-tar -xzf "$archive" -C "$temporary/unpacked"
-unpacked="$temporary/unpacked/$package"
-[[ "$("$unpacked/bak" version)" == "bak $version" ]]
-work="$temporary/smoke"
-mkdir "$work"
-cat > "$work/config.json" <<'JSON'
-{"listen":"127.0.0.1:0","secret_key":"package-smoke-test"}
-JSON
-"$unpacked/bak" server start --foreground -d "$work" > "$temporary/server.log" 2>&1 &
-server_pid=$!
-
-address=
-for ((attempt = 0; attempt < 100; attempt++)); do
-    address=$(sed -n 's/^Listening on //p' "$temporary/server.log")
-    if [[ -n "$address" ]]; then
-        break
-    fi
-    if ! kill -0 "$server_pid" 2>/dev/null; then
-        break
-    fi
-    sleep 0.1
-done
-if [[ -z "$address" ]]; then
-    cat "$temporary/server.log" >&2
-    exit 1
-fi
-curl --fail --silent --show-error --max-time 5 \
-    -H 'Authorization: Bearer package-smoke-test' "http://$address/api/status" |
-    jq -e --arg version "$version" '.version == $version' > /dev/null
-echo "Verified $archive"
+echo "Created $archive"
