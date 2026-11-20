@@ -222,7 +222,6 @@ fn startup_failure_is_reported_and_releases_locks() -> TestResult {
     assert!(!failed.status.success());
     assert!(String::from_utf8_lossy(&failed.stderr).contains("server.log"));
     assert!(std::fs::read_to_string(directory.join("server.log"))?.contains("cannot read config"));
-    fixture.config(&directory)?;
     let occupied = std::net::TcpListener::bind("127.0.0.1:0")?;
     std::fs::write(
         directory.join("config.json"),
@@ -232,8 +231,13 @@ fn startup_failure_is_reported_and_releases_locks() -> TestResult {
     )?;
     assert!(!fixture.start(&directory)?.status.success());
     assert!(std::fs::read_to_string(directory.join("server.log"))?.contains("cannot listen"));
-    drop(occupied);
-    success(&fixture.start(&directory)?);
+    // Keep the conflict in place and let the kernel assign the new server a free port.
+    fixture.config(&directory)?;
+    let restarted = fixture.start(&directory)?;
+    if !restarted.status.success() {
+        eprintln!("{}", std::fs::read_to_string(directory.join("server.log"))?);
+    }
+    success(&restarted);
     success(&fixture.command(&["server", "stop"])?);
     Ok(())
 }

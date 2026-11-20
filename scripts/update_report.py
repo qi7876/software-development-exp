@@ -339,7 +339,7 @@ def _add_use_case(
             "关联需求",
             "、".join(case["requirements"] + case["nfr"]),
             "业务规则",
-            _join(case["business_rules"]),
+            " ".join(case["business_rules"]) or "无",
         ),
         ("补充说明", case["notes"], "", ""),
     )
@@ -396,11 +396,6 @@ def _draw_workflow(path: Path) -> None:
 
 
 def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
-    _paragraph(
-        document,
-        anchor,
-        f"文档版本 {model['version']}    更新日期 {model['updated']}",
-    )
     _heading(document, anchor, "1. 任务概述")
     _heading(document, anchor, "1.1 引言", 2)
     _paragraph(
@@ -409,15 +404,16 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "bak 1.0.0 是面向个人用户的本地文件备份软件，支持全量备份、归档列表和完整恢复。"
         "支持文件类型和元数据筛选、Unix 条目与硬链接、可选 Zstd/LZ77 压缩和 "
         "XChaCha20-Poly1305 / AES-256-GCM 内容加密，"
-        "通过认证流、原始大小与 SHA-256 校验验证恢复结果，并以持久化作业提供可查询状态。",
+        "恢复时核对原始大小与容器 SHA-256，并对加密载荷验证分块认证标签。"
+        "客户端可查询持久化作业状态。",
     )
     _heading(document, anchor, "1.2 综合描述", 2)
     _paragraph(
         document,
         anchor,
-        "产品发布单一 Rust 可执行文件 bak，读取工作目录中的 "
+        "发行包包含 Rust 可执行文件 bak 和 web-ui/ 静态资源。bak 读取工作目录中的 "
         "config.json，运行 axum/Tokio HTTP 服务。"
-        "用户通过独立部署的 Web 控制台或 curl 调用 Bearer 认证接口。"
+        "用户通过可选的 Web 控制台或 curl 调用 Bearer 认证接口。"
         "浏览器可选择本机或远程 API，后台 worker 顺序执行作业；"
         "支持配置式定时备份。",
     )
@@ -498,8 +494,12 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         ("接口", "行为"),
         (
             (
-                "GET /；/ui/* 静态资源",
-                "web_ui.enabled=true 时从 web_ui.path 读取公开控制台文件，否则返回运行提示。",
+                "GET /",
+                "启用控制台时读取 index.html，关闭时返回 bak is running。",
+            ),
+            (
+                "GET /ui/app.js、/ui/styles.css、/ui/favicon.svg",
+                "启用控制台时，从 web_ui.path 读取对应的公开静态文件。",
             ),
             (
                 "GET /api/status",
@@ -507,15 +507,14 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
             ),
             (
                 "POST /api/backups",
-                "JSON: source、repository、filter、compression；可选 "
-                "compression 为 null 或算法配置对象，"
-                "另可指定 encryption 对象（algorithm、key_id）；"
-                "先入库再返回 "
-                "202/Location。",
+                "JSON 必填 source、repository、filter。"
+                "可选 compression 与 encryption，省略或填 null 即关闭对应编码。"
+                "作业入库后返回 HTTP 202 和 Location。",
             ),
             (
                 "GET /api/backups?repository=PATH",
-                "返回编号、创建时间、压缩状态与密钥信息；时间降序、同时间编号升序。",
+                "返回 backups 数组，包含 backup_id、created_at、compression 和 encryption。"
+                "按时间降序排序，同时间按编号升序。",
             ),
             (
                 "GET /api/schedules；POST /api/schedules/{id}/run",
@@ -524,7 +523,8 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
             ),
             (
                 "POST /api/restores",
-                "JSON: repository、backup_id、destination；返回 202 和持久化作业。",
+                "JSON 必填 repository、backup_id、destination。"
+                "作业入库后返回 HTTP 202 和 Location。",
             ),
             (
                 "GET /api/jobs?limit=20&before=CURSOR",
@@ -540,7 +540,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        "所有 /api/ 请求使用 Authorization: "
+        "API 请求使用 Authorization: "
         "Bearer <secret_key>。接受响应包含 "
         "job_id、kind、state、"
         "result、error；成功备份结果为 backup_id，"
@@ -566,8 +566,8 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
             ("secret_key", "API 认证使用的 Bearer key，填写有效的非空字符串。"),
             (
                 "web_ui",
-                "可省略，默认关闭；enabled=true 时必须通过 path 指定静态资源目录，"
-                "路径相对工作目录或为绝对路径。",
+                "默认关闭。enabled=true 时通过 path 指定静态资源目录，"
+                "可使用相对工作目录的路径或绝对路径。启动时检查四个资源文件，收到请求时读取。",
             ),
             (
                 "encryption.keys",
@@ -589,10 +589,13 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        "在 working-directory-example 中创建 source、repository 和 restored 目录。"
-        "执行 bak keygen --output working-directory-example/backup.key，然后执行 "
-        "bak server start -d working-directory-example。示例监听 127.0.0.1:8080。"
-        "配置顶层使用表中列出的字段。",
+        "在仓库或解包目录中创建 working-directory-example，并在其中建立 source、"
+        "repository 和 restored。按 README.md 示例创建 working-directory-example/config.json，"
+        "将 listen 设为 127.0.0.1:8080，web_ui.enabled 设为 true，"
+        "web_ui.path 设为 ../web-ui。首次启动前执行 "
+        "bak keygen --output working-directory-example/backup.key，再运行 "
+        "bak server start -d working-directory-example。浏览器打开服务地址，"
+        "在连接管理中使用配置的 secret_key 验证并保存连接。",
     )
     _paragraph(
         document, anchor,
@@ -613,10 +616,11 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        "恢复使用独立的已有空目录。服务校验全部条目路径，再以 "
-        "create_new 写入并自动解密/解压，验证最终认证块、原文大小和 SHA-256，"
-        "重建链接和特殊条目、应用 Unix 元数据并同步。恢复设备节点需要相应权限和文件系统支持。"
-        "正常关闭停止接收请求与领取作业，完成活动操作并留下 "
+        "恢复目标是与仓库分离的已有空目录。服务校验全部条目路径，再按归档设置解密、解压，"
+        "核对条目头与原文大小，同时重建目录、链接和特殊条目，以 create_new 创建普通文件。"
+        "写入条目后验证流结束标记、加密载荷的最终认证块与容器 SHA-256，"
+        "再应用并同步目录和根目录的 Unix 元数据。恢复设备节点需要相应权限和文件系统支持。"
+        "正常关闭停止接收新连接与领取作业，完成活动操作并留下 "
         "queued 作业。重启按持久化任务 ID 对账中断备份，通过完整性校验的输出补记成功；"
         "中断恢复记为失败并保留输出，随后按队列顺序执行等待中的作业。"
         "已提交作业独立执行，每次 POST 成功入队都会创建作业。",
@@ -625,7 +629,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document, anchor,
         "自包含文件采用容器 magic、编码载荷、明文 manifest、长度、结束标记和末尾 32 字节摘要。"
         "SHA-256 覆盖除摘要自身外的全部容器字节，元数据上限 64 MiB；"
-        "归档记录密钥标识和指纹，服务端管理密钥文件。复制同名 .bak 到新仓库即可列出与恢复。"
+        "复制同名 .bak 到新仓库即可列出。恢复加密归档时，在目标服务配置原密钥标识和原密钥。"
         "列表读取正式归档的元数据，成本随文件数和元数据规模增长。"
         "版本或元数据校验失败时返回归档错误。",
     )
@@ -660,7 +664,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        "压缩等级为 1–22、默认 3，Web UI "
+        "Zstd 压缩等级为 1–22，选择 Zstd 时默认等级为 3。Web UI "
         "通过双向同步的滑块和数字输入框设置本次 Zstd 压缩等级。"
         "内部 BackupOptions 的压缩和加密均为 "
         "Option；None 禁用，Some 保存 "
@@ -681,28 +685,31 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        "命名密钥在启动时加载，排队任务固定 key_id 和 "
-        "fingerprint 和 algorithm，执行时按标识和指纹匹配已配置的密钥。"
-        "加密保护归档流内的条目头与文件数据；外层明文元数据中的文件名、大小、校验和、Unix "
-        "元数据和链接目标可以直接读取。"
+        "命名密钥在启动时加载，排队任务保存 key_id、fingerprint 和 algorithm，"
+        "执行时按标识和指纹匹配已配置的密钥。"
+        "加密保护归档流内的条目头与文件数据。外层 manifest 明文保存路径、文件大小、"
+        "Unix 元数据、链接目标等信息，容器尾部保存 SHA-256 摘要。"
         "浏览器保存 API 认证 key，归档加密密钥由服务端从配置文件加载。",
     )
     _paragraph(
         document,
         anchor,
         "XChaCha20-Poly1305 保留 v2 认证分块格式；AES-256-GCM 使用 v3 头部，"
-        "包含 32 字节随机盐和 7 字节 STREAM nonce 前缀。HKDF-SHA256 从配置密钥派生"
-        "每个归档独立的 32 字节密钥。两种算法均采用 128 KiB 分块、16 字节标签和必需的最终块；"
-        "认证数据绑定头部、备份、路径、压缩配置与密钥指纹，AES 另绑定算法。",
+        "包含 32 字节随机盐和 7 字节 STREAM nonce 前缀。AES 使用 HKDF-SHA256 "
+        "从配置密钥与随机盐派生各归档的 32 字节密钥。两种算法均采用 128 KiB 分块、"
+        "16 字节标签和最终认证块，认证数据绑定头部、备份编号、归档文件名、压缩配置与密钥指纹。"
+        "AES 的认证数据还包含算法名称。",
     )
     _heading(document, anchor, "3.5 配置式定时备份", 2)
     _paragraph(
         document,
         anchor,
-        "示例：timezone=Asia/Shanghai，cron=0 2 * * * 表示每天当地 02:00。"
-        "配置修改后重启生效；示例计划默认禁用。省略筛选表示不过滤，省略压缩默认 Zstd 3，"
-        "compression=null 禁用压缩，省略加密表示不加密；相对路径以工作目录解析。"
-        "启用计划在启动时校验规则与密钥，无效设置阻止启动；文件系统错误在执行时成为失败任务。",
+        "timezone=Asia/Shanghai、cron=0 2 * * * 表示每天当地 02:00。"
+        "README 启动示例显式设置 enabled=false，省略 enabled 则启用自动调度。"
+        "省略筛选时保留所有受支持的条目，省略压缩时使用 Zstd 3，"
+        "compression=null 关闭压缩，省略加密时明文保存。相对路径以工作目录解析。"
+        "启动时校验全部计划的 Cron、筛选和压缩参数，并解析启用计划所需的密钥。"
+        "文件系统错误在执行时记入任务结果。",
     )
     _paragraph(
         document,
@@ -716,12 +723,12 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        "任务保存配置快照以及 schedule_id、scheduled_for（匹配分钟的 UTC Unix 毫秒）；"
-        "计划作业保存计划 ID。立即运行计划使用请求时刻。"
+        "计划作业保存配置快照和 schedule_id。scheduled_for 以 UTC Unix 毫秒记录"
+        "自动触发的匹配分钟或立即执行的请求时刻。"
         "Scheduled backups 页面查看全部启用/停用计划，Back up now 按服务端配置立即入队；"
         "立即运行使用独立入队路径，同计划活动任务返回 409。编辑配置后重启服务。"
         "调度器与 HTTP、worker 共同受监督；调度失败使服务失败退出，"
-        "正常关闭停止新增任务并等待活动操作，已提交 queued 作业留给重启。",
+        "正常关闭停止接收新连接，结束调度和领取，等待活动操作，保留 queued 作业供重启执行。",
     )
     _heading(document, anchor, "4. 非功能约束")
     _table(
@@ -815,17 +822,6 @@ def _populate_system_design(
     anchor: Paragraph,
     model: SystemDesignModel,
 ) -> None:
-    _paragraph(
-        document,
-        anchor,
-        f"文档版本 {model['version']}    更新日期 {model['updated']}",
-    )
-    _paragraph(
-        document,
-        anchor,
-        "本章描述 bak 1.0.0 的服务进程、模块职责、数据模型与关键交互。"
-        "类图展示 Rust 类型、模块及其静态关系。",
-    )
     _heading(document, anchor, "1. 开发环境和工具")
     _table(
         document,
@@ -974,8 +970,8 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             ),
             (
                 "属性测试",
-                "Proptest 是生成输入的技术，可用于不同测试级别；组件属性 "
-                "32 例、HTTP 属性 8 例，固定种子、缩减与回归重放。",
+                "Proptest 使用固定种子，每项组件属性生成 32 组输入，每项 HTTP 属性生成 8 组。"
+                "失败时缩减反例，HTTP 属性测试保存反例供回归重放。",
             ),
             (
                 "性能测试",
@@ -1048,7 +1044,11 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
                 "将九种编码模式的 .bak 复制到新仓库，验证列表与恢复。"
                 "启动对账覆盖临时文件发布、重复启动、候选冲突、密钥和事务错误。",
             ),
-            ("SIGTERM", "停止调度；活动作业完成，queued 留给下一次启动；HTTP 在活动操作期间响应。"),
+            (
+                "响应性与 SIGTERM",
+                "备份运行时查询服务和作业状态，并提交排队作业。"
+                "发送 SIGTERM 后监听端口关闭，活动作业完成，queued 留给下一次启动。",
+            ),
             (
                 "SIGKILL",
                 "已发布文件或唯一临时候选通过校验后补记成功，其余中断任务记为 failed/500。"

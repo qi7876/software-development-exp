@@ -61,7 +61,7 @@ def _class_source(diagram: ClassDiagram) -> str:
                 value = f": {quote(member_type.strip())}" if separator else ""
                 lines.append(f"      {quote(name.strip())}{value}")
             for operation in element["operations"]:
-                name, separator, return_type = operation.rpartition(":")
+                name, separator, return_type = operation.rpartition(": ")
                 if not separator:
                     name = operation
                 value = f": {quote(return_type.strip())}" if separator else ""
