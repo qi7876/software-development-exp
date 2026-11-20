@@ -4,15 +4,15 @@
 
 ## Install and run
 
-Download the Linux x86_64 or macOS ARM64 package and `SHA256SUMS` from
+Download the Linux x86_64 or macOS ARM64 package from
 [GitHub Releases](https://github.com/qi7876/software-development-exp/releases).
-For example, verify and extract the Linux package for v1.0.0.
+GitHub provides a SHA-256 digest for each uploaded package. Compare the output of
+`shasum -a 256 <package>` with the digest shown on the release page.
 
 ```sh
-shasum -a 256 --ignore-missing -c SHA256SUMS &&
-  tar -xzf bak-v1.0.0-linux-x86_64.tar.gz &&
-  cd bak-v1.0.0-linux-x86_64 &&
-  export PATH="$PWD:$PATH"
+tar -xzf bak-v1.0.0-linux-x86_64.tar.gz
+cd bak-v1.0.0-linux-x86_64
+export PATH="$PWD:$PATH"
 ```
 
 For a source install, use the Rust toolchain pinned in [rust-toolchain.toml](rust-toolchain.toml),
@@ -167,11 +167,10 @@ Set `BAK_BROWSER_CHANNEL=chrome` to use installed Chrome. For report checks, run
 
 ### CI and releases
 
-Pull requests to `main` run Rust formatting, Clippy, and tests, then build both release packages.
+Pull requests to `main` run `cargo test --locked --all-targets` on Linux and macOS.
 In GitHub Actions, select **Release** → **Run workflow** on `main` to build and
-download the packages and checksums from the `release-files` artifact. Enable
-**publish** to create the GitHub Release and tag the tested commit with the
-version in `Cargo.toml`.
+publish both packages. The workflow tags the build commit with the version in
+`Cargo.toml`.
 
 ## Architecture
 
