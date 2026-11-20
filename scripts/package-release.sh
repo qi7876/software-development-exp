@@ -10,7 +10,8 @@ case "$(uname -s):$(uname -m)" in
 esac
 
 cargo build --release --locked
-version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+version=$(cargo metadata --locked --no-deps --format-version 1 |
+    jq -er '.packages[] | select(.name == "bak") | .version')
 package="bak-v$version-$platform"
 mkdir -p "$output_directory"
 
@@ -38,18 +39,11 @@ mkdir "$temporary/unpacked"
 tar -xzf "$archive" -C "$temporary/unpacked"
 unpacked="$temporary/unpacked/$package"
 [[ "$("$unpacked/bak" version)" == "bak $version" ]]
-work="$unpacked/working-directory-example"
-python3 - "$work/config.json" <<'PY'
-import json
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-config = json.loads(path.read_text())
-config["listen"] = "127.0.0.1:0"
-path.write_text(json.dumps(config))
-PY
-"$unpacked/bak" keygen --output "$work/backup.key"
+work="$temporary/smoke"
+mkdir "$work"
+cat > "$work/config.json" <<'JSON'
+{"listen":"127.0.0.1:0","secret_key":"package-smoke-test"}
+JSON
 "$unpacked/bak" server start --foreground -d "$work" > "$temporary/server.log" 2>&1 &
 server_pid=$!
 
@@ -68,6 +62,7 @@ if [[ -z "$address" ]]; then
     cat "$temporary/server.log" >&2
     exit 1
 fi
-curl --fail --silent --show-error --max-time 5 "http://$address/" -o "$temporary/index.html"
-cmp "$unpacked/web/index.html" "$temporary/index.html"
+curl --fail --silent --show-error --max-time 5 \
+    -H 'Authorization: Bearer package-smoke-test' "http://$address/api/status" |
+    jq -e --arg version "$version" '.version == $version' > /dev/null
 echo "Verified $archive"

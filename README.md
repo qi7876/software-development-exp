@@ -167,7 +167,7 @@ Set `BAK_BROWSER_CHANNEL=chrome` to use installed Chrome. For report checks, run
 
 ### CI and releases
 
-Pull requests to `main` run the project checks and build both release packages.
+Pull requests to `main` run Rust formatting, Clippy, and tests, then build both release packages.
 In GitHub Actions, select **Release** → **Run workflow** on `main` to build and
 download the packages and checksums from the `release-files` artifact. Enable
 **publish** to create the GitHub Release and tag the tested commit with the

@@ -36,7 +36,8 @@ jobs:
         id: metadata
         shell: bash
         run: |
-          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+          version=$(cargo metadata --locked --no-deps --format-version 1 |
+              jq -er '.packages[] | select(.name == "bak") | .version')
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
   verify:

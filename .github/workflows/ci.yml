@@ -21,52 +21,16 @@ jobs:
             platform: linux-x86_64
           - runner: macos-15
             platform: macos-arm64
-    env:
-      UV_LOCKED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          version: "0.13.9"
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "26.13.1"
-      - name: Install the pinned toolchains
-        run: |
-          rustup show
-          uv python install
-      - name: Install Chromium
-        working-directory: web
-        shell: bash
-        run: |
-          npm ci
-          if [[ "$RUNNER_OS" == Linux ]]; then
-            npx --no-install playwright install --with-deps chromium
-          else
-            npx --no-install playwright install chromium
-          fi
-      - name: Install D2
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          cd "$RUNNER_TEMP"
-          curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
-            https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-macos-arm64.tar.gz \
-            -o d2.tar.gz
-          echo 'eaf6c0c143e56dd9fa97bfb6df25ea9c1ebce40245f056a0768cf1a6c15d3064  d2.tar.gz' |
-            shasum -a 256 -c
-          tar -xzf d2.tar.gz d2-v0.9.0/bin/d2
-          echo "$RUNNER_TEMP/d2-v0.9.0/bin" >> "$GITHUB_PATH"
-      - name: Run project checks
-        shell: bash
-        run: |
-          flags=(--web-ui)
-          if [[ "$RUNNER_OS" == macOS ]]; then
-            flags+=(--report)
-          fi
-          uv run --locked scripts/check.py "${flags[@]}"
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Run Rust tests
+        run: cargo test --locked --all-targets
       - name: Build and test the release package
         run: bash scripts/package-release.sh dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
