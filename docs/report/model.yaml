@@ -1,6 +1,6 @@
 {
-  "version": "6.0",
-  "updated": "2026-11-19",
+  "version": "6.1",
+  "updated": "2026-11-20",
   "title": "bak 当前实现系统设计",
   "diagrams": [
     {
@@ -18,14 +18,14 @@
       "details": [
         "浏览器可连接同一或另一台 bak API；地址和明文 API key 保存在浏览器 origin 的 localStorage。",
         "工作目录使用 schema v5 作业库。仓库存放自包含 v10 备份。加密密钥来自配置指定的文件。",
-        "自实现顺序归档后选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 或 AES-256-GCM 加密，形成九种模式；元数据和文件名仍为明文。",
-        "配置式定时备份使用 IANA 时区与分钟级 Cron，复用 FIFO；停机不补跑，同一计划有未完成任务时跳过。",
+        "自实现顺序归档后选择无压缩、Zstd 或自实现 LZ77，再独立选择 XChaCha20-Poly1305 或 AES-256-GCM 加密，形成九种模式；元数据和文件名以明文保存。",
+        "配置式定时备份使用 IANA 时区与分钟级 Cron，复用 FIFO；服务按当前分钟触发，同一计划有活动任务时跳过本次触发。",
         "bak server start 默认创建后台子进程并等待就绪；status/stop 通过当前用户的 Unix socket 管理实例。",
-        "静态 WebUI 独立部署并由 web_ui.path 指定目录，资源在请求时读取；任务库仍为 SQLite，仓库不使用数据库。",
+        "静态 WebUI 独立部署并由 web_ui.path 指定目录，资源在请求时读取；SQLite 保存作业，仓库存放自包含归档。",
         "启动在 HTTP 和 worker 之前按持久化任务 ID 对账：验证已发布文件或发布唯一完整临时文件，再提交结果。"
       ],
       "constraints": [
-        "一个工作目录只运行一个服务实例，SQLite 使用本地文件系统。",
+        "每个工作目录对应一个服务实例，SQLite 使用本地文件系统。",
         "同步并发布备份文件后提交作业终态。",
         "静态 UI 公开，API 采用 Bearer 认证；载荷按配置加密，外层元数据明文保存。"
       ],
@@ -267,15 +267,15 @@
         },
         {
           "element": "server::schedule::Scheduler",
-          "responsibility": "配置校验、分钟匹配、调用持久化入队；不直接读写备份载荷。"
+          "responsibility": "校验配置、匹配分钟，通过作业管理器持久化入队。"
         }
       ],
       "details": [
         "main/args/config 分派 help、version、keygen、server 命令并加载配置；daemon 创建后台子进程和本地控制接口，工作目录锁防止重复实例。",
         "server::ui 从 web_ui.path 运行时读取静态文件；server::api 处理认证、CORS、计划查看及立即执行；worker 通过 spawn_blocking 执行业务。",
-        "backup::filter 执行严格目录剪枝；archive 负责顺序条目与结束标记；content 组合私有 crypto、lz77 与 Zstd；repository 封装自包含元数据、摘要和不可覆盖发布。",
-        "jobs::recovery 对账中断任务，完整验证并补记成功或记录失败；只清理确认同一 inode 的临时硬链接。",
-        "server::schedule 编译计划并匹配时区/Cron；API 共享不可变计划目录；自动触发推进游标，立即执行不改游标，两者共享活动计划约束。",
+        "backup::filter 执行严格目录剪枝；archive 负责顺序条目与结束标记；content 组合私有 crypto、lz77 与 Zstd；repository 封装自包含元数据、摘要与独占发布。",
+        "jobs::recovery 对账中断任务，完整验证并补记成功或记录失败；按 inode 匹配并清理已验证文件的临时硬链接。",
+        "server::schedule 编译计划并按时区匹配 Cron，API 共享计划目录。自动触发推进游标，两种触发方式共享活动计划约束。",
         "主图聚焦启动、服务、作业和文件操作边界；filter 隶属 backup，crypto/lz77 隶属 content，filesystem/storage 为共享内部工具，详见模块树与类型图。"
       ],
       "constraints": [
@@ -607,13 +607,13 @@
       ],
       "details": [
         "BackupOptions.compression 为 Option<CompressionOptions>；None 禁用，Some 为 Zstd 或 LZ77 专属配置，API、任务与仓库元数据均使用带 algorithm 标签的对象。",
-        "Encryption 包含 algorithm、key_id 与 fingerprint，不保存密钥材料；Filter 的规则也随请求持久化。",
+        "持久化请求包含筛选规则，以及 Encryption 的 algorithm、key_id 与 fingerprint。",
         "ManifestEntry 的 kind 记录条目类型。HardLink 指向先前记录的原始条目。UnixMetadata 包含纳秒时间戳。",
         "普通手动备份的 schedule_id/scheduled_for 均为空；自动触发保存计划标识和匹配分钟，立即运行计划保存计划标识与请求时刻；时间均为 UTC Unix 毫秒。"
       ],
       "constraints": [
         "仓库保存完整算法配置，XChaCha 载荷 v2 或 AES 载荷 v3 对配置进行认证；恢复自动使用记录的解码器。",
-        "SHA-256 覆盖除末尾摘要自身外的容器全部字节；archive_checksum 读取时由尾部派生，不序列化到自身校验范围；original_size 描述原文。"
+        "SHA-256 覆盖末尾摘要之前的容器字节。读取时从尾部取得 archive_checksum，original_size 记录原始大小。"
       ],
       "trace": {
         "use_cases": [
@@ -1205,16 +1205,16 @@
         }
       ],
       "details": [
-        "配置和命名密钥只在启动时加载；无效密钥或旧作业库版本导致启动失败。",
+        "服务启动时加载配置与命名密钥，并校验作业库的 schema v5。",
         "静态资源可公开访问；浏览器选择服务后通过认证状态接口获取版本与密钥指纹。",
-        "keygen 是独立命令，不启动 HTTP 服务；此图只展示服务启动与正常关闭。",
+        "keygen 在服务启动前独立生成密钥文件。",
         "无效计划或调度任务异常使服务失败退出；正常关闭等待调度器和 worker 后再关闭数据库。",
         "后台命令由 daemon 派生服务进程并等待就绪，前台模式由调用者监督；此图 Startup 表示实际服务初始化过程。",
-        "启动对账完整解码和校验已发布备份或唯一临时文件后提交结果；恢复中断不重跑，结果提交失败保留 running 并终止启动。"
+        "启动对账完整解码和校验已发布备份或唯一临时文件后提交结果；中断恢复记为失败，结果提交失败保留 running 并终止启动。"
       ],
       "constraints": [
-        "配置不热加载，更换密钥配置后重启并重新连接。",
-        "终止只等待活动操作，不自动重放已中断操作。"
+        "更换密钥配置后重启并重新连接。",
+        "正常关闭等待活动任务结束。启动时对账中断作业并继续队列。"
       ],
       "trace": {
         "use_cases": [
@@ -1429,16 +1429,16 @@
       "kind": "sequence",
       "view": "sequence",
       "title": "Accepted Job to Published Full Backup",
-      "purpose": "接受请求、执行、仓库发布和结果持久化是不同阶段；HTTP 202 仅表示作业已入库。",
+      "purpose": "HTTP 202 确认入队，worker 执行并发布归档后记录作业终态。",
       "responsibilities": [
         {
           "element": "本图",
-          "responsibility": "接受请求、执行、仓库发布和结果持久化是不同阶段；HTTP 202 仅表示作业已入库。"
+          "responsibility": "HTTP 202 确认入队，worker 执行并发布归档后记录作业终态。"
         }
       ],
       "details": [
         "提交时校验等级并固定命名密钥指纹；正则/时间范围在执行时编译，失败发生在载荷写入前。",
-        "目录剪枝同时作用于路径和元数据条件；符号链接只保存目标。",
+        "目录剪枝同时作用于路径和元数据条件；符号链接保存目标路径。",
         "完成流式归档/编码后追加明文 manifest、长度、标记及 SHA-256，文件同步后硬链接发布并同步目录，再单独提交作业终态。",
         "LZ77 的候选搜索、历史窗口和 IO 均有限制；完成编解码终止标记后再完成加密最终认证块。",
         "新执行备份使用已持久化任务 ID 作为备份 ID，为启动对账提供确定关联。"
@@ -1631,12 +1631,12 @@
         }
       ],
       "details": [
-        "备份列表返回编码模式与密钥信息；界面做匹配提示，worker 仍独立校验。",
+        "备份列表返回编码模式与密钥信息。界面显示密钥匹配状态，worker 校验恢复请求。",
         "读取仓库头后匹配密钥，验证全部相对路径，再创建文件、目录和符号链接。",
         "顺序解包、核对条目头并验证结束标记、最终认证块、文件大小与整包哈希；子项完成后应用目录与根元数据。"
       ],
       "constraints": [
-        "恢复不接受编码参数，由备份记录自动决定。",
+        "恢复从备份记录选择解码参数。",
         "密钥缺失/变化在条目写入前失败；后续失败可能留下部分输出。"
       ],
       "trace": {
@@ -1820,7 +1820,7 @@
       "responsibilities": [
         {
           "element": "Scheduler",
-          "responsibility": "只匹配当前 UTC 分钟转换后的本地时间；不补跑错过分钟。"
+          "responsibility": "将当前 UTC 分钟转换为计划时区后匹配 Cron。"
         },
         {
           "element": "JobManager / jobs.sqlite3",
@@ -1829,12 +1829,12 @@
       ],
       "details": [
         "计划配置包含稳定标识、时区、五字段 Cron、路径、筛选和编码，启动后固定快照。",
-        "同计划忙碌仍推进游标；失败不会阻塞下次计划，不自动重试。",
-        "UTC 高水位持久化；时钟前跳不补跑，后跳不重复；重启从下一分钟继续。",
-        "计划页面包含启用与停用项；立即执行使用保存配置并共享活动计划约束，返回 202 或 busy/404/key 错误，不改变 UTC 游标。"
+        "同计划忙碌时推进游标并跳过触发，下一次匹配按当时的任务状态入队。",
+        "持久化 UTC 高水位，用于时钟跳变与重启后的触发判定。",
+        "计划页面包含启用与停用项；立即执行使用保存配置并共享活动计划约束，返回 202 或对应 HTTP 错误，游标由自动调度推进。"
       ],
       "constraints": [
-        "每个工作目录仅运行一个实例；调度器不单独执行文件操作。",
+        "每个工作目录对应一个服务实例，worker 负责执行调度入队的文件作业。",
         "自动触发的游标与入队共享事务；文件发布与任务结果提交独立，启动通过验证和幂等对账修复中断窗口。"
       ],
       "trace": {

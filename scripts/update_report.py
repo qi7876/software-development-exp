@@ -398,14 +398,14 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
     _paragraph(
         document,
         anchor,
-        f"文档版本：{model['version']}（当前实现）    更新日期：{model['updated']}",
+        f"文档版本 {model['version']}    更新日期 {model['updated']}",
     )
     _heading(document, anchor, "1. 任务概述")
     _heading(document, anchor, "1.1 引言", 2)
     _paragraph(
         document,
         anchor,
-        "bak 是面向个人用户的本地文件备份软件。当前提供全量备份、已发布备份列表和完整恢复，"
+        "bak 1.0.0 是面向个人用户的本地文件备份软件，支持全量备份、归档列表和完整恢复。"
         "支持文件类型和元数据筛选、Unix 条目与硬链接、可选 Zstd/LZ77 压缩和 "
         "XChaCha20-Poly1305 / AES-256-GCM 内容加密，"
         "通过认证流、原始大小与 SHA-256 校验验证恢复结果，并以持久化作业提供可查询状态。",
@@ -428,7 +428,11 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         (
             ("平台", "Linux 和 macOS。"),
             ("存储", "已有源、仓库和恢复目标目录；SQLite 使用本地文件系统。"),
-            ("部署", "同一工作目录只运行一个服务；后台管理需 Unix，WebUI 从外部目录加载。"),
+            (
+                "部署",
+                "每个工作目录对应一个服务实例。后台管理使用 Unix socket。"
+                "控制台从静态资源目录加载。",
+            ),
             (
                 "客户端",
                 "静态 Web 控制台与 HTTP 客户端执行备份和恢复。CLI 管理服务、生成密钥和补全脚本。",
@@ -515,7 +519,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
             (
                 "GET /api/schedules；POST /api/schedules/{id}/run",
                 "查看全部配置计划（含禁用项）；按保存配置立即入队，返回 202/Location。"
-                "同计划忙碌返回 409，不存在返回 404，缺少密钥返回 400；不改变 Cron 游标。",
+                "同计划忙碌返回 409，不存在返回 404，缺少密钥返回 400。Cron 游标由自动调度推进。",
             ),
             (
                 "POST /api/restores",
@@ -539,12 +543,13 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "Bearer <secret_key>。接受响应包含 "
         "job_id、kind、state、"
         "result、error；成功备份结果为 backup_id，"
-        "成功恢复结果为 destination。失败作业查询仍返回 HTTP 200，"
+        "成功恢复结果为 destination。失败作业的状态查询返回 HTTP 200，"
         "error.code 表示操作错误。请求错误返回相应 HTTP "
         "状态和统一 error.code/error.message "
         "JSON；"
-        "JSON 请求上限 2 MiB，非法输入 400，未认证 401，过大 413，媒体类型不支持 415。"
-        "CORS 预检先于认证，跨域使用显式 Bearer 头且不启用 cookie。",
+        "JSON 请求上限 2 MiB。"
+        "状态码 400、401、413、415 分别表示输入、认证、大小和媒体类型错误。"
+        "CORS 预检先于认证，跨域请求通过 Authorization 头提供 Bearer key。",
     )
     _heading(document, anchor, "3.2 启动与配置", 2)
     _table(
@@ -556,13 +561,12 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
             ("bak completions <bash|fish|zsh>", "生成指定 shell 的补全脚本。"),
             ("bak server start -d <PATH>", "指定已有工作目录并后台启动；--foreground 可前台运行。"),
             ("bak server status / stop", "查看当前用户的后台实例；停止时等待活动作业完成。"),
-            ("listen", "IP:port，例如 127.0.0.1:8080；配置仅在启动时读取。"),
-            ("secret_key", "必需且非空；用于 API 认证，与备份加密无关。"),
+            ("listen", "服务启动时绑定的地址和端口，例如 127.0.0.1:8080。"),
+            ("secret_key", "API 认证使用的 Bearer key，填写有效的非空字符串。"),
             (
                 "web_ui",
                 "可省略，默认关闭；enabled=true 时必须通过 path 指定静态资源目录，"
-                "路径相对工作目录或为绝对路径。"
-                "旧 archive_url/directory 被忽略。",
+                "路径相对工作目录或为绝对路径。",
             ),
             (
                 "encryption.keys",
@@ -570,7 +574,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
             ),
             (
                 "bak keygen --output PATH",
-                "生成 256 位随机密钥，Unix 权限 0600，拒绝覆盖已有文件，不要求 -d。",
+                "在指定路径独占创建 256 位随机密钥文件，Unix 权限为 0600。",
             ),
             (
                 "scheduled_backups",
@@ -578,66 +582,61 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
                 "计划包含 id、enabled、五字段 cron、source、repository、filter、"
                 "compression、encryption。",
             ),
-            ("logging", "废弃字段；出现此字段启动失败，应删除。作业历史固定存入 SQLite。"),
         ),
         (5.4, 8.6),
     )
     _paragraph(
         document,
         anchor,
-        "示例：mkdir -p working-directory-ex"
-        "ample/source working-directory-e"
-        "xample/repository；"
-        "cargo run -- server start -d working-directory-example。"
-        "示例配置含公开测试 key，实际使用应更换。"
-        "启动错误输出诊断并以非零状态退出；config 允许其他未知字段。",
+        "在 working-directory-example 中创建 source、repository 和 restored 目录。"
+        "执行 bak keygen --output working-directory-example/backup.key，然后执行 "
+        "bak server start -d working-directory-example。示例监听 127.0.0.1:8080。"
+        "配置顶层使用表中列出的字段。",
     )
     _paragraph(
         document, anchor,
         "后台 start 使用独立进程组，输入接空设备，输出追加至 server.log；"
         "当前用户通过本地 Unix socket 查询状态和优雅停止。"
         "用户级实例锁与工作目录锁防止重复启动，--foreground 由终端或监督器管理。"
-        "初始化包含启动对账；大备份校验可能较慢，命令显示 PID 和日志并等待就绪，"
-        "启动命令持续等待对账完成。",
+        "启动命令显示 PID 和日志路径，等待对账结束及服务就绪后返回。",
     )
     _heading(document, anchor, "3.3 持久化与操作生命周期", 2)
     _paragraph(
         document,
         anchor,
         "工作目录 jobs.sqlite3 保存 FIFO 队列与终态历史；"
-        "仓库只保存自包含的 <backup_id>.bak；编码参数、文件清单、Unix 元数据、"
-        "统计和 SHA-256 均在文件内。"
-        "流式压缩加密完成后追加明文元数据与校验尾部，同步临时文件，再以不可覆盖的硬链接发布并同步目录。"
+        "仓库中的 <backup_id>.bak 保存编码参数、文件清单、Unix 元数据、统计和 SHA-256。"
+        "流式编码后追加明文元数据与校验尾部，同步临时文件，以独占硬链接发布并同步目录。"
         "作业库使用 schema v5，备份使用 v10。",
     )
     _paragraph(
         document,
         anchor,
-        "恢复要求已有空目标且不与仓库重叠，预先校验全部条目路径，再以 "
+        "恢复使用独立的已有空目录。服务校验全部条目路径，再以 "
         "create_new 写入并自动解密/解压，验证最终认证块、原文大小和 SHA-256，"
         "重建链接和特殊条目、应用 Unix 元数据并同步。恢复设备节点需要相应权限和文件系统支持。"
         "正常关闭停止接收请求与领取作业，完成活动操作并留下 "
-        "queued 作业。重启按持久化任务 ID 对账中断备份，完整输出补记成功，无法确认则标记失败；"
-        "中断恢复保留输出且不重放，再继续 queued 作业。"
-        "客户端断开不取消已提交作业，重试 POST 会产生新作业。",
+        "queued 作业。重启按持久化任务 ID 对账中断备份，通过完整性校验的输出补记成功；"
+        "中断恢复记为失败并保留输出，随后按队列顺序执行等待中的作业。"
+        "已提交作业独立执行，每次 POST 成功入队都会创建作业。",
     )
     _paragraph(
         document, anchor,
         "自包含文件采用容器 magic、编码载荷、明文 manifest、长度、结束标记和末尾 32 字节摘要。"
         "SHA-256 覆盖除摘要自身外的全部容器字节，元数据上限 64 MiB；"
-        "密钥标识和指纹写入文件，密钥材料仍在外部。单独复制同名 .bak 到空仓库即可列出与恢复。"
-        "列表只读取元数据而不扫描载荷，成本随文件数和元数据规模增长；"
-        "正式坏文件报错，.partial 被忽略。",
+        "归档记录密钥标识和指纹，服务端管理密钥文件。复制同名 .bak 到新仓库即可列出与恢复。"
+        "列表读取正式归档的元数据，成本随文件数和元数据规模增长。"
+        "版本或元数据校验失败时返回归档错误。",
     )
     _paragraph(
         document, anchor,
-        "启动对账只处理 running：新备份 ID 等于已持久化任务 ID，"
+        "启动对账按 running 作业的 ID 查找对应备份，"
         "校验 ID 和保存参数后完整解码、认证并核对摘要。"
-        "正式文件完整则同步后补记成功；不存在正式文件且仅一个临时文件完整时，不可覆盖地发布后补记成功。"
-        "缺失、损坏、候选不唯一或密钥不可用时失败并保留数据，中断恢复不重跑。"
-        "仅清理与已验证文件属于同一 inode 的临时硬链接；"
+        "正式文件通过校验后同步并补记成功。正式文件缺失时，校验唯一临时候选，通过后发布并补记成功。"
+        "缺失、损坏、候选冲突或密钥不可用时记录失败并保留数据。"
+        "按 inode 匹配并清理已验证文件的临时硬链接。"
         "数据库提交失败则启动失败，running 留待下次重试。"
-        "已完成历史和 queued 顺序保持不变。",
+        "随后继续执行等待中的作业，并提供历史查询。",
     )
     _heading(document, anchor, "3.4 控制台、筛选与编码", 2)
     _paragraph(
@@ -661,7 +660,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "压缩等级为 1–22、默认 3，Web UI "
-        "使用双向同步的滑块和数字输入框，仅在本次备份启用压缩时生效。"
+        "通过双向同步的滑块和数字输入框设置本次 Zstd 压缩等级。"
         "内部 BackupOptions 的压缩和加密均为 "
         "Option；None 禁用，Some 保存 "
         "Zstd/LZ77 专属配置或加密算法、密钥标识与指纹。"
@@ -672,8 +671,7 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "自实现 LZ77 使用哈希候选链和环形滑动窗口，匹配范围 "
-        "8–258 字节并支持重叠复制；不实现 "
-        "Huffman、DEFLATE 或 LZ4。"
+        "8–258 字节并支持重叠复制。"
         "页面选择 LZ77 时显示窗口大小 4–1024 KiB（默认 "
         "64）和候选搜索上限 1–256（默认 32），隐藏并禁用 "
         "Zstd 等级输入。"
@@ -683,10 +681,10 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "命名密钥在启动时加载，排队任务固定 key_id 和 "
-        "fingerprint 和 algorithm；重启后替换同名密钥不会静默改变任务。"
+        "fingerprint 和 algorithm，执行时按标识和指纹匹配已配置的密钥。"
         "加密保护归档流内的条目头与文件数据；外层明文元数据中的文件名、大小、校验和、Unix "
-        "元数据和链接目标仍可见。浏览器从不保存服务端加密密钥；"
-        "API 认证 key 与加密密钥独立，服务端仍可读取明文。",
+        "元数据和链接目标可以直接读取。"
+        "浏览器保存 API 认证 key，归档加密密钥由服务端从配置文件加载。",
     )
     _paragraph(
         document,
@@ -709,18 +707,18 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         document,
         anchor,
         "Scheduler 每秒检查当前 UTC 分钟，转为配置时区后匹配五字段 Cron。"
-        "启动分钟及停机、休眠或时钟前跳错过的分钟不补跑；UTC 高水位防止回拨重复。"
+        "启动后从下一个分钟边界调度，恢复运行或时钟跳变后按当前分钟和 UTC 高水位判断触发。"
         "夏令时缺失时间跳过，重复本地时间按不同 UTC 分钟分别匹配。"
         "JobManager 在同一 SQLite 写事务中推进 schedule_cursors 并检查同计划 queued/running 作业，"
-        "忙碌则跳过本次触发；成功入队后才通知 FIFO worker。失败任务不自动重试。",
+        "忙碌时跳过本次触发，成功入队后通知 FIFO worker，失败结果写入任务记录。",
     )
     _paragraph(
         document,
         anchor,
         "任务保存配置快照以及 schedule_id、scheduled_for（匹配分钟的 UTC Unix 毫秒）；"
-        "普通手动备份这两个字段均为空；立即运行计划使用计划 ID 与请求时刻。"
+        "计划作业保存计划 ID。立即运行计划使用请求时刻。"
         "Scheduled backups 页面查看全部启用/停用计划，Back up now 按服务端配置立即入队；"
-        "立即运行不改变 Cron 游标，同计划活动任务返回 409；编辑仍需修改配置后重启。"
+        "立即运行使用独立入队路径，同计划活动任务返回 409。编辑配置后重启服务。"
         "调度器与 HTTP、worker 共同受监督；调度失败使服务失败退出，"
         "正常关闭停止新增任务并等待活动操作，已提交 queued 作业留给重启。",
     )
@@ -740,15 +738,10 @@ def _populate(document: DocumentType, anchor: Paragraph, model: Model) -> None:
         "启动对账校验中断备份，恢复失败时保留输出供检查。"
         "备份时保持源文件稳定，复制过程中检查大小变化；临时链接按 inode 确认归属后清理。",
     )
-    _heading(document, anchor, "5. 当前闭环与后续展望")
+    _heading(document, anchor, "5. 备份与恢复流程")
     _draw_workflow(GENERATED_DIR / "implemented-workflow.png")
     _picture(
-        document, anchor, GENERATED_DIR / "implemented-workflow.png", "图 4  当前全量备份与恢复闭环"
-    )
-    _paragraph(
-        document,
-        anchor,
-        "后续改进方向包括源一致性、失败清理、保留策略、元数据加密和远程存储。",
+        document, anchor, GENERATED_DIR / "implemented-workflow.png", "图 4  全量备份与恢复流程"
     )
 
 
@@ -824,13 +817,12 @@ def _populate_system_design(
     _paragraph(
         document,
         anchor,
-        f"文档版本：{model['version']}（逻辑设计阶段）    更新日期：{model['updated']}",
+        f"文档版本 {model['version']}    更新日期 {model['updated']}",
     )
     _paragraph(
         document,
         anchor,
-        "本章对应当前 bak 代码，"
-        "说明单一服务进程、模块职责、实际结构体与枚举、数据库和关键动态交互。"
+        "本章描述 bak 1.0.0 的服务进程、模块职责、数据模型与关键交互。"
         "类图展示 Rust 类型、模块及其静态关系。",
     )
     _heading(document, anchor, "1. 开发环境和工具")
@@ -851,7 +843,13 @@ def _populate_system_design(
             ),
             (
                 "版本控制",
-                "Git、GitHub 与 gh；main 为唯一长期分支，短分支和草稿 PR，默认 squash merge。",
+                "以 main 为主线，从短期分支提交 PR，默认 squash merge。",
+            ),
+            (
+                "持续集成与发布",
+                "PR 在 Linux x86_64 和 macOS ARM64 上执行 rustfmt、Clippy 和 Rust 测试。"
+                "从 main 手动触发 Release，构建并发布两个平台的发行包，"
+                "以 Cargo 版本生成标签，GitHub 为附件计算 SHA-256。",
             ),
             (
                 "测试",
@@ -998,8 +996,7 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             ),
             (
                 "CPU 与内存分析",
-                "Instruments 分开采集 Time "
-                "Profiler、Allocations、Leaks；工具不可用或失败时记录原因。",
+                "Instruments 分别采集 Time Profiler、Allocations 和 Leaks。",
             ),
         ),
         (3.3, 10.7),
@@ -1012,11 +1009,11 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
         (
             (
                 "备份 → 列表 → 重启 → 恢复",
-                "路径、目录和字节一致；源与载荷不变；只列出发布元数据；成功历史跨重启保留。",
+                "比对源、归档和恢复结果，核对列表及重启后的任务记录。",
             ),
             (
                 "占用恢复目标",
-                "作业失败、错误码 400；目标、源、仓库不变；生成文件和空目录，失败结果跨重启保留。",
+                "使用带文件与子目录的目标，验证错误码 400、数据保留及重启后的失败记录。",
             ),
             (
                 "压缩边界与路径",
@@ -1025,7 +1022,7 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             ),
             (
                 "筛选与 Unix 元数据",
-                "正则优先级、时间边界、目录剪枝、计数、权限/时间、符号链接和根属性恢复。",
+                "文件类型选择、严格目录剪枝、正则优先级、时间边界、硬链接和 Unix 元数据恢复。",
             ),
             (
                 "九模式与密钥",
@@ -1047,14 +1044,14 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             ),
             (
                 "自包含与启动对账",
-                "九模式只复制 .bak 到空仓库即可列出/恢复；源和原仓库删除后仍可恢复。"
-                "完整临时文件发布、重复启动、候选歧义、缺少密钥和结果提交失败重试均有回归。",
+                "将九种编码模式的 .bak 复制到新仓库，验证列表与恢复。"
+                "启动对账覆盖临时文件发布、重复启动、候选冲突、密钥和事务错误。",
             ),
             ("SIGTERM", "停止调度；活动作业完成，queued 留给下一次启动；HTTP 在活动操作期间响应。"),
             (
                 "SIGKILL",
-                "重启完整校验已发布备份或唯一完整临时文件并补记成功；无法确认则 failed/500，"
-                "queued 继续、终态历史不变、中断恢复不重放。",
+                "已发布文件或唯一临时候选通过校验后补记成功，其余中断任务记为 failed/500。"
+                "随后继续 queued 作业，可查询终态历史。",
             ),
         ),
         (4.2, 9.8),
@@ -1066,8 +1063,8 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
         _paragraph(
             document,
             anchor,
-            f"记录日期为 {current['recorded_at']}，对应代码提交 {current['production_revision']}。"
-            "详见 current-verification.json。",
+            f"记录日期 {current['recorded_at']}，代码提交 {current['production_revision']}。"
+            f"运行环境 {current['environment']}。完整记录见 current-verification.json。",
         )
         _table(
             document,
@@ -1076,15 +1073,24 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             ((row["command"], row["result"]) for row in current.get("checks", [])),
             (8.0, 6.0),
         )
+        ci = current.get("ci")
+        if ci:
+            _paragraph(
+                document,
+                anchor,
+                "PR 上的 Linux x86_64 和 macOS ARM64 Rust 检查通过。"
+                f"GitHub Actions 运行记录 {ci['url']}。",
+            )
     else:
         _paragraph(document, anchor, "功能回归记录待采集。")
     if CODEC_MEASUREMENTS_PATH.exists():
         measurement = json.loads(CODEC_MEASUREMENTS_PATH.read_text())
-        _heading(document, anchor, "历史编码器小样本：LZ77 与 Zstd", 2)
+        _heading(document, anchor, "LZ77 与 Zstd 编解码测量", 2)
         _paragraph(
             document,
             anchor,
-            f"采集日期：{measurement['recorded_at']}；代码提交：{measurement['production_revision']}。"
+            f"采集日期 {measurement['recorded_at']}，"
+            f"代码提交 {measurement['production_revision']}。"
             "优化 profiling 构建，对三类 1 MiB "
             "输入预热一次后测三次。LZ77 窗口 64 KiB、候选上限 "
             "32，Zstd 等级 3。"
@@ -1114,12 +1120,7 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             "LZ77 使用滑动窗口与回引用编码，随机数据可能略微膨胀。"
             "完整样本与命令见 lz77-measurements.json。",
         )
-    _heading(document, anchor, "历史测量：性能、稳定性与内存", 2)
-    _paragraph(
-        document,
-        anchor,
-        "本节展示 verification.json 中 2026-10-14 的性能、稳定性与内存测量。",
-    )
+    _heading(document, anchor, "性能、稳定性与内存测量", 2)
     if not VERIFICATION_PATH.exists():
         _paragraph(document, anchor, "测量记录待采集。")
         return
@@ -1127,32 +1128,29 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
     _paragraph(
         document,
         anchor,
-        f"记录日期：{evidence['recorded_at']}；环境：{evidence['environment']}；"
-        f"被测生产源码树：{evidence['production_revision']}。完整命令与指标见 verification.json。",
+        f"采集日期 {evidence['recorded_at']}，运行环境 {evidence['environment']}。"
+        f"代码提交 {evidence['production_revision']}。完整命令与指标见 verification.json。",
     )
-    _table(
-        document,
-        anchor,
-        ("检查", "结果"),
-        ((row["command"], row["result"]) for row in evidence.get("checks", [])),
-        (8.0, 6.0),
-    )
-    _heading(document, anchor, "4.1 性能基线", 2)
+    _heading(document, anchor, "端到端性能", 2)
     _paragraph(
         document,
         anchor,
-        "每类数据先预热一次再测三轮；端到端作业耗时包括入队、轮询和文件/目录同步。"
-        "数据生成与正确性比对在计时外。采集带状态查询和 RSS "
-        "采样开销，使用预热缓存。",
+        "使用 Zstd 等级 3，每类数据预热一次后测三轮。计时覆盖作业入队、轮询、编解码、校验及同步。"
+        "另行生成输入并比对内容，运行期间采样 HTTP 状态查询与 RSS。",
     )
     rows = []
+    datasets = {
+        "compressible": "可压缩文件",
+        "incompressible": "随机文件",
+        "small-files": "小文件集合",
+    }
     for item in evidence.get("performance", []):
         size = item["source_bytes"] / (1024 * 1024)
         backup = statistics.median(run["backup_seconds"] for run in item["runs"])
         restore = statistics.median(run["restore_seconds"] for run in item["runs"])
         rows.append(
             (
-                item["dataset"],
+                datasets[item["dataset"]],
                 f"{size:.2f} MiB",
                 f"{backup:.3f} / {restore:.3f} s",
                 f"{size / backup:.1f} / {size / restore:.1f} MiB/s",
@@ -1166,32 +1164,38 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
         rows,
         (2.6, 2.0, 3.2, 3.8, 2.4),
     )
-    _heading(document, anchor, "4.2 稳定性观察", 2)
+    hardware = evidence.get("hardware")
+    if hardware:
+        _paragraph(
+            document,
+            anchor,
+            f"测量主机为 {hardware['cpu']}，内存 {hardware['memory_bytes'] / 2**30:.0f} GiB。",
+        )
+    _heading(document, anchor, "稳定性测试", 2)
     stable = evidence.get("stability", {})
     if stable:
+        status = {"passed": "通过", "failed": "失败"}
         _paragraph(
             document,
             anchor,
             f"持续 {stable['duration_seconds']:.1f} 秒，"
-            f"完成 {stable['cycles']} 个备份/列表/恢复循环；"
-            f"内容一致性 {stable['correctness']}，重启历史检查 {stable['restart_history']}。"
+            f"完成 {stable['cycles']} 次备份、列表与恢复循环。"
+            f"内容比对 {status.get(stable['correctness'], stable['correctness'])}，"
+            f"任务历史核对 {status.get(stable['restart_history'], stable['restart_history'])}。"
             f"HTTP 状态查询 P95 为 {stable['http_status_latency']['p95_ms']:.2f} ms，"
             f"峰值采样 RSS 为 {stable['sampled_peak_rss_bytes'] / (1024 * 1024):.1f} MiB。",
         )
-    _heading(document, anchor, "4.3 Instruments CPU 与内存分析", 2)
-    signing = evidence.get("instrument_signing_diagnosis", {})
-    if signing:
-        _paragraph(document, anchor, f"采集故障复核：{signing['cause']}修正方式：{signing['fix']}")
+    _heading(document, anchor, "Instruments CPU 与内存分析", 2)
     for item in evidence.get("instruments", []):
         _paragraph(
             document,
             anchor,
-            f"{item['template']}：{item['status']}。"
-            f"{item.get('analysis', item.get('error', '原始 trace 已保存。'))}",
+            f"{item['template']}。{item.get('analysis', item['status'])}",
         )
-    _heading(document, anchor, "4.4 正常进程内存快照", 2)
+    _heading(document, anchor, "进程内存快照", 2)
     memory = evidence.get("memory_analysis", {})
-    _paragraph(document, anchor, memory.get("analysis", "尚未取得正常进程内存快照。"))
+    if analysis := memory.get("analysis"):
+        _paragraph(document, anchor, analysis)
     _heading(document, anchor, "5. 结果分析")
     for text in evidence.get("findings", []):
         _paragraph(document, anchor, text, bullet=True)
