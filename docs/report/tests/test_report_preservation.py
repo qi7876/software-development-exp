@@ -130,6 +130,13 @@ class ReportPreservationTests(unittest.TestCase):
                 "config 允许其他未知字段",
                 "不伪装",
                 "不宣称",
+                "GitHub Actions 运行记录",
+                "记录日期",
+                "采集日期",
+                "代码提交",
+                "current-verification.json",
+                "verification.json",
+                "lz77-measurements.json",
             ]:
                 self.assertNotIn(outdated, text)
 

@@ -1060,12 +1060,6 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
     _heading(document, anchor, "当前功能回归", 2)
     if CURRENT_VERIFICATION_PATH.exists():
         current = json.loads(CURRENT_VERIFICATION_PATH.read_text())
-        _paragraph(
-            document,
-            anchor,
-            f"记录日期 {current['recorded_at']}，代码提交 {current['production_revision']}。"
-            f"运行环境 {current['environment']}。完整记录见 current-verification.json。",
-        )
         _table(
             document,
             anchor,
@@ -1073,14 +1067,8 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             ((row["command"], row["result"]) for row in current.get("checks", [])),
             (8.0, 6.0),
         )
-        ci = current.get("ci")
-        if ci:
-            _paragraph(
-                document,
-                anchor,
-                "PR 上的 Linux x86_64 和 macOS ARM64 Rust 检查通过。"
-                f"GitHub Actions 运行记录 {ci['url']}。",
-            )
+        if current.get("ci", {}).get("conclusion") == "success":
+            _paragraph(document, anchor, "Linux x86_64 和 macOS ARM64 的 Rust 检查通过。")
     else:
         _paragraph(document, anchor, "功能回归记录待采集。")
     if CODEC_MEASUREMENTS_PATH.exists():
@@ -1089,8 +1077,6 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
         _paragraph(
             document,
             anchor,
-            f"采集日期 {measurement['recorded_at']}，"
-            f"代码提交 {measurement['production_revision']}。"
             "优化 profiling 构建，对三类 1 MiB "
             "输入预热一次后测三次。LZ77 窗口 64 KiB、候选上限 "
             "32，Zstd 等级 3。"
@@ -1114,23 +1100,11 @@ def _populate_tests(document: DocumentType, anchor: Paragraph) -> None:
             rows,
             (2.4, 2.0, 3.0, 3.3, 3.3),
         )
-        _paragraph(
-            document,
-            anchor,
-            "LZ77 使用滑动窗口与回引用编码，随机数据可能略微膨胀。"
-            "完整样本与命令见 lz77-measurements.json。",
-        )
     _heading(document, anchor, "性能、稳定性与内存测量", 2)
     if not VERIFICATION_PATH.exists():
         _paragraph(document, anchor, "测量记录待采集。")
         return
     evidence = json.loads(VERIFICATION_PATH.read_text())
-    _paragraph(
-        document,
-        anchor,
-        f"采集日期 {evidence['recorded_at']}，运行环境 {evidence['environment']}。"
-        f"代码提交 {evidence['production_revision']}。完整命令与指标见 verification.json。",
-    )
     _heading(document, anchor, "端到端性能", 2)
     _paragraph(
         document,
