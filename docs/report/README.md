@@ -4,17 +4,17 @@
 
 | 文件 | 内容 |
 | --- | --- |
-| `bak-项目答辩.pptx` | 答辩演示文稿，截图和进度图已嵌入 |
-| `report.docx` | 本地课程报告，生成脚本在该文件上更新章节，Git 忽略此文件 |
+| `report.pptx` | 答辩演示文稿，截图和进度图已嵌入 |
+| `report.docx` | 课程报告，包含人工排版的封面和已嵌入的图表 |
 | `use-cases.yaml` | 需求、用例和追踪关系 |
 | `model.yaml` | 构件、类型和时序视图 |
-| `generated/` | 生成的 D2 源码、渲染后的 PNG 和报告流程图 |
+| `generated/` | 本地生成的 D2 源码、PNG 和报告流程图，由 Git 忽略 |
 | `evidence/` | 报告引用的功能回归与实测记录 |
 | `tests/` | 模型、图表和报告生成的回归测试 |
 
 ## 生成与检查
 
-图表使用 D2 0.9.0、ELK 布局和 theme 0。生成脚本更新本地的 `docs/report/report.docx`。请先将课程 Word 文件放在该路径。
+图表使用 D2 0.9.0、ELK 布局和 theme 0。报告生成脚本会从模型重建 `generated/` 中的图表，并更新仓库中的 `docs/report/report.docx`。报告检查在临时副本上运行。
 
 ```sh
 uv run scripts/update_report.py

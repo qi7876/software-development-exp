@@ -34,8 +34,6 @@ def main(*, report: bool = False, web_ui: bool = False) -> None:
     _run(["uv", "run", "basedpyright"])
     if report:
         _run(["uv", "run", "python", "-m", "unittest", "discover", "-s", "docs/report/tests"])
-        _run(["uv", "run", "scripts/update_use_cases.py", "--check"])
-        _run(["uv", "run", "scripts/update_system_design.py", "--check"])
 
 
 if __name__ == "__main__":

@@ -254,7 +254,7 @@ def generate_artifacts(*, check: bool = False) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--check", action="store_true", help="check local outputs for freshness")
     arguments = parser.parse_args()
     generate_artifacts(check=arguments.check)
 
