@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate the release ref
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - name: Require main
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+            echo 'Run Release from main.' >&2
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read the package version
+        id: metadata
+        shell: bash
+        run: |
+          version=$(cargo metadata --locked --no-deps --format-version 1 |
+              jq -er '.packages[] | select(.name == "bak") | .version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  package:
+    name: Build release (${{ matrix.platform }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+          - runner: macos-15
+            platform: macos-arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the release package
+        run: bash scripts/package-release.sh dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bak-${{ matrix.platform }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [prepare, package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: bak-*
+          path: dist
+          merge-multiple: true
+      - name: Publish the build commit and packages
+        working-directory: dist
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          tag="v$VERSION"
+          tag_ref=$(git ls-remote --refs --tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "refs/tags/$tag")
+          releases=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name')
+          if [[ -n "$tag_ref" ]] || grep -Fxq -- "$tag" <<< "$releases"; then
+            echo "Tag or release $tag already exists." >&2
+            exit 1
+          fi
+          gh release create "$tag" --target "$GITHUB_SHA" --generate-notes \
+            "bak-v$VERSION-linux-x86_64.tar.gz" "bak-v$VERSION-macos-arm64.tar.gz"

@@ -4,10 +4,23 @@
 
 ## Install and run
 
-Use the Rust toolchain pinned in [rust-toolchain.toml](rust-toolchain.toml) and add Cargo's bin directory to your `PATH`. Run these commands from the repository root.
+Download the Linux x86_64 or macOS ARM64 package from
+[GitHub Releases](https://github.com/qi7876/software-development-exp/releases).
+GitHub provides a SHA-256 digest for each uploaded package. Compare the output of
+`shasum -a 256 <package>` with the digest shown on the release page.
 
 ```sh
-cargo install --locked --path .
+tar -xzf bak-v1.0.0-linux-x86_64.tar.gz
+cd bak-v1.0.0-linux-x86_64
+export PATH="$PWD:$PATH"
+```
+
+For a source install, use the Rust toolchain pinned in [rust-toolchain.toml](rust-toolchain.toml),
+run `cargo install --locked --path .` from the repository root, and add Cargo's bin directory to `PATH`.
+
+Run these commands from the extracted package or repository root.
+
+```sh
 mkdir -p working-directory-example/source working-directory-example/repository working-directory-example/restored
 bak keygen --output working-directory-example/backup.key
 bak server start -d working-directory-example
@@ -151,6 +164,13 @@ uv run scripts/check.py --web-ui
 ```
 
 Set `BAK_BROWSER_CHANNEL=chrome` to use installed Chrome. For report checks, run `uv run scripts/check.py --report`. See the [course report guide](docs/report/README.md).
+
+### CI and releases
+
+Pull requests to `main` run Rust formatting checks, Clippy, and tests on Linux and macOS.
+In GitHub Actions, select **Release** → **Run workflow** on `main` to build and
+publish both packages. The workflow tags the build commit with the version in
+`Cargo.toml`.
 
 ## Architecture
 
